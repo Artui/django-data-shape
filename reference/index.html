@@ -13,7 +13,7 @@
         <link rel="canonical" href="https://artui.github.io/django-data-shape/reference/">
       
       
-        <link rel="prev" href="..">
+        <link rel="prev" href="../relations/">
       
       
       
@@ -286,6 +286,33 @@
       
   
   
+  
+  
+    <li class="md-nav__item">
+      <a href="../relations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Relations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
     
   
   
@@ -393,8 +420,30 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#django_data_shape.table.Table.relations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        relations
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#django_data_shape.fan_out.FanOut" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        FanOut
+      
+    </span>
+  </a>
   
 </li>
       
@@ -525,6 +574,17 @@
     <span class="md-ellipsis">
       
         Sequential
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#django_data_shape.distributions.zipf.Zipf" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Zipf
       
     </span>
   </a>
@@ -671,8 +731,30 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#django_data_shape.table.Table.relations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        relations
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#django_data_shape.fan_out.FanOut" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        FanOut
+      
+    </span>
+  </a>
   
 </li>
       
@@ -803,6 +885,17 @@
     <span class="md-ellipsis">
       
         Sequential
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#django_data_shape.distributions.zipf.Zipf" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Zipf
       
     </span>
   </a>
@@ -1013,7 +1106,7 @@ that knows more than it says.</p>
   </span>
 
 <a href="#django_data_shape.table.Table.fields" class="headerlink" title="Permanent link">&para;</a></h3>
-<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="n">fields</span><span class="p">:</span> <span class="n">Mapping</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Distribution</span><span class="p">]</span>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="n">fields</span><span class="p">:</span> <span class="n">Mapping</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Distribution</span> <span class="o">|</span> <span class="n">FanOut</span><span class="p">]</span>
 </span></code></pre></div>
 
     <div class="doc doc-contents ">
@@ -1050,6 +1143,92 @@ different cache key for no reason.</p>
     </div>
 
 </div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="django_data_shape.table.Table.relations" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">relations</span>
+
+
+<a href="#django_data_shape.table.Table.relations" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">relations</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Field</span><span class="p">[</span><span class="n">Any</span><span class="p">,</span> <span class="n">Any</span><span class="p">]],</span> <span class="o">...</span><span class="p">]</span>
+</span></code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>The declared relation columns, in the same stable order as columns().</p>
+
+
+    </div>
+
+</div>
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h2 id="django_data_shape.fan_out.FanOut" class="doc doc-heading">
+            <span class="doc doc-object-name doc-class-name">FanOut</span>
+
+
+<a href="#django_data_shape.fan_out.FanOut" class="headerlink" title="Permanent link">&para;</a></h2>
+
+
+    <div class="doc doc-contents first">
+
+
+
+        <p>A distribution over how many children each parent has.</p>
+<p>Declared as a shape over an <strong>already fixed</strong> child row count, never as a
+multiplier. Rows times fan-out makes cardinality emergent, and a table whose
+size is emergent is a table nothing can assert about.</p>
+<p><code>sizes</code> supplies a relative weight per parent -- <code>Zipf()</code> for the
+realistic heavy tail, <code>Uniform(1, 10)</code> for something flatter. The weights
+are normalised, so their scale is irrelevant and only their spread matters.</p>
+<p><code>childless</code> is the share of parents with <strong>no</strong> children at all. It is
+called out separately because it is the case hand-written fixtures always
+omit and the one that changes what a join does: a parent nobody references
+is the difference between an inner and an outer join returning the same
+thing and returning different things.</p>
+<p><code>null</code> is the share of children whose foreign key is NULL, which is only
+meaningful on a nullable column. <strong>It thins the partition uniformly after</strong>
+it is computed, so <code>sizes</code> describes the pre-null spread. Stated because
+the alternative -- partitioning only the non-null children -- would make the
+declared distribution mean something subtly different from what it says.</p>
+<p><code>placement</code> decides where children sit physically, and it is not
+cosmetic. Emitting them parent by parent gives a perfectly clustered table
+that no production system has and that flatters every index scan; the
+default interleaves them the way rows really arrive.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
 
 
 
@@ -1502,6 +1681,61 @@ in plan choice.</p>
 <p>Works for anything supporting <code>start + row * step</code>, which covers numbers
 and <code>datetime</code> with a <code>timedelta</code>. It ignores <code>draw</code> entirely: this is
 the one distribution whose value is a function of position alone.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h2 id="django_data_shape.distributions.zipf.Zipf" class="doc doc-heading">
+            <span class="doc doc-object-name doc-class-name">Zipf</span>
+
+
+<a href="#django_data_shape.distributions.zipf.Zipf" class="headerlink" title="Permanent link">&para;</a></h2>
+
+
+    <div class="doc doc-contents first">
+
+
+
+        <p>Positive weights following a power law of exponent <code>s</code>.</p>
+<p>The distribution fan-out is realistically drawn from, and the reason
+declaring fan-out is worth doing at all. A customer table where every
+customer has ten orders is not merely tidy, it is the one shape in which the
+planner is never wrong: its <code>n_distinct</code> average <em>is</em> the truth, so a join
+estimate cannot miss. Give the head a thousand orders and the tail one, and
+the same estimate is out by orders of magnitude in both directions -- which
+is what production looks like and what a test database has to reproduce.</p>
+<p>Inverse transform of a Pareto: <code>(1 - draw) ** (-1 / s)</code>. Larger <code>s</code>
+means a lighter tail; values near 1 are the classic Zipf regime.</p>
 
 
 
