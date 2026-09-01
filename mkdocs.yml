@@ -70,4 +70,5 @@ markdown_extensions:
 
 nav:
   - Home: index.md
+  - Relations: relations.md
   - API reference: reference.md

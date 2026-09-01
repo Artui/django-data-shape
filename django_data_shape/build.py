@@ -2,14 +2,19 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 from django.core.management.color import no_style
 from django.db import DEFAULT_DB_ALIAS, connections, transaction
+from django.db.models import Model
 
 from django_data_shape.build_result import BuildResult
+from django_data_shape.fan_out import FanOut
+from django_data_shape.fan_out_plan import FanOutPlan
 from django_data_shape.generate_rows import generate_rows
+from django_data_shape.order_tables import order_tables
 from django_data_shape.require_postgres import require_postgres
+from django_data_shape.resolve_fan_out import resolve_fan_out
 from django_data_shape.shape import Shape
 from django_data_shape.shape_not_empty import ShapeNotEmpty
 from django_data_shape.table import Table
@@ -41,13 +46,33 @@ def build(shape: Shape, using: str = DEFAULT_DB_ALIAS) -> BuildResult:
     # -- fix the shape, run it again -- fails on a duplicate key rather than on
     # the original problem.
     with transaction.atomic(using=using):
-        for table in shape.tables:
+        # Parents first. Not because the database insists -- Django's foreign
+        # keys are deferred, so any order commits -- but because a fan-out reads
+        # its parent's real keys, and a table with no rows yet has none.
+        for table in order_tables(shape.tables):
             _require_empty(connection, table)
-            loaded = _load(connection, table, shape.seed)
+            plans = _resolve(connection, table, shape.seed)
+            loaded = _load(connection, table, shape.seed, plans)
             _reset_sequence(connection, table)
             _analyze(connection, table)
             results.append(TableResult(table=table.db_table, rows=loaded))
     return BuildResult(tables=tuple(results))
+
+
+def _resolve(connection: Any, table: Table, seed: int) -> dict[str, FanOutPlan]:
+    """Partition each declared relation over the parent keys that exist."""
+    plans: dict[str, FanOutPlan] = {}
+    for name, field in table.relations():
+        plans[name] = resolve_fan_out(
+            cast("FanOut", table.fields[name]),
+            cast("type[Model]", field.related_model),
+            table.rows,
+            seed,
+            table.db_table,
+            name,
+            connection,
+        )
+    return plans
 
 
 def _require_empty(connection: Any, table: Table) -> None:
@@ -72,7 +97,7 @@ def _require_empty(connection: Any, table: Table) -> None:
 # API reached through Django's cursor wrapper, and it appears on no Django base
 # class, so annotating the real wrapper type would mean asserting the checker
 # out of the way on every line that uses it.
-def _load(connection: Any, table: Table, seed: int) -> int:
+def _load(connection: Any, table: Table, seed: int, plans: dict[str, FanOutPlan]) -> int:
     """Stream generated rows into the table with ``COPY FROM STDIN``.
 
     ``bulk_create`` is the obvious alternative and is roughly an order of
@@ -105,7 +130,7 @@ def _load(connection: Any, table: Table, seed: int) -> int:
         # block never learns it needs a rollback, so the next query inside it
         # fails with "current transaction is aborted" instead of a Django error.
         with connection.wrap_database_errors, cursor.copy(statement) as copy:
-            for row in generate_rows(table, seed):
+            for row in generate_rows(table, seed, plans):
                 copy.write_row(
                     (
                         row[0],

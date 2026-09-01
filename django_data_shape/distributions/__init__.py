@@ -6,5 +6,6 @@ from django_data_shape.distributions.distribution import Distribution
 from django_data_shape.distributions.sequential import Sequential
 from django_data_shape.distributions.skew import Skew
 from django_data_shape.distributions.uniform import Uniform
+from django_data_shape.distributions.zipf import Zipf
 
-__all__ = ["Bounded", "Constant", "Distribution", "Sequential", "Skew", "Uniform"]
+__all__ = ["Bounded", "Constant", "Distribution", "Sequential", "Skew", "Uniform", "Zipf"]

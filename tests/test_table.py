@@ -10,11 +10,13 @@ from django_data_shape import (
     Bounded,
     Constant,
     Distribution,
+    FanOut,
     InvalidShape,
     Sequential,
     Skew,
     Table,
     Uniform,
+    Zipf,
 )
 from tests.testapp.models import (
     Company,
@@ -23,6 +25,7 @@ from tests.testapp.models import (
     Project,
     Referred,
     Reserved,
+    Session,
     SlugPk,
     Subscriber,
 )
@@ -86,8 +89,11 @@ def test_declaring_the_primary_key_is_refused() -> None:
         Table(Company, rows=1, name=Constant("x"), id=Sequential(1, 1))
 
 
-def test_declaring_a_relation_is_refused_for_now() -> None:
-    with pytest.raises(InvalidShape, match="is a relation"):
+def test_a_relation_needs_a_fanout_not_a_value_distribution() -> None:
+    # A value distribution over a foreign key column emits keys drawn from
+    # nothing, pointing at rows that may not exist -- the one thing referential
+    # integrity by construction exists to make impossible.
+    with pytest.raises(InvalidShape, match="needs a FanOut"):
         Table(
             Project,
             rows=1,
@@ -95,6 +101,18 @@ def test_declaring_a_relation_is_refused_for_now() -> None:
             status=Constant("ACTIVE"),
             created_at=Sequential(0, 1),
         )
+
+
+def test_a_fanout_on_a_plain_column_is_refused() -> None:
+    with pytest.raises(InvalidShape, match="nothing to fan out over"):
+        Table(Company, rows=1, name=FanOut(Zipf()))
+
+
+def test_a_relation_declared_with_a_fanout_is_accepted() -> None:
+    table = Table(Session, rows=10, company=FanOut(Zipf()), label=Constant("s"))
+
+    assert [name for name, _ in table.relations()] == ["company"]
+    assert [name for name, _ in table.columns()] == ["company", "label"]
 
 
 def test_a_required_field_left_out_is_refused_by_name() -> None:

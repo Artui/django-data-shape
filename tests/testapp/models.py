@@ -34,6 +34,20 @@ class Order(models.Model):
     channel = models.CharField(max_length=20, default="web")
 
 
+class Session(models.Model):
+    """A child whose parent is a plain fan-out target."""
+
+    company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name="sessions")
+    label = models.CharField(max_length=50)
+
+
+class OptionalChild(models.Model):
+    """A child whose foreign key may be null, for the null share."""
+
+    company = models.ForeignKey(Company, null=True, on_delete=models.SET_NULL)
+    label = models.CharField(max_length=50)
+
+
 class Project(models.Model):
     """A fan-out child carrying a per-group invariant.
 
@@ -122,3 +136,15 @@ class Subscriber(models.Model):
     """
 
     email = models.CharField(max_length=100, unique=True)
+
+
+class Left(models.Model):
+    """Half of a mutually-referencing pair, for the load-order cycle check."""
+
+    right = models.ForeignKey("Right", null=True, on_delete=models.SET_NULL)
+
+
+class Right(models.Model):
+    """The other half. Neither can be loaded first, which is the point."""
+
+    left = models.ForeignKey(Left, null=True, on_delete=models.SET_NULL)

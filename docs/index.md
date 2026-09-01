@@ -106,13 +106,14 @@ could never occur.
 cardinality are backend-neutral; `COPY` and column statistics are not, and a
 shaped database whose plans mean nothing is worse than no shaped database.
 
+## Relations
+
+Foreign keys are declared with a `FanOut` -- how many children each parent has,
+as a distribution rather than a number, plus the childless tail and where the
+children physically sit. The parents can be ones this package built or ones your
+own code did. See [Relations](relations.md).
+
 ## Not in this release
 
-Foreign-key fan-out as a distribution, physical placement of related rows,
-per-group invariants, many-to-many edges, and reusing a built database as a
-template.
-
-Relations are refused in both directions: declaring one raises, and so does
-omitting one that cannot be null. An **optional** foreign key may be left out,
-and loads entirely `NULL` -- which is worth knowing rather than assuming, because
-a join key with `null_frac` of 1.0 is not a neutral thing to hand a planner.
+Derived fields, collections copied along a join, per-group invariants,
+many-to-many edges, and reusing a built database as a template.
