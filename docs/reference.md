@@ -4,6 +4,8 @@
 
 ::: django_data_shape.table.Table
 
+::: django_data_shape.fan_out.FanOut
+
 ::: django_data_shape.build.build
 
 ::: django_data_shape.build_result.BuildResult
@@ -21,6 +23,8 @@
 ::: django_data_shape.distributions.uniform.Uniform
 
 ::: django_data_shape.distributions.sequential.Sequential
+
+::: django_data_shape.distributions.zipf.Zipf
 
 ::: django_data_shape.distributions.constant.Constant
 

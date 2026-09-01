@@ -56,12 +56,28 @@ build(shape)
 past the keys it assigned, and runs `ANALYZE` so the planner can see the shape.
 It raises on any backend that is not PostgreSQL rather than degrading quietly.
 
+## Relations
+
+```python
+Table(
+    Order,
+    rows=2_000_000,
+    # A distribution, not a number: giving every parent ten children is the one
+    # shape in which the planner is never wrong, because its n_distinct average
+    # is then the truth.
+    company=FanOut(Zipf(1.2), childless=0.35),
+    ...
+)
+```
+
+The parents can be rows this package built or rows your own code did -- their
+real keys are read, not assumed, so the ORM can own the small tables while this
+owns the large ones.
+
 ## Status
 
-Early. This release covers single tables. Foreign-key fan-out as a distribution,
-physical placement, per-group invariants and template-database reuse are the
-releases after it; declaring a relation raises today rather than generating ids
-that point at nothing.
+Early. Single tables and the model graph. Derived fields, collections copied
+along a join, per-group invariants and template-database reuse come next.
 
 Full documentation: <https://artui.github.io/django-data-shape/>
 
