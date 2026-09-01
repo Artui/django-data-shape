@@ -1,0 +1,180 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "django-data-shape"
+dynamic = ["version"]
+description = "A realistically shaped test database from Django models: declare cardinality, skew and fan-out, load by COPY, and make the query planner believe it."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [
+    { name = "Artur Veres", email = "artur8118@gmail.com" },
+]
+keywords = ["django", "testing", "test-data", "fixtures", "postgres", "query-planner", "performance"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Web Environment",
+    "Framework :: Django",
+    "Framework :: Django :: 4.2",
+    "Framework :: Django :: 5.0",
+    "Framework :: Django :: 5.1",
+    "Framework :: Django :: 5.2",
+    "Framework :: Django :: 6.0",
+    "Framework :: Django :: 6.1",
+    "Framework :: Pytest",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Database",
+    "Topic :: Software Development :: Testing",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+dependencies = [
+    # 4.2 floor because it is the oldest Django still receiving security fixes,
+    # and nothing the shape vocabulary reads was added after it: the model graph
+    # comes from ``_meta``, and conditional ``UniqueConstraint``s -- the shape of
+    # "one ACTIVE per company" -- have been readable from ``_meta.constraints``
+    # since 2.2. Raise it only when a declaration needs a newer API, not on age.
+    "django>=4.2",
+]
+
+[project.optional-dependencies]
+# The loader half. Generation, the vocabulary and the invariant checks are pure
+# Python and need nothing; streaming millions of rows into ``COPY FROM STDIN``
+# needs a driver, and psycopg 3's ``cursor.copy()`` is the only one that takes a
+# row iterator rather than a file-like object.
+#
+# psycopg 2 is deliberately not supported: its ``copy_expert`` would mean
+# materialising the generated rows somewhere first, which is the cost this
+# package exists to avoid. A project on psycopg 2 can still use the generation
+# half; it cannot use the loader, and that refusal is stated rather than
+# approximated.
+postgres = [
+    "psycopg[binary]>=3.2.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/Artui/django-data-shape"
+Repository = "https://github.com/Artui/django-data-shape"
+Issues = "https://github.com/Artui/django-data-shape/issues"
+
+[dependency-groups]
+dev = [
+    "ruff>=0.14.0",
+    "ty>=0.0.1a10",
+    "pre-commit>=4.0.0",
+    "pytest>=8.0.0",
+    "pytest-django>=4.9.0",
+    "pytest-cov>=6.0.0",
+    "pytest-asyncio>=0.24.0",
+    # Backs the ``TID`` rule selection below; ruff reads its settings from the
+    # flake8-tidy-imports namespace and the plugin is what defines them.
+    "flake8-tidy-imports>=4.12.0",
+    "django-stubs>=5.1.0",
+    # Also a runtime extra, and required here for a different reason: CI's lint
+    # and test jobs sync --all-groups without --all-extras, so without this ty
+    # cannot resolve the loader's import and its tests cannot run at all.
+    "psycopg[binary]>=3.2.0",
+]
+docs = [
+    "mkdocs>=1.6.0",
+    "mkdocs-material>=9.5.0",
+    "mkdocstrings[python]>=0.27.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["django_data_shape"]
+
+[tool.hatch.version]
+path = "django_data_shape/version.py"
+# Hatchling's default regex expects a bare ``__version__ = "..."``. This file
+# annotates the assignment, so the pattern has to allow the annotation or the
+# build cannot find the version at all -- and the failure is total: every uv
+# command reports "unable to parse the version from the file".
+pattern = "^__version__(?:\\s*:\\s*[A-Za-z][A-Za-z0-9_]*)?\\s*=\\s*[\"'](?P<version>[^\"']+)[\"']"
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "tests.conftest_settings"
+asyncio_mode = "auto"
+testpaths = ["tests"]
+# The coverage gate rides on the default run, and the default run is Postgres --
+# see tests/conftest_settings.py. This package's own thesis is that an assertion
+# which passes because the backend could not check it is worse than no
+# assertion, so its suite does not get to make that mistake about itself.
+addopts = "--cov=django_data_shape --cov-report=term-missing --cov-fail-under=100"
+
+[tool.coverage.run]
+source = ["django_data_shape"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+fail_under = 100
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "UP", "B", "SIM", "I", "TID"]
+ignore = ["E203", "E501", "E231", "F811", "E722", "E741", "UP040", "UP046", "UP047"]
+
+[tool.ruff.lint.per-file-ignores]
+# I002 exempts the two file kinds that must not carry the future import: a
+# re-export ``__init__.py`` has no annotations to postpone, and migrations are
+# generated by Django, so the import would be dropped on every makemigrations.
+"__init__.py" = ["F401", "I002"]
+"**/migrations/*.py" = ["I002"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["django_data_shape"]
+# CLAUDE.md requires this at the top of every annotated file; required-imports
+# is what enforces it rather than leaving it to memory.
+required-imports = ["from __future__ import annotations"]
+
+[tool.ruff.lint.flake8-tidy-imports]
+# CLAUDE.md forbids every relative form, including single-dot. TID's default is
+# "parents", which lets ``from .foo import bar`` through.
+ban-relative-imports = "all"
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+
+[tool.ty.environment]
+root = ["./django_data_shape"]
+
+[tool.bumpversion]
+current_version = "0.0.0"
+allow_dirty = false
+commit = false
+tag = false
+
+[[tool.bumpversion.files]]
+filename = "django_data_shape/version.py"
+search = '__version__: str = "{current_version}"'
+replace = '__version__: str = "{new_version}"'
+
+[[tool.bumpversion.files]]
+filename = "CHANGELOG.md"
+search = "## [Unreleased]"
+replace = """## [Unreleased]
+
+## [{new_version}] — {now:%Y-%m-%d}"""
+
+[[tool.bumpversion.files]]
+filename = "CHANGELOG.md"
+search = "[Unreleased]: https://github.com/Artui/django-data-shape/compare/v{current_version}...HEAD"
+replace = """[Unreleased]: https://github.com/Artui/django-data-shape/compare/v{new_version}...HEAD
+[{new_version}]: https://github.com/Artui/django-data-shape/compare/v{current_version}...v{new_version}"""
