@@ -114,8 +114,14 @@ jobs:
         run: uv sync --frozen --all-groups --all-extras --python 3.10
       - name: Name the versions that produced
         run: uv pip list
+      # No coverage gate here either. This job's claim is that the declared
+      # floors resolve and the suite passes against them -- not that every line
+      # runs. It inherited the gate from the default addopts, which went
+      # unnoticed until a test skipped below Django 5.2 left one branch
+      # uncovered and failed a job that was never meant to measure coverage.
+      # One gate, on the Postgres job, is the design.
       - name: Test
-        run: uv run --no-sync pytest
+        run: uv run --no-sync pytest --cov-fail-under=0
 
       # The step above installs every extra, and an extra can hold a shared
       # dependency *above* the floor being claimed -- masking the lie rather
