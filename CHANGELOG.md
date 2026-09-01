@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `FanOut`, which declares how a foreign key's children spread across their
+  parents: a size distribution, a `childless` share for parents with no children
+  at all, a `null` share for nullable columns, and `placement`.
+- `Zipf`, the heavy-tailed weight distribution fan-out is realistically drawn
+  from. A table where every parent has ten children is not merely tidy -- it is
+  the one shape in which the planner is never wrong, because its `n_distinct`
+  average is the truth.
+- Tables load in dependency order, and a cycle of fan-outs is refused by name.
+
+### The two representation decisions
+- **Fan-out reads the parent's real keys rather than assuming the dense `1..N`
+  range this package assigns.** The case that matters is the hybrid: a project
+  builds its fifty companies with the ORM, where the row count is small and the
+  ORM is the right tool, and asks this package only for the two million orders.
+  Referential integrity then holds by construction, because every key emitted
+  came out of the parent table.
+- **A fan-out is a partition of the child key range, not a per-child draw.**
+  Parent `j` owns rows `[start, end)`. A per-child draw cannot be inverted, and
+  "which children belong to parent T" is what a mirrored collection needs. The
+  childless tail and `placement` both fall out of the partition for free.
+
+### Notes
+- `placement` defaults to `arrival`. Emitting children parent by parent gives a
+  perfectly clustered table that no production system has and that flatters
+  every index scan over the foreign key.
+- A self-referential fan-out is refused: it would read keys from a table still
+  empty at load time. Self-referential trees are their own feature.
+- A relation needs a `FanOut` and a plain column refuses one, in both
+  directions.
+
 ## [0.1.1] — 2026-09-01
 
 ### Added

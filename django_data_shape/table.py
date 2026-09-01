@@ -12,6 +12,7 @@ from django.db.models.fields import NOT_PROVIDED
 from django_data_shape.distributions.bounded import Bounded
 from django_data_shape.distributions.constant import Constant
 from django_data_shape.distributions.distribution import Distribution
+from django_data_shape.fan_out import FanOut
 from django_data_shape.invalid_shape import InvalidShape
 
 
@@ -36,13 +37,13 @@ class Table:
         self,
         model: type[Model],
         rows: int,
-        fields: dict[str, Distribution] | None = None,
-        **field_distributions: Distribution,
+        fields: Mapping[str, Distribution | FanOut] | None = None,
+        **field_distributions: Distribution | FanOut,
     ) -> None:
         if rows < 0:
             raise InvalidShape(f"{model.__name__} cannot have {rows} rows.")
 
-        declared: dict[str, Distribution] = dict(fields or {})
+        declared: dict[str, Distribution | FanOut] = dict(fields or {})
         overlap = sorted(set(declared) & set(field_distributions))
         if overlap:
             raise InvalidShape(
@@ -70,7 +71,7 @@ class Table:
         return self._rows
 
     @property
-    def fields(self) -> Mapping[str, Distribution]:
+    def fields(self) -> Mapping[str, Distribution | FanOut]:
         """The declared distributions, including defaults filled in from the model."""
         return MappingProxyType(self._fields)
 
@@ -91,6 +92,15 @@ class Table:
         # which _validate has already ruled out for every name reaching here.
         return tuple(
             (name, cast("Field[Any, Any]", meta.get_field(name))) for name in sorted(self.fields)
+        )
+
+    def relations(self) -> tuple[tuple[str, Field[Any, Any]], ...]:
+        """The declared relation columns, in the same stable order as columns()."""
+        meta = self.model._meta
+        return tuple(
+            (name, cast("Field[Any, Any]", meta.get_field(name)))
+            for name in sorted(self.fields)
+            if cast("Field[Any, Any]", meta.get_field(name)).is_relation
         )
 
     def _validate(self) -> None:
@@ -129,17 +139,43 @@ class Table:
                 "be satisfied without a lookup, so it is not available to declare."
             )
 
-        # Relations are the next release's work, and generating a foreign key
-        # column from a value distribution would produce ids pointing at rows
-        # that may not exist. Refusing is the only honest answer until fan-out
-        # can be declared as a distribution over the parents.
-        relations = sorted(
-            name for name, field in known.items() if field.is_relation and name in self.fields
+        # A relation takes a FanOut and nothing else. A value distribution over a
+        # foreign key column would emit ids drawn from thin air, pointing at rows
+        # that may not exist -- the one thing referential integrity by
+        # construction exists to make impossible.
+        mismatched = sorted(
+            name
+            for name, declared in self.fields.items()
+            if known[name].is_relation and not isinstance(declared, FanOut)
         )
-        if relations:
+        if mismatched:
             raise InvalidShape(
-                f"{self.model.__name__}.{', '.join(relations)} is a relation, and relations are "
-                "not supported yet. Declaring fan-out as a distribution is the next release."
+                f"{self.model.__name__}.{', '.join(mismatched)} is a relation, so it needs a "
+                "FanOut rather than a value distribution. A value distribution would emit keys "
+                "drawn from nothing, pointing at rows that may not exist."
+            )
+        self_referential = sorted(
+            name
+            for name, declared in self.fields.items()
+            if isinstance(declared, FanOut)
+            and known[name].is_relation
+            and known[name].related_model is self.model
+        )
+        if self_referential:
+            raise InvalidShape(
+                f"{self.model.__name__}.{', '.join(self_referential)} points at its own table, "
+                "and a fan-out reads keys from a table that is still empty at load time. "
+                "Self-referential trees are their own feature, not a fan-out."
+            )
+        misapplied = sorted(
+            name
+            for name, declared in self.fields.items()
+            if not known[name].is_relation and isinstance(declared, FanOut)
+        )
+        if misapplied:
+            raise InvalidShape(
+                f"{self.model.__name__}.{', '.join(misapplied)} is not a relation, so a FanOut "
+                "has nothing to fan out over."
             )
 
         self._resolve_defaults(known)
