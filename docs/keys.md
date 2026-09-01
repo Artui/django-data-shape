@@ -66,6 +66,15 @@ over a sample and refused if it disagrees with itself, and refused again if it
 produces a duplicate. A key that varies between calls would break reproducibility
 silently, in the one column every foreign key points at.
 
+## What `keys=` does not cover
+
+`KeyFunction` takes any deterministic function of the row index, so there is no
+key *type* left over -- if you can compute it, you can declare it.
+
+One thing genuinely remains, and it is not a type: a **composite primary key** is
+several columns, and a key strategy maps a row index to one value. That is arity
+rather than type, so `keys=` cannot help and the declaration is refused by name.
+
 ## Why anything else is refused
 
 Inventing values for a semantic column is not a small liberty. A character

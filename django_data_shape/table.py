@@ -127,7 +127,17 @@ class Table:
                 f"Its concrete fields are: {', '.join(sorted(known))}."
             )
 
-        pk_field = next(field for field in known.values() if field.primary_key)
+        pk_field = next((field for field in known.values() if field.primary_key), None)
+        if pk_field is None:
+            # A composite primary key is not among the concrete fields, because
+            # it has no column of its own. Without this the package raised a
+            # bare StopIteration from inside itself, which says nothing about
+            # what the caller did.
+            raise InvalidShape(
+                f"{self.model.__name__} has a composite primary key, which this package cannot "
+                "assign. A key strategy maps a row index to one value and a composite key is "
+                "several columns, so keys= cannot help either: this is arity, not type."
+            )
         if self._keys is None:
             self._keys = infer_key_strategy(pk_field)
         if self._keys is None:

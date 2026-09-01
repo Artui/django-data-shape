@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from typing import Any, cast
 
+import django
 import pytest
+from django.db import models
 
 from django_data_shape import (
     Bounded,
@@ -265,3 +267,23 @@ def test_a_declaration_cannot_be_edited_past_its_own_validation() -> None:
 
     with pytest.raises(TypeError):
         table.fields["status"] = Constant("x")
+
+
+@pytest.mark.skipif(django.VERSION < (5, 2), reason="composite primary keys arrived in Django 5.2")
+def test_a_composite_primary_key_is_refused_as_arity_not_type() -> None:
+    # It used to raise a bare StopIteration from inside the package: a composite
+    # key is not among the concrete fields, because it has no column of its own.
+    # The message has to say keys= cannot help, or the reader will reasonably
+    # try the escape hatch that works for every other unusual key.
+    class Composite(models.Model):
+        pk = models.CompositePrimaryKey("left_id", "right_id")
+        left_id = models.IntegerField()
+        right_id = models.IntegerField()
+
+        class Meta:
+            app_label = "testapp"
+
+    with pytest.raises(InvalidShape, match="composite primary key") as raised:
+        Table(Composite, rows=3, left_id=Constant(1), right_id=Constant(2))
+
+    assert "arity, not type" in str(raised.value)

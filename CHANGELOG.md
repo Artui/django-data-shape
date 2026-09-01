@@ -37,6 +37,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   declares one for any other type.
 - `SequentialKeys`, `UuidKeys`, `KeyFunction` and the `KeyStrategy` protocol,
   plus a `keys=` argument on `Table`.
+- A composite primary key is refused by name. It is not among a model's concrete
+  fields, because it has no column of its own, so the package used to raise a
+  bare `StopIteration` from inside itself. The message says `keys=` cannot help
+  either: a strategy maps a row index to one value, and this is arity rather than
+  type.
 - The documentation's Python examples are parsed by the test suite. A docs
   example is the first code anybody runs, so it gets a guard rather than a
   convention.
