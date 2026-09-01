@@ -70,3 +70,4 @@ markdown_extensions:
 
 nav:
   - Home: index.md
+  - API reference: reference.md

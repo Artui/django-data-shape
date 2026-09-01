@@ -22,16 +22,48 @@ generating children parent-by-parent clusters them perfectly, which flatters
 every index scan. A test database can be wrong in the flattering direction, and
 usually is.
 
-## Status
-
-Pre-release scaffold. The design lives in the plan; the vocabulary lands in
-0.1.0.
-
 ## Install
 
 ```bash
 pip install django-data-shape[postgres]
 ```
+
+## Use
+
+```python
+import datetime
+
+from django_data_shape import Sequential, Shape, Skew, Table, Uniform, build
+
+shape = Shape(
+    Table(
+        Order,
+        rows=1_000_000,
+        status=Skew({"complete": 0.98, "pending": 0.015, "cancelled": 0.005}),
+        total=Uniform(0, 500, places=2),
+        created_at=Sequential(
+            datetime.datetime(2020, 1, 1, tzinfo=datetime.timezone.utc),
+            datetime.timedelta(seconds=3),
+        ),
+    ),
+    seed=1234,
+)
+
+build(shape)
+```
+
+`build()` generates the rows, loads them with `COPY`, moves the identity sequence
+past the keys it assigned, and runs `ANALYZE` so the planner can see the shape.
+It raises on any backend that is not PostgreSQL rather than degrading quietly.
+
+## Status
+
+Early. This release covers single tables. Foreign-key fan-out as a distribution,
+physical placement, per-group invariants and template-database reuse are the
+releases after it; declaring a relation raises today rather than generating ids
+that point at nothing.
+
+Full documentation: <https://artui.github.io/django-data-shape/>
 
 ## License
 
