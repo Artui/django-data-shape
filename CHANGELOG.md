@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0] — 2026-09-01
+
 ### Added
 - The shape vocabulary: `Shape`, `Table`, and the `Skew`, `Uniform`, `Sequential`
   and `Constant` distributions, behind a single-method `Distribution` protocol.
@@ -32,4 +34,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the next release, and generating a foreign key from a value distribution would
   write ids pointing at rows that may not exist.
 
-[Unreleased]: https://github.com/Artui/django-data-shape/compare/v0.0.0...HEAD
+[Unreleased]: https://github.com/Artui/django-data-shape/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/Artui/django-data-shape/compare/v0.0.0...v0.1.0

@@ -156,7 +156,7 @@ skip-magic-trailing-comma = false
 root = ["./django_data_shape"]
 
 [tool.bumpversion]
-current_version = "0.0.0"
+current_version = "0.1.0"
 allow_dirty = false
 commit = false
 tag = false
