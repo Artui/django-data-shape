@@ -43,9 +43,11 @@ jobs:
       - name: Install with docs group
         run: uv sync --all-groups
       - name: mkdocs build --strict
-        # mkdocstrings imports the package, which defines Django models. Those
-        # cannot be imported before ``django.setup()``, so we point at the test
-        # settings module to keep the build hermetic.
+        # This package defines no models, so mkdocstrings can import it without
+        # django.setup(). The settings module is pointed at anyway because the
+        # reference pages document code that reads Django's model _meta API, and
+        # a future page that imports the test models would otherwise fail here
+        # rather than in the docs build a contributor runs locally.
         run: DJANGO_SETTINGS_MODULE=tests.conftest_settings uv run mkdocs build --strict
 
 
@@ -130,8 +132,9 @@ jobs:
           import django
           from django.conf import settings
 
-          # This package defines models, so a bare import cannot run before
-          # django.setup() against configured settings.
+          # No models here, so the import itself needs no django.setup(). The
+          # settings are configured anyway so this asserts the shape a real
+          # consumer has: installed alongside Django, at the declared floors.
           settings.configure(
               SECRET_KEY="x",
               INSTALLED_APPS=[
@@ -218,8 +221,14 @@ jobs:
     # vendor, so they are exercised by passing a vendor rather than by running
     # the suite twice. A degradation path that can only be covered on the
     # backend it refuses is a degradation path that gates nothing.
-    name: postgres / 3.13 / Django 6.1
+    name: postgres / 3.13 / Django ${{ matrix.django-version }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 5.2 is the LTS and the oldest Django with db_default, which is the one
+        # behaviour no other Postgres cell covers.
+        django-version: ["5.2", "6.1"]
     services:
       postgres:
         image: postgres:17
@@ -249,8 +258,8 @@ jobs:
         run: uv python install 3.13
       - name: Sync dev deps
         run: uv sync --all-groups --all-extras --python 3.13
-      - name: Pin Django 6.1
-        run: uv pip install --reinstall-package django "django~=6.1.0"
+      - name: Pin Django ${{ matrix.django-version }}
+        run: uv pip install --reinstall-package django "django~=${{ matrix.django-version }}.0"
       - name: pytest against Postgres
         run: |
           uv run --no-sync pytest \
@@ -260,7 +269,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: coverage-postgres
+          name: coverage-postgres-${{ matrix.django-version }}
           path: |
             coverage.xml
             htmlcov/
@@ -327,8 +336,10 @@ jobs:
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           # The Postgres job is the only run that reaches every line, so it is
-          # the only one whose number means anything.
-          name: coverage-postgres
+          # the only one whose number means anything. Pinned to one cell of it:
+          # the number is the same across Django versions, and the badge needs
+          # one.
+          name: coverage-postgres-6.1
           path: coverage-artifact/
       - name: Render coverage.json
         if: steps.gate.outputs.skip != 'true'

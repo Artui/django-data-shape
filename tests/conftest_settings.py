@@ -48,4 +48,14 @@ else:
         }
     }
 
+# A second alias that is deliberately not Postgres. The backend gate can be
+# unit-tested with a stub connection, and is -- but a stub proves the gate
+# works, not that anything calls it. This alias is what lets one test drive the
+# real entry point into a real refusal, which is the difference between
+# asserting a guard exists and falsifying its absence.
+DATABASES["not_postgres"] = {
+    "ENGINE": "django.db.backends.sqlite3",
+    "NAME": ":memory:",
+}
+
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
