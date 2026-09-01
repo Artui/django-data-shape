@@ -8,6 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **A UUID primary key no longer refuses to load.** It was refused outright,
+  which made this package unusable for a whole class of Django project. The
+  reframing is the fix: the design never needed integers, it needed a
+  deterministic injection from row index to key -- which is what lets a foreign
+  key be satisfied without a lookup, what makes a self-referential tree acyclic
+  on the index rather than the value, and what makes two builds of one shape
+  agree. Integers were only the most obvious such function.
+- The primary key is prepared by its own field, like every other value. It did
+  not need to be while keys were always integers, and a UUID works either way
+  because psycopg adapts it -- but a key type needing conversion was stored
+  verbatim, which is the bug already found once on an ordinary column.
 - Two documentation examples were syntax errors -- `...` after keyword arguments,
   in the README and on the relations page -- and would have failed the moment a
   reader pasted them.
@@ -18,6 +29,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   primary keys, empty tables, and callable model defaults.
 
 ### Added
+- **Key strategies.** A table's primary keys come from a deterministic function
+  of the row index rather than from a hard-coded dense `1..N` range. Integer keys
+  count from one, `UUIDField` keys are derived from the seed, and `KeyFunction`
+  declares one for any other type.
+- `SequentialKeys`, `UuidKeys`, `KeyFunction` and the `KeyStrategy` protocol,
+  plus a `keys=` argument on `Table`.
 - The documentation's Python examples are parsed by the test suite. A docs
   example is the first code anybody runs, so it gets a guard rather than a
   convention.

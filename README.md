@@ -94,9 +94,9 @@ naming the field. In particular:
 - **PostgreSQL and psycopg 3.** Rows stream into `COPY FROM STDIN`, which
   psycopg 2 cannot do without materialising them first. Both are refused by name
   rather than degraded around.
-- **Integer primary keys.** This package assigns keys itself, as a dense `1..N`
-  range, so a UUID or character primary key is refused rather than filled with
-  numbers. Other key types are the next release's work.
+- **A key type it can assign.** Integer keys count from one and UUID keys are
+  derived from the seed; anything else is refused rather than guessed, and
+  `keys=KeyFunction(...)` declares one.
 - **Empty tables.** Keys start at 1 on every build, so `build()` checks first and
   raises rather than colliding partway through.
 - **A callable model default** such as `default=uuid4` must be declared as a

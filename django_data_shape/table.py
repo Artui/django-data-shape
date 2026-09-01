@@ -6,14 +6,16 @@ from collections.abc import Mapping
 from types import MappingProxyType
 from typing import Any, cast
 
-from django.db.models import Field, IntegerField, Model
+from django.db.models import Field, Model
 from django.db.models.fields import NOT_PROVIDED
 
 from django_data_shape.distributions.bounded import Bounded
 from django_data_shape.distributions.constant import Constant
 from django_data_shape.distributions.distribution import Distribution
 from django_data_shape.fan_out import FanOut
+from django_data_shape.infer_key_strategy import infer_key_strategy
 from django_data_shape.invalid_shape import InvalidShape
+from django_data_shape.keys.key_strategy import KeyStrategy
 
 
 class Table:
@@ -38,6 +40,7 @@ class Table:
         model: type[Model],
         rows: int,
         fields: Mapping[str, Distribution | FanOut] | None = None,
+        keys: KeyStrategy | None = None,
         **field_distributions: Distribution | FanOut,
     ) -> None:
         if rows < 0:
@@ -55,6 +58,7 @@ class Table:
         self._model = model
         self._rows = rows
         self._fields = declared
+        self._keys = keys
         self._validate()
 
     # Read-only, because every rule in this class is enforced once, in
@@ -69,6 +73,15 @@ class Table:
     @property
     def rows(self) -> int:
         return self._rows
+
+    @property
+    def keys(self) -> KeyStrategy:
+        """How this table's primary keys are decided.
+
+        Never None by the time anyone can read it: _validate either inferred a
+        strategy from the primary key's type or refused the declaration.
+        """
+        return cast("KeyStrategy", self._keys)
 
     @property
     def fields(self) -> Mapping[str, Distribution | FanOut]:
@@ -114,21 +127,17 @@ class Table:
                 f"Its concrete fields are: {', '.join(sorted(known))}."
             )
 
-        pk_fields = [field for field in known.values() if field.primary_key]
-        for field in pk_fields:
-            # The dense 1..N range this package assigns is integers, and nothing
-            # downstream converts it. Given a CharField primary key the load
-            # used to succeed and write "1", "2", "3" -- values the application
-            # could never produce, with a whole statistics picture built on top
-            # of them. Refusing is the only honest answer until a key strategy
-            # can be declared per table.
-            if not isinstance(field, IntegerField):
-                raise InvalidShape(
-                    f"{self.model.__name__}.{field.name} is a "
-                    f"{type(field).__name__} primary key, and this package assigns primary keys "
-                    "itself as a dense 1..N integer range. Only integer primary keys are "
-                    "supported."
-                )
+        pk_field = next(field for field in known.values() if field.primary_key)
+        if self._keys is None:
+            self._keys = infer_key_strategy(pk_field)
+        if self._keys is None:
+            raise InvalidShape(
+                f"{self.model.__name__}.{pk_field.name} is a {type(pk_field).__name__} primary "
+                "key, and only integer and UUID keys are inferred. Pass keys= with a strategy "
+                "for it -- KeyFunction takes any deterministic function of the row index. "
+                "Inventing values for a key column is how a character primary key once got "
+                'loaded with the strings "1", "2" and "3".'
+            )
 
         pk_names = {name for name, field in known.items() if field.primary_key}
         declared_pk = sorted(pk_names & set(self.fields))

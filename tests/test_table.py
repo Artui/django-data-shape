@@ -12,10 +12,13 @@ from django_data_shape import (
     Distribution,
     FanOut,
     InvalidShape,
+    KeyFunction,
     Sequential,
+    SequentialKeys,
     Skew,
     Table,
     Uniform,
+    UuidKeys,
     Zipf,
 )
 from tests.testapp.models import (
@@ -28,6 +31,7 @@ from tests.testapp.models import (
     Session,
     SlugPk,
     Subscriber,
+    Tenant,
 )
 
 
@@ -157,12 +161,39 @@ def test_a_field_colliding_with_the_signature_is_declarable_through_fields() -> 
     assert table.rows == 3
 
 
-def test_a_non_integer_primary_key_is_refused() -> None:
+def test_a_key_type_with_no_obvious_strategy_is_refused_and_points_at_the_fix() -> None:
     # It used to load: the dense 1..N range went into the CharField verbatim and
     # wrote "1", "2", "3" -- values the application could never produce, with a
     # whole statistics picture built on top of them, and no error anywhere.
-    with pytest.raises(InvalidShape, match="CharField primary key"):
+    with pytest.raises(InvalidShape, match="CharField primary") as raised:
         Table(SlugPk, rows=3, name=Constant("x"))
+
+    # Refusing is only half of it. The message has to say what to do instead, or
+    # the reader is left to discover keys= by reading the source.
+    assert "keys=" in str(raised.value)
+    assert "KeyFunction" in str(raised.value)
+
+
+def test_an_integer_key_infers_a_counter() -> None:
+    assert isinstance(_order().keys, SequentialKeys)
+
+
+def test_a_uuid_key_infers_derived_uuids() -> None:
+    # A UUID primary key used to be refused outright, which made this package
+    # unusable for a whole class of project.
+    assert isinstance(Table(Tenant, rows=5, name=Constant("t")).keys, UuidKeys)
+
+
+def test_an_explicit_strategy_makes_an_exotic_key_declarable() -> None:
+    table = Table(SlugPk, rows=3, name=Constant("x"), keys=KeyFunction(lambda row: f"s-{row}"))
+
+    assert table.keys.key_for(2, 0) == "s-2"
+
+
+def test_an_explicit_strategy_overrides_the_inferred_one() -> None:
+    table = Table(Company, rows=3, name=Constant("x"), keys=KeyFunction(lambda row: row * 10))
+
+    assert table.keys.key_for(2, 0) == 20
 
 
 def test_omitting_a_required_relation_is_refused_like_declaring_one() -> None:

@@ -11,6 +11,10 @@ from django_data_shape.distributions.uniform import Uniform
 from django_data_shape.distributions.zipf import Zipf
 from django_data_shape.fan_out import FanOut
 from django_data_shape.invalid_shape import InvalidShape
+from django_data_shape.keys.key_function import KeyFunction
+from django_data_shape.keys.key_strategy import KeyStrategy
+from django_data_shape.keys.sequential_keys import SequentialKeys
+from django_data_shape.keys.uuid_keys import UuidKeys
 from django_data_shape.shape import Shape
 from django_data_shape.shape_not_empty import ShapeNotEmpty
 from django_data_shape.table import Table
@@ -25,6 +29,10 @@ __all__ = [
     "Distribution",
     "FanOut",
     "InvalidShape",
+    "KeyFunction",
+    "KeyStrategy",
+    "SequentialKeys",
+    "UuidKeys",
     "Sequential",
     "Shape",
     "ShapeNotEmpty",

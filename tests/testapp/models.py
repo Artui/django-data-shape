@@ -148,3 +148,35 @@ class Right(models.Model):
     """The other half. Neither can be loaded first, which is the point."""
 
     left = models.ForeignKey(Left, null=True, on_delete=models.SET_NULL)
+
+
+class Tenant(models.Model):
+    """A model keyed by UUID, which is common enough to be a first-class case."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    name = models.CharField(max_length=50)
+
+
+class TenantRecord(models.Model):
+    """A child of a UUID-keyed parent.
+
+    The case that proves the key work reaches further than the key column: a
+    foreign key over a UUID parent has to carry UUIDs, both out of the parent's
+    real keys and into the child's own column.
+    """
+
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="records")
+    label = models.CharField(max_length=50)
+
+
+class Reading(models.Model):
+    """A model keyed by a timestamp, which needs its key prepared like any value.
+
+    Exotic, and deliberately so: it is the smallest model that shows why the
+    primary key goes through the field's own preparation rather than straight to
+    the driver. A naive datetime handed to psycopg is stored verbatim; handed to
+    Django first it is localised, which is what save() would have written.
+    """
+
+    at = models.DateTimeField(primary_key=True)
+    value = models.IntegerField()
