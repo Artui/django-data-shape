@@ -40,3 +40,11 @@ def test_it_has_no_build_method() -> None:
     # the template-database cache key and the shape-from emitter both need that
     # and neither can have it if a shape can hold a connection.
     assert not hasattr(Shape(_company()), "build")
+
+
+def test_a_shape_cannot_be_edited_past_its_own_validation() -> None:
+    shape = Shape(_company(), seed=1)
+
+    for attribute, value in (("tables", ()), ("seed", 2)):
+        with pytest.raises(AttributeError):
+            setattr(shape, attribute, value)

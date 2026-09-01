@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from types import MappingProxyType
 from typing import Any, cast
 
 from django.db.models import Field, IntegerField, Model
 from django.db.models.fields import NOT_PROVIDED
 
+from django_data_shape.distributions.bounded import Bounded
 from django_data_shape.distributions.constant import Constant
 from django_data_shape.distributions.distribution import Distribution
 from django_data_shape.invalid_shape import InvalidShape
@@ -48,10 +51,28 @@ class Table:
             )
         declared.update(field_distributions)
 
-        self.model = model
-        self.rows = rows
-        self.fields = declared
+        self._model = model
+        self._rows = rows
+        self._fields = declared
         self._validate()
+
+    # Read-only, because every rule in this class is enforced once, in
+    # __init__. Leaving the attributes writable meant a declaration could be
+    # edited afterwards into one that would have been refused -- and silently,
+    # since nothing re-runs the checks. A shape also has to stay hashable data
+    # for the template cache that comes later, which a mutable one cannot be.
+    @property
+    def model(self) -> type[Model]:
+        return self._model
+
+    @property
+    def rows(self) -> int:
+        return self._rows
+
+    @property
+    def fields(self) -> Mapping[str, Distribution]:
+        """The declared distributions, including defaults filled in from the model."""
+        return MappingProxyType(self._fields)
 
     @property
     def db_table(self) -> str:
@@ -122,6 +143,33 @@ class Table:
             )
 
         self._resolve_defaults(known)
+        self._check_satisfiable(known)
+
+    def _check_satisfiable(self, known: dict[str, Field[Any, Any]]) -> None:
+        """Refuse a declaration the database provably cannot hold.
+
+        A ``Constant`` on a unique column with more than one row is not a subtle
+        problem: it is arithmetic, decidable here, and it used to be discovered
+        by the database partway through a load that had already written most of
+        a table. The same reasoning covers a ``Skew`` offering fewer values than
+        there are rows.
+
+        Only single-column uniqueness is checked. Multi-column constraints are
+        satisfiable through combinations across independently declared columns,
+        which is a real analysis rather than a comparison, and guessing at it
+        would refuse declarations that are perfectly buildable.
+        """
+        for name, distribution in self.fields.items():
+            field = known[name]
+            if not field.unique or not isinstance(distribution, Bounded):
+                continue
+            available = distribution.distinct_values()
+            if available < self.rows:
+                raise InvalidShape(
+                    f"{self.model.__name__}.{name} is unique and needs {self.rows} distinct "
+                    f"values, but {distribution!r} can only produce {available}. The database "
+                    "would refuse this partway through the load."
+                )
 
     def _resolve_defaults(self, known: dict[str, Field[Any, Any]]) -> None:
         """Decide what happens to every field the caller did not declare.
@@ -179,7 +227,7 @@ class Table:
         missing: list[str] = []
         for name, field in undeclared:
             if field.has_default():
-                self.fields[name] = Constant(field.get_default())
+                self._fields[name] = Constant(field.get_default())
             elif field.null or self._has_db_default(field):
                 continue
             else:

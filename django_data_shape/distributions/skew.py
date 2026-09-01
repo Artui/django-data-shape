@@ -67,5 +67,9 @@ class Skew:
         # is cheaper than renormalising on every draw.
         return self._values[-1]
 
+    def distinct_values(self) -> int:
+        """How many values were declared. See ``Bounded``."""
+        return len(self._values)
+
     def __repr__(self) -> str:
         return f"Skew({self._weights!r})"

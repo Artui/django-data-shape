@@ -2,6 +2,7 @@
 
 from django_data_shape.build import build
 from django_data_shape.build_result import BuildResult
+from django_data_shape.distributions.bounded import Bounded
 from django_data_shape.distributions.constant import Constant
 from django_data_shape.distributions.distribution import Distribution
 from django_data_shape.distributions.sequential import Sequential
@@ -16,6 +17,7 @@ from django_data_shape.unsupported_backend import UnsupportedBackend
 from django_data_shape.version import __version__
 
 __all__ = [
+    "Bounded",
     "BuildResult",
     "Constant",
     "Distribution",

@@ -34,8 +34,18 @@ class Shape:
                     "distributions; two declarations would silently mean whichever came last."
                 )
             seen[key] = table
-        self.tables = tables
-        self.seed = seed
+        self._tables = tables
+        self._seed = seed
+
+    # Read-only for the same reason Table's are: a shape has to stay inert,
+    # hashable data, and the duplicate-table check above runs once.
+    @property
+    def tables(self) -> tuple[Table, ...]:
+        return self._tables
+
+    @property
+    def seed(self) -> int:
+        return self._seed
 
     def __repr__(self) -> str:
         names = ", ".join(table.model.__name__ for table in self.tables)

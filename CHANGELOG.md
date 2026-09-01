@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `Bounded`, an optional second protocol for distributions that can say how many
+  distinct values they produce. `Constant` and `Skew` implement it. It is
+  separate from `Distribution` on purpose: adding the method there would make it
+  required, so a custom distribution written against the single-method protocol
+  would stop satisfying it.
+- A declaration that provably cannot be loaded is now refused at declaration
+  time. A `Constant` on a unique column with more than one row, or a `Skew` with
+  fewer values than rows, is arithmetic rather than a subtle problem, and it used
+  to be discovered by the database partway through a load that had already
+  written most of a table. Only single-column uniqueness is checked; multi-column
+  constraints are satisfiable through combinations across independently declared
+  columns, which is an analysis rather than a comparison.
+
+### Fixed
+- `Uniform` with `places` raised `decimal.InvalidOperation` past 28 significant
+  digits -- Python's default context precision -- from inside the `COPY` loop, on
+  a column such as `numeric(30, 2)` that would have accepted the value. The
+  precision needed is now derived from the declared bounds.
+- `Table` and `Shape` attributes are read-only. Every rule they enforce runs once
+  in `__init__`, so while the attributes were writable a declaration could be
+  edited afterwards into one that would have been refused, with nothing
+  re-checking it.
+
 ## [0.1.0] — 2026-09-01
 
 ### Added

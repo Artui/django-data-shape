@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from decimal import Decimal
+from decimal import Decimal, localcontext
 
 from django_data_shape.invalid_shape import InvalidShape
 
@@ -38,12 +38,26 @@ class Uniform:
         self._low = low
         self._high = high
         self._places = places
+        # Python's default decimal context carries 28 significant digits, and
+        # rounding past it raises InvalidOperation -- which used to surface from
+        # inside the COPY loop, on a numeric(30, 2) column that would have
+        # accepted the value perfectly well. The precision needed is the integer
+        # digits of the widest bound plus the decimal places, and the guard
+        # covers the rounding step itself.
+        magnitude = max(abs(low), abs(high), 1.0)
+        self._precision = max(28, int(math.log10(magnitude)) + (places or 0) + 5)
 
     def value(self, row: int, draw: float) -> object:
         raw = self._low + draw * (self._high - self._low)
         if self._places is None:
             return raw
-        return round(Decimal(repr(raw)), self._places)
+        with localcontext() as context:
+            context.prec = self._precision
+            # repr() rather than the float itself: Decimal(float) takes the full
+            # binary expansion, which rounds tie cases the other way --
+            # Decimal(2.675) rounds to 2.67 where Decimal(repr(2.675)) gives the
+            # 2.68 a reader expects from the literal they wrote.
+            return round(Decimal(repr(raw)), self._places)
 
     def __repr__(self) -> str:
         places = "" if self._places is None else f", places={self._places}"

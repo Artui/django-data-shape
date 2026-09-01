@@ -22,5 +22,9 @@ class Constant:
     def value(self, row: int, draw: float) -> object:
         return self._value
 
+    def distinct_values(self) -> int:
+        """One, by definition. See ``Bounded``."""
+        return 1
+
     def __repr__(self) -> str:
         return f"Constant({self._value!r})"

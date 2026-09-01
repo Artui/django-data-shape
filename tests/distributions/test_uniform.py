@@ -55,3 +55,18 @@ def test_nan_or_infinite_bounds_are_refused() -> None:
 
 def test_places_zero_fills_an_integer_column() -> None:
     assert Uniform(0, 10, places=0).value(0, 0.55) == Decimal("6")
+
+
+def test_a_range_wider_than_the_default_decimal_precision_still_rounds() -> None:
+    # Python's default decimal context carries 28 significant digits and
+    # rounding past it raises InvalidOperation -- which used to surface from
+    # inside the COPY loop, on a numeric(30, 2) column that would have taken the
+    # value happily.
+    assert Uniform(0, 1e27, places=2).value(0, 0.5) == Decimal("500000000000000000000000000.00")
+    assert Uniform(0, 1e40, places=2).value(0, 0.5) == Decimal("5" + "0" * 39 + ".00")
+
+
+def test_rounding_follows_the_literal_a_reader_wrote() -> None:
+    # repr() rather than the float itself: Decimal(2.675) takes the full binary
+    # expansion and rounds to 2.67, where the literal 2.675 reads as 2.68.
+    assert Uniform(2.675, 2.6750001, places=2).value(0, 0.0) == Decimal("2.68")
