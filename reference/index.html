@@ -372,6 +372,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#django_data_shape.table.Table.fields" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        fields
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#django_data_shape.table.Table.columns" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -460,6 +471,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#django_data_shape.distributions.bounded.Bounded" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Bounded
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#django_data_shape.distributions.skew.Skew" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -467,6 +489,23 @@
       
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Skew">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#django_data_shape.distributions.skew.Skew.distinct_values" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        distinct_values
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -500,6 +539,23 @@
       
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Constant">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#django_data_shape.distributions.constant.Constant.distinct_values" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        distinct_values
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -594,6 +650,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#django_data_shape.table.Table.fields" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        fields
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#django_data_shape.table.Table.columns" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -682,6 +749,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#django_data_shape.distributions.bounded.Bounded" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Bounded
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#django_data_shape.distributions.skew.Skew" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -689,6 +767,23 @@
       
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Skew">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#django_data_shape.distributions.skew.Skew.distinct_values" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        distinct_values
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -722,6 +817,23 @@
       
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Constant">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#django_data_shape.distributions.constant.Constant.distinct_values" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        distinct_values
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -887,6 +999,30 @@ that knows more than it says.</p>
 
 
 
+
+<div class="doc doc-object doc-attribute">
+
+
+
+<h3 id="django_data_shape.table.Table.fields" class="doc doc-heading">
+            <span class="doc doc-object-name doc-attribute-name">fields</span>
+
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-property"><code>property</code></small>
+  </span>
+
+<a href="#django_data_shape.table.Table.fields" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="n">fields</span><span class="p">:</span> <span class="n">Mapping</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Distribution</span><span class="p">]</span>
+</span></code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>The declared distributions, including defaults filled in from the model.</p>
+
+    </div>
+
+</div>
 
 
 
@@ -1150,6 +1286,64 @@ which is the property the placement work in a later release depends on.</p>
 
 
 
+<h2 id="django_data_shape.distributions.bounded.Bounded" class="doc doc-heading">
+            <span class="doc doc-object-name doc-class-name">Bounded</span>
+
+
+<a href="#django_data_shape.distributions.bounded.Bounded" class="headerlink" title="Permanent link">&para;</a></h2>
+
+
+    <div class="doc doc-contents first">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="typing.Protocol">Protocol</span></code></p>
+
+
+
+        <p>A distribution with a known, finite number of distinct values.</p>
+<p>Deliberately a <strong>second</strong> protocol rather than a method on
+:class:<code>~django_data_shape.distributions.distribution.Distribution</code>. Adding
+it there would make it required, and a custom distribution written against
+the single-method protocol would stop satisfying it -- so the one thing this
+exists to prevent, a declaration that cannot describe a database, would be
+bought by breaking every declaration someone had already written.</p>
+<p>Structural and runtime-checkable, so a distribution opts in by having the
+method and nothing has to register anywhere. A distribution that cannot
+answer -- one drawing from a continuous range, say -- simply does not
+implement it, and is treated as unbounded rather than as suspicious.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
 <h2 id="django_data_shape.distributions.skew.Skew" class="doc doc-heading">
             <span class="doc doc-object-name doc-class-name">Skew</span>
 
@@ -1196,6 +1390,26 @@ which is better said by leaving it out than by declaring it and meaning not.</p>
 
 
 
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="django_data_shape.distributions.skew.Skew.distinct_values" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">distinct_values</span>
+
+
+<a href="#django_data_shape.distributions.skew.Skew.distinct_values" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">distinct_values</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">int</span>
+</span></code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>How many values were declared. See <code>Bounded</code>.</p>
+
+
+    </div>
+
+</div>
 
 
 
@@ -1362,6 +1576,26 @@ everything or nothing, and an index on it is never usable.</p>
 
 
 
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="django_data_shape.distributions.constant.Constant.distinct_values" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">distinct_values</span>
+
+
+<a href="#django_data_shape.distributions.constant.Constant.distinct_values" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">distinct_values</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">int</span>
+</span></code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>One, by definition. See <code>Bounded</code>.</p>
+
+
+    </div>
+
+</div>
 
 
 

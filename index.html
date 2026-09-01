@@ -608,6 +608,9 @@ library rather than left to the caller to remember.</p>
   would have written is used instead.</li>
 <li><strong>A callable default is refused.</strong> <code>uuid4</code> varies per row and <code>dict</code> does not,
   and nothing on the field distinguishes them. Declare a distribution instead.</li>
+<li><strong>A declaration is read-only once built.</strong> Every rule runs in the constructor,
+  so an editable declaration would be one that could be rewritten past its own
+  validation.</li>
 </ul>
 <h2 id="what-it-expects">What it expects<a class="headerlink" href="#what-it-expects" title="Permanent link">&para;</a></h2>
 <ul>
@@ -624,7 +627,10 @@ library rather than left to the caller to remember.</p>
 </ul>
 <h2 id="what-it-refuses">What it refuses<a class="headerlink" href="#what-it-refuses" title="Permanent link">&para;</a></h2>
 <p>A declaration that cannot describe a database raises <code>InvalidShape</code> at
-declaration time, naming the field. A generated database that is wrong is worse
+declaration time, naming the field. That includes ones which are merely
+arithmetic: a <code>Constant</code> on a unique column with more than one row, or a <code>Skew</code>
+offering fewer values than there are rows, is refused before a row is generated
+rather than found by the database halfway through a load. A generated database that is wrong is worse
 than one that refuses to exist, because the suite it feeds asserts on rows that
 could never occur.</p>
 <p><code>build()</code> raises <code>UnsupportedBackend</code> on anything but PostgreSQL. Generation and
