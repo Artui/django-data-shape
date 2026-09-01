@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Mapping
+from typing import Any
 
 from django_data_shape.invalid_shape import InvalidShape
 
@@ -15,13 +17,19 @@ class Skew:
     the thing a fixtures loop never expresses -- ten rows with one of each says
     the opposite of what production says.
 
+    ``Mapping[Any, float]`` rather than ``dict[object, float]``: ``dict`` is
+    invariant in both parameters, so a caller's prepared ``dict[str, float]`` --
+    the obvious way to build one of these outside a call -- would be rejected by
+    a type checker for no reason a reader could act on. ``Mapping`` is covariant
+    in its value type, so integer counts are accepted too.
+
     Weights are relative and need not sum to 1: the readable form is often
     counts, and normalising here is cheaper than making every caller do it. They
     must be positive, because a zero-weight value is a value that never appears,
     which is better said by leaving it out than by declaring it and meaning not.
     """
 
-    def __init__(self, weights: dict[object, float]) -> None:
+    def __init__(self, weights: Mapping[Any, float]) -> None:
         if not weights:
             raise InvalidShape("Skew needs at least one value; an empty distribution has none.")
         # ``not (w > 0)`` rather than ``w <= 0`` because NaN compares False to
