@@ -440,6 +440,33 @@
   
   
     <li class="md-nav__item">
+      <a href="keys/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Keys
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="reference/" class="md-nav__link">
         
   
@@ -640,13 +667,14 @@ library rather than left to the caller to remember.</p>
 </span></code></pre></div>
 <h2 id="what-it-decides-for-you">What it decides for you<a class="headerlink" href="#what-it-decides-for-you" title="Permanent link">&para;</a></h2>
 <ul>
-<li><strong>Primary keys are assigned here</strong>, as a dense <code>1..N</code> range. That is what will
-  let a foreign key be satisfied without a lookup when relations land, and what
-  makes a self-referential tree acyclic by construction. The identity sequence is
-  moved past them afterwards, so the first <code>objects.create()</code> in your test does
-  not collide with a key that already exists. Only integer primary keys are
-  supported, and a model with any other kind is refused rather than filled with
-  numbers in a character column.</li>
+<li><strong>Primary keys are assigned here</strong>, by a <em>key strategy</em>: a deterministic
+  function of the row index. Integer keys count from one and the identity
+  sequence is moved past them afterwards; UUID keys are derived from the seed, so
+  two builds of one shape agree. Determinism is the requirement, not integers --
+  it is what lets a foreign key be satisfied without a lookup and what makes a
+  self-referential tree acyclic. A key type with no obvious strategy is refused
+  rather than guessed, and <code>keys=KeyFunction(...)</code> declares one. See
+  <a href="keys/">Keys</a>.</li>
 <li><strong>Every value goes through its field's <code>get_db_prep_save</code>.</strong> Without it a naive
   datetime lands in the database verbatim rather than localised, which under a
   non-UTC <code>TIME_ZONE</code> is hours from where <code>save()</code> would have put it, and a

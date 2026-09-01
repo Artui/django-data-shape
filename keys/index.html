@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://artui.github.io/django-data-shape/relations/">
+        <link rel="canonical" href="https://artui.github.io/django-data-shape/keys/">
       
       
-        <link rel="prev" href="..">
+        <link rel="prev" href="../relations/">
       
       
-        <link rel="next" href="../keys/">
+        <link rel="next" href="../reference/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>Relations - django-data-shape</title>
+        <title>Keys - django-data-shape</title>
       
     
     
@@ -80,7 +80,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#relations" class="md-skip">
+        <a href="#keys" class="md-skip">
           Skip to content
         </a>
       
@@ -116,7 +116,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Relations
+              Keys
             
           </span>
         </div>
@@ -288,6 +288,33 @@
       
   
   
+  
+  
+    <li class="md-nav__item">
+      <a href="../relations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Relations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
     
   
   
@@ -307,7 +334,7 @@
   <span class="md-ellipsis">
     
   
-    Relations
+    Keys
   
 
     
@@ -325,7 +352,7 @@
   <span class="md-ellipsis">
     
   
-    Relations
+    Keys
   
 
     
@@ -351,10 +378,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#why-a-distribution-and-not-a-number" class="md-nav__link">
+  <a href="#why-the-keys-are-ours-at-all" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Why a distribution and not a number
+        Why the keys are ours at all
       
     </span>
   </a>
@@ -362,10 +389,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#the-parents-do-not-have-to-be-ours" class="md-nav__link">
+  <a href="#what-is-inferred" class="md-nav__link">
     <span class="md-ellipsis">
       
-        The parents do not have to be ours
+        What is inferred
       
     </span>
   </a>
@@ -373,10 +400,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#the-childless-tail" class="md-nav__link">
+  <a href="#declaring-your-own" class="md-nav__link">
     <span class="md-ellipsis">
       
-        The childless tail
+        Declaring your own
       
     </span>
   </a>
@@ -384,10 +411,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#nullable-keys" class="md-nav__link">
+  <a href="#what-keys-does-not-cover" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Nullable keys
+        What keys= does not cover
       
     </span>
   </a>
@@ -395,32 +422,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#placement-where-the-children-physically-sit" class="md-nav__link">
+  <a href="#why-anything-else-is-refused" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Placement — where the children physically sit
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#load-order" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Load order
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#what-is-refused" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        What is refused
+        Why anything else is refused
       
     </span>
   </a>
@@ -431,33 +436,6 @@
   
 </nav>
       
-    </li>
-  
-
-    
-      
-      
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../keys/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Keys
-  
-
-    
-  </span>
-  
-  
-
-      </a>
     </li>
   
 
@@ -516,10 +494,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#why-a-distribution-and-not-a-number" class="md-nav__link">
+  <a href="#why-the-keys-are-ours-at-all" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Why a distribution and not a number
+        Why the keys are ours at all
       
     </span>
   </a>
@@ -527,10 +505,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#the-parents-do-not-have-to-be-ours" class="md-nav__link">
+  <a href="#what-is-inferred" class="md-nav__link">
     <span class="md-ellipsis">
       
-        The parents do not have to be ours
+        What is inferred
       
     </span>
   </a>
@@ -538,10 +516,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#the-childless-tail" class="md-nav__link">
+  <a href="#declaring-your-own" class="md-nav__link">
     <span class="md-ellipsis">
       
-        The childless tail
+        Declaring your own
       
     </span>
   </a>
@@ -549,10 +527,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#nullable-keys" class="md-nav__link">
+  <a href="#what-keys-does-not-cover" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Nullable keys
+        What keys= does not cover
       
     </span>
   </a>
@@ -560,32 +538,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#placement-where-the-children-physically-sit" class="md-nav__link">
+  <a href="#why-anything-else-is-refused" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Placement — where the children physically sit
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#load-order" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Load order
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#what-is-refused" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        What is refused
+        Why anything else is refused
       
     </span>
   </a>
@@ -609,7 +565,7 @@
 
 
   
-    <a href="https://github.com/Artui/django-data-shape/edit/main/docs/relations.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
+    <a href="https://github.com/Artui/django-data-shape/edit/main/docs/keys.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
       
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
     </a>
@@ -617,114 +573,93 @@
   
 
 
-<h1 id="relations">Relations<a class="headerlink" href="#relations" title="Permanent link">&para;</a></h1>
-<p>A foreign key is declared with a <code>FanOut</code>: how many children each parent has, as
-a distribution rather than a number.</p>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">django_data_shape</span><span class="w"> </span><span class="kn">import</span> <span class="n">Constant</span><span class="p">,</span> <span class="n">FanOut</span><span class="p">,</span> <span class="n">Shape</span><span class="p">,</span> <span class="n">Table</span><span class="p">,</span> <span class="n">Zipf</span><span class="p">,</span> <span class="n">build</span>
+<h1 id="keys">Keys<a class="headerlink" href="#keys" title="Permanent link">&para;</a></h1>
+<p>This package assigns primary keys itself, using a <strong>key strategy</strong>: a
+deterministic function from the row index to that row's key.</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">django_data_shape</span><span class="w"> </span><span class="kn">import</span> <span class="n">Constant</span><span class="p">,</span> <span class="n">KeyFunction</span><span class="p">,</span> <span class="n">Table</span>
 </span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>
-</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="n">shape</span> <span class="o">=</span> <span class="n">Shape</span><span class="p">(</span>
-</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>    <span class="n">Table</span><span class="p">(</span><span class="n">Company</span><span class="p">,</span> <span class="n">rows</span><span class="o">=</span><span class="mi">50</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="n">Constant</span><span class="p">(</span><span class="s2">"acme"</span><span class="p">)),</span>
-</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>    <span class="n">Table</span><span class="p">(</span>
-</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>        <span class="n">Order</span><span class="p">,</span>
-</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>        <span class="n">rows</span><span class="o">=</span><span class="mi">2_000_000</span><span class="p">,</span>
-</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>        <span class="n">company</span><span class="o">=</span><span class="n">FanOut</span><span class="p">(</span><span class="n">Zipf</span><span class="p">(</span><span class="mf">1.2</span><span class="p">),</span> <span class="n">childless</span><span class="o">=</span><span class="mf">0.35</span><span class="p">),</span>
-</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>        <span class="n">status</span><span class="o">=</span><span class="n">Skew</span><span class="p">({</span><span class="s2">"complete"</span><span class="p">:</span> <span class="mf">0.98</span><span class="p">,</span> <span class="s2">"pending"</span><span class="p">:</span> <span class="mf">0.02</span><span class="p">}),</span>
-</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>    <span class="p">),</span>
-</span><span id="__span-0-11"><a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="p">)</span>
-</span><span id="__span-0-12"><a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>
-</span><span id="__span-0-13"><a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a><span class="n">build</span><span class="p">(</span><span class="n">shape</span><span class="p">)</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="c1"># Inferred. An integer key counts from one.</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="n">Table</span><span class="p">(</span><span class="n">Order</span><span class="p">,</span> <span class="n">rows</span><span class="o">=</span><span class="mi">1_000_000</span><span class="p">,</span> <span class="n">status</span><span class="o">=</span><span class="n">Constant</span><span class="p">(</span><span class="s2">"complete"</span><span class="p">))</span>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="c1"># Inferred. A UUIDField key is derived from the seed.</span>
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="n">Table</span><span class="p">(</span><span class="n">Tenant</span><span class="p">,</span> <span class="n">rows</span><span class="o">=</span><span class="mi">50_000</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="n">Constant</span><span class="p">(</span><span class="s2">"acme"</span><span class="p">))</span>
+</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>
+</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="c1"># Declared, for a key type with no obvious answer.</span>
+</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="n">Table</span><span class="p">(</span>
+</span><span id="__span-0-11"><a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>    <span class="n">Page</span><span class="p">,</span>
+</span><span id="__span-0-12"><a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>    <span class="n">rows</span><span class="o">=</span><span class="mi">10_000</span><span class="p">,</span>
+</span><span id="__span-0-13"><a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>    <span class="n">title</span><span class="o">=</span><span class="n">Constant</span><span class="p">(</span><span class="s2">"untitled"</span><span class="p">),</span>
+</span><span id="__span-0-14"><a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>    <span class="n">keys</span><span class="o">=</span><span class="n">KeyFunction</span><span class="p">(</span><span class="k">lambda</span> <span class="n">row</span><span class="p">:</span> <span class="sa">f</span><span class="s2">"page-</span><span class="si">{</span><span class="n">row</span><span class="si">:</span><span class="s2">06d</span><span class="si">}</span><span class="s2">"</span><span class="p">),</span>
+</span><span id="__span-0-15"><a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a><span class="p">)</span>
 </span></code></pre></div>
-<h2 id="why-a-distribution-and-not-a-number">Why a distribution and not a number<a class="headerlink" href="#why-a-distribution-and-not-a-number" title="Permanent link">&para;</a></h2>
-<p>Giving every parent ten children is the tidy thing to do and it is the one shape
-in which the query planner is never wrong.</p>
-<p>Postgres estimates a join from <code>n_distinct</code> — the <em>average</em> number of children
-per parent. When the real fan-out is uniform, that average is the truth, so the
-estimate cannot miss. Give the head a thousand children and the tail one, and the
-same estimate is wrong in both directions at once. Measured on a two-million-row
-table with a Zipf fan-out, a join over the busiest parents was estimated at 3,880
-rows against an actual 251,178 — a 65-fold under-estimate that picks a nested loop
-over 193,000 heap blocks.</p>
-<p>That defect cannot be reproduced against a fixture with even fan-out. Declaring
-the distribution is what makes it reproducible.</p>
-<h2 id="the-parents-do-not-have-to-be-ours">The parents do not have to be ours<a class="headerlink" href="#the-parents-do-not-have-to-be-ours" title="Permanent link">&para;</a></h2>
-<p><code>FanOut</code> reads the parent table's <strong>real keys</strong>. It does not assume the dense
-<code>1..N</code> range this package assigns when it builds a table itself.</p>
-<p>That matters because the realistic project is a hybrid: fifty companies created
-through the ORM or <code>model_bakery</code>, where the row count is small and the ORM is
-the right tool, and two million orders from here. Their keys are whatever the
-sequence handed out, and a fan-out assuming <code>1..50</code> would point every child at
-nothing.</p>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1"># The parents already exist, made however you liked.</span>
-</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="n">companies</span> <span class="o">=</span> <span class="p">[</span><span class="n">Company</span><span class="o">.</span><span class="n">objects</span><span class="o">.</span><span class="n">create</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="sa">f</span><span class="s2">"c</span><span class="si">{</span><span class="n">i</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">50</span><span class="p">)]</span>
-</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>
-</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="c1"># Only the large table is declared.</span>
-</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="n">build</span><span class="p">(</span><span class="n">Shape</span><span class="p">(</span><span class="n">Table</span><span class="p">(</span><span class="n">Order</span><span class="p">,</span> <span class="n">rows</span><span class="o">=</span><span class="mi">2_000_000</span><span class="p">,</span> <span class="n">company</span><span class="o">=</span><span class="n">FanOut</span><span class="p">(</span><span class="n">Zipf</span><span class="p">()),</span> <span class="n">status</span><span class="o">=</span><span class="n">Constant</span><span class="p">(</span><span class="s2">"x"</span><span class="p">))))</span>
-</span></code></pre></div>
-<p>Reading the keys is also what makes referential integrity hold <strong>by
-construction</strong>: every key written came out of the parent table, so there is
-nothing to validate afterwards.</p>
-<h2 id="the-childless-tail">The childless tail<a class="headerlink" href="#the-childless-tail" title="Permanent link">&para;</a></h2>
-<p><code>childless=0.35</code> gives 35% of parents no children at all.</p>
-<p>It is called out separately from the size distribution because it is the case
-hand-written fixtures always omit, and the one that changes what a query returns:
-a parent nobody references is the difference between an inner join and an outer
-join giving the same answer and giving different ones.</p>
-<h2 id="nullable-keys">Nullable keys<a class="headerlink" href="#nullable-keys" title="Permanent link">&para;</a></h2>
-<p><code>null=0.25</code> leaves a quarter of the children with a <code>NULL</code> foreign key. Only
-meaningful on a nullable column, and worth declaring because <code>null_frac</code> is
-planner-visible — an optional foreign key that is never null is its own kind of
-unrealistic.</p>
-<p>It thins the partition uniformly <em>after</em> it is computed, so the size distribution
-describes the pre-null spread.</p>
-<h2 id="placement-where-the-children-physically-sit">Placement — where the children physically sit<a class="headerlink" href="#placement-where-the-children-physically-sit" title="Permanent link">&para;</a></h2>
-<p><code>placement</code> decides the order children are written in, and it is not cosmetic.</p>
+<h2 id="why-the-keys-are-ours-at-all">Why the keys are ours at all<a class="headerlink" href="#why-the-keys-are-ours-at-all" title="Permanent link">&para;</a></h2>
+<p>Three things depend on it, and none of them depends on the keys being integers:</p>
+<ul>
+<li><strong>A foreign key is satisfied without a lookup</strong>, because a child can compute
+  its parent's key from the parent's row index.</li>
+<li><strong>A self-referential tree is acyclic by construction</strong>, because
+  <code>parent_index &lt; child_index</code> holds on the <em>index</em>, not on the value.</li>
+<li><strong>Two builds of one shape agree</strong>, because the same seed produces the same
+  keys.</li>
+</ul>
+<p>All three follow from determinism. Integers were only the most obvious
+deterministic function, and treating them as the requirement is what once made a
+UUID-keyed project unable to use this package at all.</p>
+<h2 id="what-is-inferred">What is inferred<a class="headerlink" href="#what-is-inferred" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
 <tr>
-<th><code>placement</code></th>
-<th><code>pg_stats.correlation</code></th>
-<th>What it is</th>
+<th>Primary key</th>
+<th>Strategy</th>
+<th>Notes</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><code>arrival</code> <em>(default)</em></td>
-<td>below 0.3</td>
-<td>children interleaved, the way rows really arrive</td>
+<td><code>AutoField</code>, <code>BigAutoField</code>, <code>IntegerField</code></td>
+<td><code>SequentialKeys</code></td>
+<td><code>row + 1</code>. The identity sequence is moved past the keys afterwards</td>
 </tr>
 <tr>
-<td><code>grouped</code></td>
-<td>above 0.9</td>
-<td>children contiguous per parent</td>
+<td><code>UUIDField</code></td>
+<td><code>UuidKeys</code></td>
+<td>A version-4 UUID derived from the seed and the row. No sequence exists, so none is reset</td>
+</tr>
+<tr>
+<td>anything else</td>
+<td><em>refused</em></td>
+<td>Declare one with <code>keys=</code></td>
 </tr>
 </tbody>
 </table>
-<p>Same rows, same per-parent counts, different plan. On a clustered table Postgres
-costs an index scan over the foreign key an order of magnitude cheaper, and picks
-it where it would not otherwise.</p>
-<p>The default is <code>arrival</code> because the obvious fixture loop —
-<code>for c in companies: for _ in range(n): Order(company=c)</code> — produces the
-<em>clustered</em> layout, which no production table has. A test database can be
-unrealistic in the flattering direction, and that loop is.</p>
-<h2 id="load-order">Load order<a class="headerlink" href="#load-order" title="Permanent link">&para;</a></h2>
-<p>Tables load parents-first, whatever order they are declared in. Not because the
-database insists — Django creates every PostgreSQL foreign key
-<code>DEFERRABLE INITIALLY DEFERRED</code>, so the checks fire at commit and any order would
-satisfy them — but because a fan-out reads the parent's keys, and a table with no
-rows yet has none.</p>
-<p>Two tables that fan out over each other are refused by name: one of them has to
-load first, and a cycle means neither can.</p>
-<h2 id="what-is-refused">What is refused<a class="headerlink" href="#what-is-refused" title="Permanent link">&para;</a></h2>
-<ul>
-<li>A relation declared with a <strong>value distribution</strong> rather than a <code>FanOut</code>. It
-  would emit keys drawn from nothing, pointing at rows that may not exist.</li>
-<li>A <code>FanOut</code> on a column that is <strong>not</strong> a relation, which has nothing to fan out
-  over.</li>
-<li>A <strong>self-referential</strong> <code>FanOut</code>. It would read keys from a table still empty at
-  load time; self-referential trees are their own feature.</li>
-<li>A required relation <strong>left undeclared</strong>, which would fail the load on a
-  not-null violation rather than at declaration time.</li>
-</ul>
+<p><code>UuidKeys</code> derives from a 128-bit hash rather than from a random draw. A random
+key would make the primary key -- and every foreign key pointing at it -- differ
+between two builds of the same shape.</p>
+<h2 id="declaring-your-own">Declaring your own<a class="headerlink" href="#declaring-your-own" title="Permanent link">&para;</a></h2>
+<p><code>KeyFunction</code> takes any deterministic function of the row index:</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="n">Table</span><span class="p">(</span>
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>    <span class="n">Page</span><span class="p">,</span>
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>    <span class="n">rows</span><span class="o">=</span><span class="mi">10_000</span><span class="p">,</span>
+</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>    <span class="n">title</span><span class="o">=</span><span class="n">Constant</span><span class="p">(</span><span class="s2">"untitled"</span><span class="p">),</span>
+</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>    <span class="n">keys</span><span class="o">=</span><span class="n">KeyFunction</span><span class="p">(</span><span class="k">lambda</span> <span class="n">row</span><span class="p">:</span> <span class="sa">f</span><span class="s2">"page-</span><span class="si">{</span><span class="n">row</span><span class="si">:</span><span class="s2">06d</span><span class="si">}</span><span class="s2">"</span><span class="p">),</span>
+</span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="p">)</span>
+</span></code></pre></div>
+<p>It is checked rather than trusted. At construction the function is called twice
+over a sample and refused if it disagrees with itself, and refused again if it
+produces a duplicate. A key that varies between calls would break reproducibility
+silently, in the one column every foreign key points at.</p>
+<h2 id="what-keys-does-not-cover">What <code>keys=</code> does not cover<a class="headerlink" href="#what-keys-does-not-cover" title="Permanent link">&para;</a></h2>
+<p><code>KeyFunction</code> takes any deterministic function of the row index, so there is no
+key <em>type</em> left over -- if you can compute it, you can declare it.</p>
+<p>One thing genuinely remains, and it is not a type: a <strong>composite primary key</strong> is
+several columns, and a key strategy maps a row index to one value. That is arity
+rather than type, so <code>keys=</code> cannot help and the declaration is refused by name.</p>
+<h2 id="why-anything-else-is-refused">Why anything else is refused<a class="headerlink" href="#why-anything-else-is-refused" title="Permanent link">&para;</a></h2>
+<p>Inventing values for a semantic column is not a small liberty. A character
+primary key once loaded cleanly with the strings <code>"1"</code>, <code>"2"</code> and <code>"3"</code> -- values
+the application could never have produced, with a whole statistics picture built
+on top of them, and no error anywhere.</p>
+<p>Refusing names the field and the type, and points at <code>keys=</code>.</p>
 
 
 

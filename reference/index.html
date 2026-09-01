@@ -13,7 +13,7 @@
         <link rel="canonical" href="https://artui.github.io/django-data-shape/reference/">
       
       
-        <link rel="prev" href="../relations/">
+        <link rel="prev" href="../keys/">
       
       
       
@@ -313,6 +313,33 @@
       
   
   
+  
+  
+    <li class="md-nav__item">
+      <a href="../keys/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Keys
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
     
   
   
@@ -397,6 +424,17 @@
   
     <nav class="md-nav" aria-label="Table">
       <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#django_data_shape.table.Table.keys" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        keys
+      
+    </span>
+  </a>
+  
+</li>
         
           <li class="md-nav__item">
   <a href="#django_data_shape.table.Table.fields" class="md-nav__link">
@@ -491,6 +529,61 @@
     <span class="md-ellipsis">
       
         TableResult
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#keys" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Keys
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#django_data_shape.keys.key_strategy.KeyStrategy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        KeyStrategy
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#django_data_shape.keys.sequential_keys.SequentialKeys" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SequentialKeys
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#django_data_shape.keys.uuid_keys.UuidKeys" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        UuidKeys
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#django_data_shape.keys.key_function.KeyFunction" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        KeyFunction
       
     </span>
   </a>
@@ -710,6 +803,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#django_data_shape.table.Table.keys" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        keys
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#django_data_shape.table.Table.fields" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -802,6 +906,61 @@
     <span class="md-ellipsis">
       
         TableResult
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#keys" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Keys
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#django_data_shape.keys.key_strategy.KeyStrategy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        KeyStrategy
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#django_data_shape.keys.sequential_keys.SequentialKeys" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SequentialKeys
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#django_data_shape.keys.uuid_keys.UuidKeys" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        UuidKeys
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#django_data_shape.keys.key_function.KeyFunction" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        KeyFunction
       
     </span>
   </a>
@@ -1097,6 +1256,32 @@ that knows more than it says.</p>
 
 
 
+<h3 id="django_data_shape.table.Table.keys" class="doc doc-heading">
+            <span class="doc doc-object-name doc-attribute-name">keys</span>
+
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-property"><code>property</code></small>
+  </span>
+
+<a href="#django_data_shape.table.Table.keys" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="n">keys</span><span class="p">:</span> <span class="n">KeyStrategy</span>
+</span></code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>How this table's primary keys are decided.</p>
+<p>Never None by the time anyone can read it: _validate either inferred a
+strategy from the primary key's type or refused the declaration.</p>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-attribute">
+
+
+
 <h3 id="django_data_shape.table.Table.fields" class="doc doc-heading">
             <span class="doc doc-object-name doc-attribute-name">fields</span>
 
@@ -1372,6 +1557,233 @@ start checking.</p>
 <p>Carries the database table name rather than the model, because this is what
 a caller prints or asserts on, and because the two stop being one-to-one as
 soon as through tables are generated alongside the models that declare them.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div><h2 id="keys">Keys<a class="headerlink" href="#keys" title="Permanent link">&para;</a></h2>
+
+
+<div class="doc doc-object doc-class">
+
+
+
+<h2 id="django_data_shape.keys.key_strategy.KeyStrategy" class="doc doc-heading">
+            <span class="doc doc-object-name doc-class-name">KeyStrategy</span>
+
+
+<a href="#django_data_shape.keys.key_strategy.KeyStrategy" class="headerlink" title="Permanent link">&para;</a></h2>
+
+
+    <div class="doc doc-contents first">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="typing.Protocol">Protocol</span></code></p>
+
+
+
+        <p>Turns a row index into that row's primary key.</p>
+<p>The generalisation of what used to be a hard-coded dense <code>1..N</code> range. The
+range was never the requirement: what the design actually rests on is that
+the key is a <strong>deterministic function of the row index</strong>, and integers were
+only the most obvious such function.</p>
+<p>Everything the dense range bought is bought by determinism instead. A child
+can compute its parent's key from the parent's <em>index</em>, so a foreign key is
+satisfied without a lookup whatever the key type. A self-referential tree is
+acyclic because <code>parent_index &lt; child_index</code> holds on the index, not on the
+value. And two builds of one shape agree because the same seed produces the
+same keys.</p>
+<p><code>stream</code> is a per-table value derived from the seed, so a strategy that
+needs entropy has some. One that does not -- a counter, or a caller's own
+function -- ignores it, exactly as a positional distribution ignores its
+draw.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h2 id="django_data_shape.keys.sequential_keys.SequentialKeys" class="doc doc-heading">
+            <span class="doc doc-object-name doc-class-name">SequentialKeys</span>
+
+
+<a href="#django_data_shape.keys.sequential_keys.SequentialKeys" class="headerlink" title="Permanent link">&para;</a></h2>
+
+
+    <div class="doc doc-contents first">
+
+
+
+        <p><code>row + 1</code>: the default for any integer primary key.</p>
+<p>Counting from one rather than zero because that is what a database sequence
+does, and a test database whose keys start at zero is subtly unlike every
+other one the reader has seen.</p>
+<p>This is the strategy that obliges the sequence reset after loading. It is
+also the only one that does: a key type with no sequence behind it has
+nothing to move.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h2 id="django_data_shape.keys.uuid_keys.UuidKeys" class="doc doc-heading">
+            <span class="doc doc-object-name doc-class-name">UuidKeys</span>
+
+
+<a href="#django_data_shape.keys.uuid_keys.UuidKeys" class="headerlink" title="Permanent link">&para;</a></h2>
+
+
+    <div class="doc doc-contents first">
+
+
+
+        <p>A UUID per row, deterministic in the seed and the row index.</p>
+<p>Derived from a hash rather than drawn from <code>uuid4</code> for the reason the
+whole package is built around: two builds of one shape have to agree, and a
+random key would make the primary key -- and therefore every foreign key
+pointing at it -- differ between runs.</p>
+<p>A full 128 bits from the digest, not a float draw. A draw carries 53 bits,
+which sounds ample until birthday collisions arrive around ninety million
+rows; a table that large is exactly the kind this package exists to build.</p>
+<p>The version and variant bits are stamped so the result is a well-formed
+version 4 UUID. Applications store v4 keys, so a test database holding
+something that merely looks UUID-shaped would be unlike the thing it stands
+in for.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h2 id="django_data_shape.keys.key_function.KeyFunction" class="doc doc-heading">
+            <span class="doc doc-object-name doc-class-name">KeyFunction</span>
+
+
+<a href="#django_data_shape.keys.key_function.KeyFunction" class="headerlink" title="Permanent link">&para;</a></h2>
+
+
+    <div class="doc doc-contents first">
+
+
+
+        <p>A caller's own deterministic mapping from row index to key.</p>
+<p>The escape hatch for a key this package cannot infer -- a natural key, a
+prefixed slug, an external identifier. Integer and UUID primary keys are
+inferred and need none of this; anything else is declared rather than
+guessed, because a guessed value in a semantic column is how a character
+primary key once got loaded with the strings "1", "2" and "3".</p>
+<p>The function must be a pure function of the row index. That is checked on a
+sample at construction rather than trusted: a key that varies between calls
+would break reproducibility, and it would break it silently, in the one
+column every foreign key points at.</p>
 
 
 
