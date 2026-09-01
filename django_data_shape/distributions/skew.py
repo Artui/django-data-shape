@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+
 from django_data_shape.invalid_shape import InvalidShape
 
 
@@ -22,10 +24,15 @@ class Skew:
     def __init__(self, weights: dict[object, float]) -> None:
         if not weights:
             raise InvalidShape("Skew needs at least one value; an empty distribution has none.")
-        bad = sorted(repr(v) for v, w in weights.items() if w <= 0)
+        # ``not (w > 0)`` rather than ``w <= 0`` because NaN compares False to
+        # both, so the obvious spelling let it through -- and a NaN weight makes
+        # every cumulative bound NaN, so no draw ever matches and the fallthrough
+        # returns the last value for every row. The declared distribution comes
+        # out inverted, silently.
+        bad = sorted(repr(v) for v, w in weights.items() if not (w > 0) or not math.isfinite(w))
         if bad:
             raise InvalidShape(
-                "Skew weights must be positive, and these are not: "
+                "Skew weights must be positive and finite, and these are not: "
                 + ", ".join(bad)
                 + ". A value that never occurs is said by omitting it."
             )
@@ -46,9 +53,10 @@ class Skew:
         for value, bound in zip(self._values, self._bounds, strict=True):
             if draw < bound:
                 return value
-        # Only reachable when floating-point accumulation leaves the final bound
-        # a hair below 1.0. The last value is the correct answer there, and
-        # falling through to it is cheaper than renormalising every draw.
+        # Reachable only when floating-point accumulation leaves the final bound
+        # a hair below 1.0, since a draw is guaranteed below 1.0 by construction.
+        # The last value is the correct answer there, and falling through to it
+        # is cheaper than renormalising on every draw.
         return self._values[-1]
 
     def __repr__(self) -> str:

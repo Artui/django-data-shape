@@ -42,3 +42,16 @@ def test_negative_places_is_refused() -> None:
 def test_it_reads_back_as_what_was_declared() -> None:
     assert repr(Uniform(0, 5)) == "Uniform(0, 5)"
     assert repr(Uniform(0, 5, places=2)) == "Uniform(0, 5, places=2)"
+
+
+def test_nan_or_infinite_bounds_are_refused() -> None:
+    # Same shape of bug as Skew's: ``high <= low`` is False for NaN, so the
+    # range was accepted and then returned NaN for every row.
+    with pytest.raises(InvalidShape, match="finite bounds"):
+        Uniform(0, float("inf"))
+    with pytest.raises(InvalidShape, match="finite bounds"):
+        Uniform(float("nan"), 1)
+
+
+def test_places_zero_fills_an_integer_column() -> None:
+    assert Uniform(0, 10, places=0).value(0, 0.55) == Decimal("6")

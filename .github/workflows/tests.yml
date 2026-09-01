@@ -43,9 +43,11 @@ jobs:
       - name: Install with docs group
         run: uv sync --all-groups
       - name: mkdocs build --strict
-        # mkdocstrings imports the package, which defines Django models. Those
-        # cannot be imported before ``django.setup()``, so we point at the test
-        # settings module to keep the build hermetic.
+        # This package defines no models, so mkdocstrings can import it without
+        # django.setup(). The settings module is pointed at anyway because the
+        # reference pages document code that reads Django's model _meta API, and
+        # a future page that imports the test models would otherwise fail here
+        # rather than in the docs build a contributor runs locally.
         run: DJANGO_SETTINGS_MODULE=tests.conftest_settings uv run mkdocs build --strict
 
 
@@ -130,8 +132,9 @@ jobs:
           import django
           from django.conf import settings
 
-          # This package defines models, so a bare import cannot run before
-          # django.setup() against configured settings.
+          # No models here, so the import itself needs no django.setup(). The
+          # settings are configured anyway so this asserts the shape a real
+          # consumer has: installed alongside Django, at the declared floors.
           settings.configure(
               SECRET_KEY="x",
               INSTALLED_APPS=[

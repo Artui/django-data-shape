@@ -17,6 +17,26 @@ def require_postgres(connection: Any, operation: str) -> None:
     path the coverage gate cannot see, and this package gates coverage on
     Postgres precisely because that is where its real work happens.
     """
+    # The driver is read off the connection, exactly like ``vendor`` above, and
+    # for the same reason: a refusal that could only be covered by installing
+    # the driver it refuses is a refusal the coverage gate cannot see. Django
+    # sets ``Database`` to the driver module -- ``psycopg`` on 3, ``psycopg2``
+    # on 2 -- so a stub can supply it and this branch is testable everywhere.
+    driver = getattr(connection.Database, "__name__", "")
+    if connection.vendor == "postgresql" and driver != "psycopg":
+        # Django 6.1 still ships the psycopg 2 fallback, so this is a live
+        # configuration rather than a legacy one. Without this check the vendor
+        # gate passes and the load fails deep inside the package with
+        # "'psycopg2.extensions.cursor' object has no attribute 'copy'" -- a
+        # traceback pointing here, which a user would reasonably file as a bug
+        # in this package rather than as a missing driver.
+        raise UnsupportedBackend(
+            f"{operation} needs psycopg 3; connection '{connection.alias}' is using "
+            f"{driver or 'an unknown driver'}. "
+            "Rows are streamed straight into COPY FROM STDIN, which psycopg 2 cannot do without "
+            "materialising them first -- the cost this package exists to avoid. Install the "
+            "'postgres' extra: pip install django-data-shape[postgres]."
+        )
     if connection.vendor != "postgresql":
         raise UnsupportedBackend(
             f"{operation} needs PostgreSQL; connection '{connection.alias}' is "

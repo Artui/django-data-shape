@@ -2,12 +2,21 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
 from django_data_shape import UnsupportedBackend
 from django_data_shape.require_postgres import require_postgres
+
+# SimpleNamespace, not a class: ``type.__name__`` is a data descriptor on the
+# metaclass, so a class-body ``__name__`` never wins and a stub class would keep
+# reporting its own name. Django sets ``Database`` to a module anyway, which is
+# what this stands in for.
+_PSYCOPG3 = SimpleNamespace(__name__="psycopg")
+_PSYCOPG2 = SimpleNamespace(__name__="psycopg2")
 
 
 @dataclass
@@ -22,10 +31,26 @@ class _Connection:
 
     vendor: str
     alias: str = "default"
+    Database: Any = field(default_factory=lambda: _PSYCOPG3)
 
 
-def test_postgresql_passes() -> None:
+def test_postgresql_on_psycopg3_passes() -> None:
     require_postgres(_Connection(vendor="postgresql"), "Building a shape")
+
+
+def test_postgresql_on_psycopg2_is_refused() -> None:
+    # Django 6.1 still ships the psycopg 2 fallback, so this is a live
+    # configuration. Without the check the vendor gate passes and the load dies
+    # inside the package on "'psycopg2.extensions.cursor' object has no
+    # attribute 'copy'" -- a traceback a user would reasonably file here.
+    with pytest.raises(UnsupportedBackend, match="needs psycopg 3") as raised:
+        require_postgres(
+            _Connection(vendor="postgresql", alias="legacy", Database=_PSYCOPG2),
+            "Building a shape",
+        )
+
+    assert "psycopg2" in str(raised.value)
+    assert "django-data-shape[postgres]" in str(raised.value)
 
 
 @pytest.mark.parametrize("vendor", ["sqlite", "mysql", "oracle"])

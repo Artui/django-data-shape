@@ -79,3 +79,36 @@ class Defaulted(models.Model):
     """
 
     token = models.UUIDField(default=uuid.uuid4)
+
+
+class Event(models.Model):
+    """A model for checking that field preparation actually happens.
+
+    ``at`` is the interesting column: written without Django's own preparation a
+    naive datetime lands in the database verbatim, which under a non-UTC
+    ``TIME_ZONE`` is hours away from where ``save()`` would have put it. ``tags``
+    cannot be written at all without preparation, because psycopg has no adapter
+    for a bare dict.
+    """
+
+    at = models.DateTimeField()
+    tags = models.JSONField()
+
+
+class SlugPk(models.Model):
+    """A model whose primary key this package cannot assign.
+
+    Keys are handed out as a dense 1..N integer range, and nothing converts
+    them, so a character primary key used to be loaded with the strings "1",
+    "2", "3".
+    """
+
+    code = models.CharField(max_length=50, primary_key=True)
+    name = models.CharField(max_length=50)
+
+
+class Referred(models.Model):
+    """A model with an optional self-relation, which may be left undeclared."""
+
+    label = models.CharField(max_length=50)
+    referrer = models.ForeignKey("self", null=True, on_delete=models.SET_NULL)

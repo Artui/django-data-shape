@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any, cast
+
 import pytest
 
 from django_data_shape import (
@@ -13,7 +15,15 @@ from django_data_shape import (
     Table,
     Uniform,
 )
-from tests.testapp.models import Company, Defaulted, Order, Project, Reserved
+from tests.testapp.models import (
+    Company,
+    Defaulted,
+    Order,
+    Project,
+    Referred,
+    Reserved,
+    SlugPk,
+)
 
 
 def _order(**overrides: Distribution) -> Table:
@@ -125,3 +135,44 @@ def test_a_field_colliding_with_the_signature_is_declarable_through_fields() -> 
 
     assert [name for name, _ in table.columns()] == ["rows"]
     assert table.rows == 3
+
+
+def test_a_non_integer_primary_key_is_refused() -> None:
+    # It used to load: the dense 1..N range went into the CharField verbatim and
+    # wrote "1", "2", "3" -- values the application could never produce, with a
+    # whole statistics picture built on top of them, and no error anywhere.
+    with pytest.raises(InvalidShape, match="CharField primary key"):
+        Table(SlugPk, rows=3, name=Constant("x"))
+
+
+def test_omitting_a_required_relation_is_refused_like_declaring_one() -> None:
+    # Declaring a relation was already refused; omitting a required one was not,
+    # and reached COPY to die there on a not-null violation. Both directions
+    # have to refuse, or the contract only holds for callers who tried the
+    # unsupported thing explicitly.
+    with pytest.raises(InvalidShape, match="relation that cannot be null"):
+        Table(Project, rows=1, status=Constant("ACTIVE"), created_at=Sequential(0, 1))
+
+
+def test_a_nullable_relation_may_be_omitted_and_loads_null() -> None:
+    # Allowed rather than refused: optional foreign keys are common enough that
+    # refusing them would make most real models unshapeable this release. The
+    # column loads entirely NULL, which is stated in the documentation because a
+    # join key with null_frac 1.0 is not a neutral thing to hand a planner.
+    assert "referrer" not in Table(Referred, rows=1, label=Constant("x")).fields
+
+
+def test_a_database_default_is_left_to_the_database() -> None:
+    # A stub rather than a model, so this runs on Django 4.2 as well -- db_default
+    # arrived in 5.0, and the branch it guards is the only reason a column may
+    # legitimately be left out of the COPY. Mutating _has_db_default to return
+    # False left the whole suite green before this existed, because the `or`
+    # arm next to it was already covered.
+    class _Field:
+        db_default = "eu"
+
+    class _Older:
+        pass
+
+    assert Table._has_db_default(cast("Any", _Field()))
+    assert not Table._has_db_default(cast("Any", _Older()))

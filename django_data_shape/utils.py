@@ -37,4 +37,9 @@ def draw(stream: int, row: int) -> float:
     z = ((z ^ (z >> 30)) * 0xBF58476D1CE4E5B9) & _MASK64
     z = ((z ^ (z >> 27)) * 0x94D049BB133111EB) & _MASK64
     z = z ^ (z >> 31)
-    return z / 18446744073709551616.0
+    # 53 bits over 2**53 rather than 64 bits over 2**64: the latter can round up
+    # to exactly 1.0 for the top 1024 finalizer outputs, and the finalizer is a
+    # bijection so all of them are reachable. That would break the [0, 1)
+    # contract every distribution is written against. This is the same
+    # construction the standard library uses for ``random.random()``.
+    return (z >> 11) / 9007199254740992.0

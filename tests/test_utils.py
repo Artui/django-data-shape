@@ -10,6 +10,10 @@ def test_a_draw_is_uniform_in_the_unit_interval() -> None:
     values = [draw(stream, row) for row in range(2000)]
 
     assert all(0.0 <= value < 1.0 for value in values)
+    # The upper bound is a guarantee, not an observation: the largest value the
+    # derivation can produce is below 1.0 by construction, which is what Skew's
+    # bounds and the Distribution contract are written against.
+    assert (((1 << 64) - 1) >> 11) / 9007199254740992.0 < 1.0
     # Not a distribution test, a smoke test: a mixer that collapsed would show
     # up here long before it showed up as a wrong-looking database.
     assert len(set(values)) > 1900
@@ -43,4 +47,4 @@ def test_a_stream_is_stable_across_processes() -> None:
     # derivation ever regressed to it -- and the failure would look like flaky
     # test data rather than like a bug here.
     assert field_stream(seed=0, table="orders", field="status") == 10965613546237361956
-    assert draw(field_stream(seed=0, table="orders", field="status"), 0) == 0.9705692634847263
+    assert draw(field_stream(seed=0, table="orders", field="status"), 0) == 0.9705692634847262

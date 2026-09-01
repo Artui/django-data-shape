@@ -54,3 +54,14 @@ def test_a_value_that_never_occurs_is_refused_by_name() -> None:
 
 def test_it_reads_back_as_what_was_declared() -> None:
     assert repr(Skew({"a": 1})) == "Skew({'a': 1})"
+
+
+def test_a_nan_or_infinite_weight_is_refused() -> None:
+    # NaN compares False to every ordering, so ``w <= 0`` let it through -- and
+    # a NaN weight makes every cumulative bound NaN, so no draw ever matches and
+    # every row falls through to the last value. The declared distribution came
+    # out inverted, with nothing raised.
+    with pytest.raises(InvalidShape, match="positive and finite"):
+        Skew({"a": float("nan"), "b": 1})
+    with pytest.raises(InvalidShape, match="positive and finite"):
+        Skew({"a": float("inf"), "b": 1})

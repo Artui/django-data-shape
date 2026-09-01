@@ -5,11 +5,20 @@ from __future__ import annotations
 import datetime
 
 import pytest
-from django.db import connection
+from django.db import DatabaseError, connection
 
-from django_data_shape import Constant, Sequential, Shape, Skew, Table, Uniform, UnsupportedBackend
+from django_data_shape import (
+    Constant,
+    Sequential,
+    Shape,
+    ShapeNotEmpty,
+    Skew,
+    Table,
+    Uniform,
+    UnsupportedBackend,
+)
 from django_data_shape import build as build_shape
-from tests.testapp.models import Company, Order
+from tests.testapp.models import Company, Event, Order
 
 # Skipped with a reason on any other backend rather than silently passing. This
 # module is the package's own claim under test -- COPY, a reset sequence, real
@@ -24,6 +33,10 @@ pytestmark = [
         reason="COPY loading and planner statistics need PostgreSQL",
     ),
 ]
+
+
+_AWARE = datetime.datetime(2020, 1, 1, tzinfo=datetime.timezone.utc)
+_ORDERS = Order._meta.db_table
 
 
 def _orders(rows: int = 5000) -> Table:
@@ -126,3 +139,93 @@ def test_building_against_a_non_postgres_connection_is_refused() -> None:
     # here even though the stub test would still pass.
     with pytest.raises(UnsupportedBackend, match="needs PostgreSQL"):
         build_shape(Shape(_orders(rows=1)), using="not_postgres")
+
+
+def test_a_naive_datetime_is_stored_where_save_would_have_put_it() -> None:
+    # The silent one. Written without Django's field preparation a naive
+    # datetime lands verbatim, which under this suite's America/Chicago
+    # TIME_ZONE is hours away from where save() puts it -- on the exact column
+    # Sequential exists to make realistic, with no error and no warning.
+    naive = datetime.datetime(2020, 1, 1, 12, 0)
+    # Django's own warning, raised from DateTimeField.get_prep_value. Before the
+    # fix build() raised none at all, which is the sharpest evidence that no
+    # field preparation was happening.
+    with pytest.warns(RuntimeWarning, match="received a naive datetime"):
+        build_shape(Shape(Table(Event, rows=1, at=Constant(naive), tags=Constant({"a": 1}))))
+
+    saved = Event.objects.create(at=naive, tags={"b": 2})
+    # Both sides read back from the database: the point is what was *stored*,
+    # and the in-memory instance still holds the naive value it was handed.
+    saved.refresh_from_db()
+    loaded = Event.objects.exclude(pk=saved.pk).get()
+
+    assert loaded.at == saved.at
+    assert loaded.at == datetime.datetime(2020, 1, 1, 18, 0, tzinfo=datetime.timezone.utc)
+
+
+def test_a_json_column_loads_at_all() -> None:
+    # psycopg has no adapter for a bare dict, so without preparation this does
+    # not merely land wrong -- the build fails outright.
+    build_shape(Shape(Table(Event, rows=3, at=Constant(_AWARE), tags=Constant({"a": [1, 2]}))))
+
+    assert Event.objects.get(pk=1).tags == {"a": [1, 2]}
+
+
+def test_analyze_is_fresh_rather_than_merely_present() -> None:
+    # pg_statistic survives both TRUNCATE and --reuse-db, so asserting that
+    # statistics *exist* passes against a build that never analyzed, as long as
+    # some earlier run did. Asking when the table was last analyzed is the
+    # question that actually discriminates.
+    build_shape(Shape(_orders(rows=200)))
+    with connection.cursor() as cursor:
+        cursor.execute("SELECT pg_stat_get_last_analyze_time(%s::regclass)", [_ORDERS])
+        first = cursor.fetchone()[0]
+
+    Order.objects.all().delete()
+    build_shape(Shape(_orders(rows=200)))
+    with connection.cursor() as cursor:
+        cursor.execute("SELECT pg_stat_get_last_analyze_time(%s::regclass)", [_ORDERS])
+        second = cursor.fetchone()[0]
+
+    assert first is not None
+    assert second > first
+
+
+def test_building_over_existing_rows_is_refused_before_anything_is_written() -> None:
+    # Keys start at 1 every time, so the second build collided on the primary
+    # key and reported a unique violation naming an index -- which says nothing
+    # about what the caller did or what to do instead.
+    build_shape(Shape(_orders(rows=10)))
+
+    with pytest.raises(ShapeNotEmpty, match="already holds rows"):
+        build_shape(Shape(_orders(rows=10)))
+
+
+def test_a_failed_build_leaves_no_table_behind() -> None:
+    # Without the transaction the first table stayed committed and analyzed, so
+    # the natural next action -- fix the shape and run it again -- failed on a
+    # duplicate key rather than on the original problem.
+    Order.objects.create(
+        status="complete", total="1.00", created_at=_AWARE
+    )  # makes the second table refuse
+
+    with pytest.raises(ShapeNotEmpty):
+        build_shape(Shape(Table(Company, rows=5, name=Constant("acme")), _orders(rows=10)))
+
+    assert Company.objects.count() == 0
+
+
+def test_a_copy_failure_arrives_as_a_django_error() -> None:
+    # cursor.copy is not in Django's WRAP_ERROR_ATTRS, so the psycopg exception
+    # escaped raw: uncatchable as django.db.DatabaseError, and an enclosing
+    # atomic block never learned it needed a rollback.
+    too_long = Table(Company, rows=1, name=Constant("x" * 500))
+
+    with pytest.raises(DatabaseError):
+        build_shape(Shape(too_long))
+
+
+def test_the_result_counts_what_the_database_took() -> None:
+    result = build_shape(Shape(_orders(rows=250)))
+
+    assert result.rows == Order.objects.count() == 250

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, cast
 
-from django.db.models import Field, Model
+from django.db.models import Field, IntegerField, Model
 from django.db.models.fields import NOT_PROVIDED
 
 from django_data_shape.distributions.constant import Constant
@@ -83,6 +83,22 @@ class Table:
                 f"Its concrete fields are: {', '.join(sorted(known))}."
             )
 
+        pk_fields = [field for field in known.values() if field.primary_key]
+        for field in pk_fields:
+            # The dense 1..N range this package assigns is integers, and nothing
+            # downstream converts it. Given a CharField primary key the load
+            # used to succeed and write "1", "2", "3" -- values the application
+            # could never produce, with a whole statistics picture built on top
+            # of them. Refusing is the only honest answer until a key strategy
+            # can be declared per table.
+            if not isinstance(field, IntegerField):
+                raise InvalidShape(
+                    f"{self.model.__name__}.{field.name} is a "
+                    f"{type(field).__name__} primary key, and this package assigns primary keys "
+                    "itself as a dense 1..N integer range. Only integer primary keys are "
+                    "supported."
+                )
+
         pk_names = {name for name, field in known.items() if field.primary_key}
         declared_pk = sorted(pk_names & set(self.fields))
         if declared_pk:
@@ -124,8 +140,25 @@ class Table:
         undeclared = [
             (name, field)
             for name, field in known.items()
-            if name not in self.fields and not field.primary_key and not field.is_relation
+            if name not in self.fields and not field.primary_key
         ]
+
+        # Declaring a relation is refused in _validate; omitting a required one
+        # used to be accepted and then fail inside COPY with a not-null
+        # violation. Both directions have to refuse, or the contract only holds
+        # for the callers who tried the unsupported thing explicitly.
+        required_relations = sorted(
+            name
+            for name, field in undeclared
+            if field.is_relation and not field.null and not field.has_default()
+        )
+        if required_relations:
+            raise InvalidShape(
+                f"{self.model.__name__}.{', '.join(required_relations)} is a relation that "
+                "cannot be null, and relations are not supported yet, so this shape cannot be "
+                "built. Declaring fan-out as a distribution is the next release."
+            )
+        undeclared = [(name, field) for name, field in undeclared if not field.is_relation]
 
         # A callable default is refused rather than guessed. This package cannot
         # know whether it varies per row -- ``uuid4`` does, ``dict`` does not --

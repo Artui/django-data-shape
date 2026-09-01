@@ -29,10 +29,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   it. A callable default is refused instead of guessed: `uuid4` varies per row
   and `dict` does not, and nothing on the field distinguishes them.
 
+- `ShapeNotEmpty`, raised before anything is written when a target table already
+  holds rows. Keys start at 1 on every build, so the collision was previously a
+  unique-violation naming an index, which says nothing about what to do instead.
+- The whole build runs in one transaction, so a shape whose second table fails
+  leaves nothing behind and can be re-run after a fix.
+- Every declared value passes through its field's `get_db_prep_save`. Without it
+  a naive datetime was stored verbatim rather than localised -- hours from where
+  `save()` puts it under a non-UTC `TIME_ZONE` -- and a `JSONField` could not be
+  written at all.
+
 ### Notes
-- Relations are refused rather than approximated. Fan-out as a distribution is
-  the next release, and generating a foreign key from a value distribution would
-  write ids pointing at rows that may not exist.
+- Relations are refused in both directions: declaring one raises, and so does
+  omitting one that cannot be null. An optional foreign key may be omitted and
+  loads entirely `NULL`, which is documented rather than left to be discovered.
+- Only integer primary keys are supported. Any other kind is refused, rather than
+  a dense `1..N` integer range being written into a character column.
+- psycopg 3 is required and psycopg 2 is refused by name. Rows stream straight
+  into `COPY FROM STDIN`, which psycopg 2 cannot do without materialising them
+  first.
 
 [Unreleased]: https://github.com/Artui/django-data-shape/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/Artui/django-data-shape/compare/v0.0.0...v0.1.0

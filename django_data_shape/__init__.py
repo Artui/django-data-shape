@@ -9,6 +9,7 @@ from django_data_shape.distributions.skew import Skew
 from django_data_shape.distributions.uniform import Uniform
 from django_data_shape.invalid_shape import InvalidShape
 from django_data_shape.shape import Shape
+from django_data_shape.shape_not_empty import ShapeNotEmpty
 from django_data_shape.table import Table
 from django_data_shape.table_result import TableResult
 from django_data_shape.unsupported_backend import UnsupportedBackend
@@ -21,6 +22,7 @@ __all__ = [
     "InvalidShape",
     "Sequential",
     "Shape",
+    "ShapeNotEmpty",
     "Skew",
     "Table",
     "TableResult",
