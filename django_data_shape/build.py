@@ -118,10 +118,13 @@ def _load(connection: Any, table: Table, seed: int, plans: dict[str, FanOutPlan]
     many-to-many edges arrive.
     """
     quote = connection.ops.quote_name
-    pk_column = table.model._meta.pk.column
-    columns = [quote(pk_column)] + [quote(field.column) for _, field in table.columns()]
+    pk_field = table.model._meta.pk
+    columns = [quote(pk_field.column)] + [quote(field.column) for _, field in table.columns()]
     statement = f"COPY {quote(table.db_table)} ({', '.join(columns)}) FROM STDIN"
-    prepare = [field.get_db_prep_save for _, field in table.columns()]
+    # The primary key is prepared like every other value. It did not need to be
+    # while keys were always integers; a UUID key does, and a strategy the
+    # caller wrote could return anything its column accepts.
+    prepare = [pk_field.get_db_prep_save] + [field.get_db_prep_save for _, field in table.columns()]
 
     with connection.cursor() as cursor:
         # ``copy`` is not in Django's WRAP_ERROR_ATTRS, so without this a
@@ -132,13 +135,7 @@ def _load(connection: Any, table: Table, seed: int, plans: dict[str, FanOutPlan]
         with connection.wrap_database_errors, cursor.copy(statement) as copy:
             for row in generate_rows(table, seed, plans):
                 copy.write_row(
-                    (
-                        row[0],
-                        *(
-                            prep(value, connection)
-                            for prep, value in zip(prepare, row[1:], strict=True)
-                        ),
-                    )
+                    tuple(prep(value, connection) for prep, value in zip(prepare, row, strict=True))
                 )
         return int(cursor.rowcount)
 

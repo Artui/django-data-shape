@@ -58,13 +58,14 @@ print(result.rows)
 
 ## What it decides for you
 
-- **Primary keys are assigned here**, as a dense `1..N` range. That is what will
-  let a foreign key be satisfied without a lookup when relations land, and what
-  makes a self-referential tree acyclic by construction. The identity sequence is
-  moved past them afterwards, so the first `objects.create()` in your test does
-  not collide with a key that already exists. Only integer primary keys are
-  supported, and a model with any other kind is refused rather than filled with
-  numbers in a character column.
+- **Primary keys are assigned here**, by a *key strategy*: a deterministic
+  function of the row index. Integer keys count from one and the identity
+  sequence is moved past them afterwards; UUID keys are derived from the seed, so
+  two builds of one shape agree. Determinism is the requirement, not integers --
+  it is what lets a foreign key be satisfied without a lookup and what makes a
+  self-referential tree acyclic. A key type with no obvious strategy is refused
+  rather than guessed, and `keys=KeyFunction(...)` declares one. See
+  [Keys](keys.md).
 - **Every value goes through its field's `get_db_prep_save`.** Without it a naive
   datetime lands in the database verbatim rather than localised, which under a
   non-UTC `TIME_ZONE` is hours from where `save()` would have put it, and a

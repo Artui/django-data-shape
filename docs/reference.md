@@ -12,6 +12,16 @@
 
 ::: django_data_shape.table_result.TableResult
 
+## Keys
+
+::: django_data_shape.keys.key_strategy.KeyStrategy
+
+::: django_data_shape.keys.sequential_keys.SequentialKeys
+
+::: django_data_shape.keys.uuid_keys.UuidKeys
+
+::: django_data_shape.keys.key_function.KeyFunction
+
 ## Distributions
 
 ::: django_data_shape.distributions.distribution.Distribution

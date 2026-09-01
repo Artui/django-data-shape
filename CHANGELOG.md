@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-09-01
+
+### Fixed
+- **A UUID primary key no longer refuses to load.** It was refused outright,
+  which made this package unusable for a whole class of Django project. The
+  reframing is the fix: the design never needed integers, it needed a
+  deterministic injection from row index to key -- which is what lets a foreign
+  key be satisfied without a lookup, what makes a self-referential tree acyclic
+  on the index rather than the value, and what makes two builds of one shape
+  agree. Integers were only the most obvious such function.
+- The primary key is prepared by its own field, like every other value. It did
+  not need to be while keys were always integers, and a UUID works either way
+  because psycopg adapts it -- but a key type needing conversion was stored
+  verbatim, which is the bug already found once on an ordinary column.
+- Two documentation examples were syntax errors -- `...` after keyword arguments,
+  in the README and on the relations page -- and would have failed the moment a
+  reader pasted them.
+- The install line is quoted. `pip install django-data-shape[postgres]` fails in
+  zsh with `no matches found`, which is the default shell on macOS.
+- The README's usage example imports the model it uses, and documents the
+  refusals a first attempt actually meets: PostgreSQL and psycopg 3, integer
+  primary keys, empty tables, and callable model defaults.
+
+### Added
+- **Key strategies.** A table's primary keys come from a deterministic function
+  of the row index rather than from a hard-coded dense `1..N` range. Integer keys
+  count from one, `UUIDField` keys are derived from the seed, and `KeyFunction`
+  declares one for any other type.
+- `SequentialKeys`, `UuidKeys`, `KeyFunction` and the `KeyStrategy` protocol,
+  plus a `keys=` argument on `Table`.
+- A composite primary key is refused by name. It is not among a model's concrete
+  fields, because it has no column of its own, so the package used to raise a
+  bare `StopIteration` from inside itself. The message says `keys=` cannot help
+  either: a strategy maps a row index to one value, and this is arity rather than
+  type.
+- The documentation's Python examples are parsed by the test suite. A docs
+  example is the first code anybody runs, so it gets a guard rather than a
+  convention.
+
 ## [0.2.0] — 2026-09-01
 
 ### Added
@@ -108,7 +147,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   into `COPY FROM STDIN`, which psycopg 2 cannot do without materialising them
   first.
 
-[Unreleased]: https://github.com/Artui/django-data-shape/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/Artui/django-data-shape/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/Artui/django-data-shape/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/Artui/django-data-shape/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/Artui/django-data-shape/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/Artui/django-data-shape/compare/v0.0.0...v0.1.0

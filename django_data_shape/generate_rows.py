@@ -22,10 +22,12 @@ def generate_rows(
     and nothing here needs an instance, because no ``save`` will run and no
     signal should fire.
 
-    Primary keys are a dense ``1..N`` because this package assigns them, which is
-    what lets a child's foreign key be satisfied without a lookup and what makes
-    a self-referential tree acyclic by construction. It also obliges the caller
-    to reset the sequence afterwards; see ``build``.
+    Primary keys come from the table's key strategy, which is a deterministic
+    function of the row index -- ``row + 1`` for an integer key, a derived UUID
+    for a UUID one, a caller's own function for anything else. Determinism is the
+    requirement, not the integers: it is what lets a child compute its parent's
+    key without a lookup, and what makes a self-referential tree acyclic on the
+    index rather than on the value.
 
     ``plans`` carries the resolved fan-out for each relation column. Resolving
     happens outside this function because it has to read the parent's real keys
@@ -37,6 +39,8 @@ def generate_rows(
     nothing but peak RSS.
     """
     plans = plans or {}
+    keys = table.keys
+    key_stream = field_stream(seed, table.db_table, ":key")
     # Each column is reduced to one callable of the row index before the loop
     # starts. At a million rows the loop body runs a million times per column, so
     # the branch between a fan-out and a value distribution is worth deciding
@@ -53,7 +57,7 @@ def generate_rows(
         )
 
     for row in range(table.rows):
-        yield (row + 1, *(produce(row) for produce in emit))
+        yield (keys.key_for(row, key_stream), *(produce(row) for produce in emit))
 
 
 def _from_distribution(distribution: Distribution, stream: int, row: int) -> object:
