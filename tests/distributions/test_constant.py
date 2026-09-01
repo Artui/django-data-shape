@@ -13,3 +13,9 @@ def test_every_row_gets_the_same_value() -> None:
 
 def test_it_reads_back_as_what_was_declared() -> None:
     assert repr(Constant("web")) == "Constant('web')"
+
+
+def test_it_reports_a_single_distinct_value() -> None:
+    # What makes a unique column with more than one row decidably impossible
+    # at declaration time rather than partway through a load.
+    assert Constant("web").distinct_values() == 1

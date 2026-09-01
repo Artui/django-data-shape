@@ -7,6 +7,7 @@ from typing import Any, cast
 import pytest
 
 from django_data_shape import (
+    Bounded,
     Constant,
     Distribution,
     InvalidShape,
@@ -23,6 +24,7 @@ from tests.testapp.models import (
     Referred,
     Reserved,
     SlugPk,
+    Subscriber,
 )
 
 
@@ -176,3 +178,41 @@ def test_a_database_default_is_left_to_the_database() -> None:
 
     assert Table._has_db_default(cast("Any", _Field()))
     assert not Table._has_db_default(cast("Any", _Older()))
+
+
+def test_a_constant_cannot_fill_a_unique_column_twice() -> None:
+    # Arithmetic, decidable here. It used to be discovered by the database
+    # partway through a load that had already written most of a table.
+    with pytest.raises(InvalidShape, match="needs 5 distinct values"):
+        Table(Subscriber, rows=5, email=Constant("a@example.com"))
+
+
+def test_a_skew_with_too_few_values_cannot_fill_a_unique_column() -> None:
+    with pytest.raises(InvalidShape, match="can only produce 2"):
+        Table(Subscriber, rows=5, email=Skew({"a@example.com": 1, "b@example.com": 1}))
+
+
+def test_a_bounded_distribution_that_is_big_enough_is_accepted() -> None:
+    assert Table(Subscriber, rows=1, email=Constant("a@example.com")).rows == 1
+
+
+def test_an_unbounded_distribution_is_not_second_guessed() -> None:
+    # Sequential does not implement Bounded, so it is treated as unbounded
+    # rather than as suspicious. A distribution that cannot answer the question
+    # should not be refused for failing to.
+    assert not isinstance(Sequential(0, 1), Bounded)
+    assert Table(Subscriber, rows=1000, email=Sequential(0, 1)).rows == 1000
+
+
+def test_a_declaration_cannot_be_edited_past_its_own_validation() -> None:
+    # Every rule in Table runs once, in __init__. While the attributes were
+    # writable a declaration could be rewritten afterwards into one that would
+    # have been refused, and nothing re-checked it.
+    table = _order()
+
+    for attribute, value in (("rows", -1), ("model", Company), ("fields", {})):
+        with pytest.raises(AttributeError):
+            setattr(table, attribute, value)
+
+    with pytest.raises(TypeError):
+        table.fields["status"] = Constant("x")

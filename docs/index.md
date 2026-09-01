@@ -75,6 +75,9 @@ print(result.rows)
   would have written is used instead.
 - **A callable default is refused.** `uuid4` varies per row and `dict` does not,
   and nothing on the field distinguishes them. Declare a distribution instead.
+- **A declaration is read-only once built.** Every rule runs in the constructor,
+  so an editable declaration would be one that could be rewritten past its own
+  validation.
 
 ## What it expects
 
@@ -92,7 +95,10 @@ print(result.rows)
 ## What it refuses
 
 A declaration that cannot describe a database raises `InvalidShape` at
-declaration time, naming the field. A generated database that is wrong is worse
+declaration time, naming the field. That includes ones which are merely
+arithmetic: a `Constant` on a unique column with more than one row, or a `Skew`
+offering fewer values than there are rows, is refused before a row is generated
+rather than found by the database halfway through a load. A generated database that is wrong is worse
 than one that refuses to exist, because the suite it feeds asserts on rows that
 could never occur.
 

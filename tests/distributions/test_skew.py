@@ -65,3 +65,7 @@ def test_a_nan_or_infinite_weight_is_refused() -> None:
         Skew({"a": float("nan"), "b": 1})
     with pytest.raises(InvalidShape, match="positive and finite"):
         Skew({"a": float("inf"), "b": 1})
+
+
+def test_it_reports_how_many_values_it_can_produce() -> None:
+    assert Skew({"a": 1, "b": 2, "c": 3}).distinct_values() == 3

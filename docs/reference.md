@@ -14,6 +14,8 @@
 
 ::: django_data_shape.distributions.distribution.Distribution
 
+::: django_data_shape.distributions.bounded.Bounded
+
 ::: django_data_shape.distributions.skew.Skew
 
 ::: django_data_shape.distributions.uniform.Uniform

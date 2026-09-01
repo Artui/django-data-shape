@@ -112,3 +112,13 @@ class Referred(models.Model):
 
     label = models.CharField(max_length=50)
     referrer = models.ForeignKey("self", null=True, on_delete=models.SET_NULL)
+
+
+class Subscriber(models.Model):
+    """A model with a single-column unique constraint.
+
+    The arithmetic this makes checkable: a constant cannot fill a unique column
+    more than once, and neither can a skew with fewer values than rows.
+    """
+
+    email = models.CharField(max_length=100, unique=True)
