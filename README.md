@@ -25,8 +25,11 @@ usually is.
 ## Install
 
 ```bash
-pip install django-data-shape[postgres]
+pip install 'django-data-shape[postgres]'
 ```
+
+The quotes are not decoration: zsh globs the brackets and reports
+`no matches found` without them.
 
 ## Use
 
@@ -34,6 +37,8 @@ pip install django-data-shape[postgres]
 import datetime
 
 from django_data_shape import Sequential, Shape, Skew, Table, Uniform, build
+
+from myapp.models import Order
 
 shape = Shape(
     Table(
@@ -59,20 +64,44 @@ It raises on any backend that is not PostgreSQL rather than degrading quietly.
 ## Relations
 
 ```python
-Table(
-    Order,
-    rows=2_000_000,
-    # A distribution, not a number: giving every parent ten children is the one
-    # shape in which the planner is never wrong, because its n_distinct average
-    # is then the truth.
-    company=FanOut(Zipf(1.2), childless=0.35),
-    ...
+from django_data_shape import Constant, FanOut, Shape, Table, Zipf, build
+
+build(
+    Shape(
+        Table(Company, rows=50, name=Constant("acme")),
+        Table(
+            Order,
+            rows=2_000_000,
+            # A distribution, not a number: giving every parent ten children is
+            # the one shape in which the planner is never wrong, because its
+            # n_distinct average is then the truth.
+            company=FanOut(Zipf(1.2), childless=0.35),
+            status=Constant("complete"),
+        ),
+    )
 )
 ```
 
 The parents can be rows this package built or rows your own code did -- their
 real keys are read, not assumed, so the ORM can own the small tables while this
 owns the large ones.
+
+## What it expects, and what it refuses
+
+A declaration that cannot describe a database raises before a row is generated,
+naming the field. In particular:
+
+- **PostgreSQL and psycopg 3.** Rows stream into `COPY FROM STDIN`, which
+  psycopg 2 cannot do without materialising them first. Both are refused by name
+  rather than degraded around.
+- **Integer primary keys.** This package assigns keys itself, as a dense `1..N`
+  range, so a UUID or character primary key is refused rather than filled with
+  numbers. Other key types are the next release's work.
+- **Empty tables.** Keys start at 1 on every build, so `build()` checks first and
+  raises rather than colliding partway through.
+- **A callable model default** such as `default=uuid4` must be declared as a
+  distribution: `uuid4` varies per row and `dict` does not, and nothing on the
+  field distinguishes them.
 
 ## Status
 

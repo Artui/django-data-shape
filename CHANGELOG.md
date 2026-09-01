@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Two documentation examples were syntax errors -- `...` after keyword arguments,
+  in the README and on the relations page -- and would have failed the moment a
+  reader pasted them.
+- The install line is quoted. `pip install django-data-shape[postgres]` fails in
+  zsh with `no matches found`, which is the default shell on macOS.
+- The README's usage example imports the model it uses, and documents the
+  refusals a first attempt actually meets: PostgreSQL and psycopg 3, integer
+  primary keys, empty tables, and callable model defaults.
+
+### Added
+- The documentation's Python examples are parsed by the test suite. A docs
+  example is the first code anybody runs, so it gets a guard rather than a
+  convention.
+
 ## [0.2.0] — 2026-09-01
 
 ### Added

@@ -58,9 +58,9 @@ print(result.rows)
 
 ## What it decides for you
 
-- **Primary keys are assigned here**, as a dense `1..N` range. That is what will
-  let a foreign key be satisfied without a lookup when relations land, and what
-  makes a self-referential tree acyclic by construction. The identity sequence is
+- **Primary keys are assigned here**, as a dense `1..N` range. That is what lets
+  a foreign key be satisfied without a lookup, and what makes a self-referential
+  tree acyclic by construction. The identity sequence is
   moved past them afterwards, so the first `objects.create()` in your test does
   not collide with a key that already exists. Only integer primary keys are
   supported, and a model with any other kind is refused rather than filled with

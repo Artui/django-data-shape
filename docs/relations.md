@@ -51,7 +51,7 @@ nothing.
 companies = [Company.objects.create(name=f"c{i}") for i in range(50)]
 
 # Only the large table is declared.
-build(Shape(Table(Order, rows=2_000_000, company=FanOut(Zipf()), ...)))
+build(Shape(Table(Order, rows=2_000_000, company=FanOut(Zipf()), status=Constant("x"))))
 ```
 
 Reading the keys is also what makes referential integrity hold **by
