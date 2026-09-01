@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-09-01
+
 ### Fixed
 - **A UUID primary key no longer refuses to load.** It was refused outright,
   which made this package unusable for a whole class of Django project. The
@@ -140,7 +142,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   into `COPY FROM STDIN`, which psycopg 2 cannot do without materialising them
   first.
 
-[Unreleased]: https://github.com/Artui/django-data-shape/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/Artui/django-data-shape/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/Artui/django-data-shape/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/Artui/django-data-shape/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/Artui/django-data-shape/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/Artui/django-data-shape/compare/v0.0.0...v0.1.0
