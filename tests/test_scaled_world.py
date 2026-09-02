@@ -140,6 +140,11 @@ def test_it_also_undoes_a_world_it_opened_the_transaction_for() -> None:
 # and the PostgreSQL one was wrong by two when it was finally measured. They are
 # measurements, so a deliberate change to the loader may move them; what must
 # not change silently is which of the two is a constant and which is a curve.
+# Counted with CaptureQueriesContext inside a non-transactional django_db test,
+# which is what pytestmark above gives every test in this module. Both of those
+# choices move the number: through execute_wrapper the same shape is nine, and a
+# transaction=True test is one savepoint fewer. The constants are therefore a
+# regression guard on this module's own measurement, not a published figure.
 _POSTGRES_STATEMENTS = 14
 _PORTABLE_STATEMENTS = 10
 _ROWS_PER_INSERT = 1000
