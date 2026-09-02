@@ -124,6 +124,27 @@ rather than quietly costing a round trip per row. A per-row creation hook is the
 thing this package replaces, and a hook whose body may query is a hook whose body
 will.
 
+## Projections
+
+Some tables are copied rather than distributed. An `Event` is created from a
+`Template`, and its `EventSession` rows mirror that template's `TemplateSession`
+rows -- so the child count is *determined*, and correlated with the template.
+
+```python
+Shape(
+    Table(Template, rows=500, name=Constant("t")),
+    Table(TemplateSession, rows=4_000, template=FanOut(Zipf()), title=Constant("s")),
+    Table(Event, rows=200_000, template=FanOut(Zipf()), name=Constant("e")),
+    Projection(EventSession, per=Event, copying=TemplateSession),
+)
+```
+
+One `INSERT ... SELECT`, derived from the model graph, with raw SQL as the escape
+hatch. There is no `rows=`: the count comes from the join, and comes back in the
+`BuildResult`. It is what a creation service collapses into at scale -- one event
+from a template is a service call, a million is one statement -- and it
+reproduces a correlation a `FanOut` on the child would destroy.
+
 ## From pytest
 
 ```python

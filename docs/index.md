@@ -121,6 +121,15 @@ as a distribution rather than a number, plus the childless tail and where the
 children physically sit. The parents can be ones this package built or ones your
 own code did. See [Relations](relations.md).
 
+## Projections
+
+Some tables are not distributed at all, they are copied. An event created from a
+template has exactly the sessions that template has, so its child count is
+*determined* rather than drawn -- and correlated with the template, which is the
+cross-table correlation Postgres cannot see. `Projection` fills such a table with
+one `INSERT ... SELECT` derived from the model graph, which is what a creation
+service collapses into at scale. See [Projections](projections.md).
+
 ## From pytest
 
 A session-scoped fixture builds a shape once for a whole run, and a scale
@@ -132,5 +141,5 @@ planner. See [From pytest](pytest.md).
 
 ## Not in this release
 
-Derived fields, collections copied along a join, per-group invariants,
-many-to-many edges, and reusing a built database as a template.
+Per-group invariants, many-to-many edges, and reusing a built database as a
+template.

@@ -43,14 +43,29 @@ def scaled_world(shape: Shape, factor: int, *, using: str = DEFAULT_DB_ALIAS) ->
 
     **Open a query capture inside the block, never around it.** Building a world
     emits statements of its own, and a capture wrapped around ``world(factor)``
-    counts them along with the block's. On PostgreSQL that is mild and fixed --
-    measured at twelve statements for a two-table shape, because ``COPY`` does
-    not go through Django's ``execute_wrapper`` and only the emptiness check, the
-    parent key read, the sequence reset, the ``ANALYZE`` and the savepoints do.
-    Off PostgreSQL it is neither: the inserts are ordinary statements, one per
-    thousand rows, **so the captured count grows with the factor** and a growth
-    assertion measuring from outside the block would read the loader's own curve
-    as its subject's.
+    counts them along with the block's. On PostgreSQL that is mild and **fixed**:
+    fourteen statements for a two-table shape at every factor, because ``COPY``
+    does not go through Django's ``execute_wrapper`` and only the emptiness
+    check, the parent key read, the sequence reset, the ``ANALYZE`` and the
+    savepoints do.
+
+    That fourteen is counted with ``CaptureQueriesContext`` -- what
+    ``django_assert_num_queries`` reads -- inside a non-transactional ``django_db``
+    test. **Both halves of that sentence move the number**: the same shape counted
+    through ``execute_wrapper``, which is what a capture built on that hook sees,
+    is nine, because the savepoints and the emptiness check reach the query log by
+    a route the wrapper does not; and a ``transaction=True`` test drops one more
+    savepoint. So do not read the absolute figure as a constant of this package.
+    **What is invariant, and what the tests below pin, is the shape of each: fixed
+    on PostgreSQL whatever the factor, growing off it.** Off PostgreSQL it is neither: the inserts are ordinary
+    statements, one per thousand rows, **so the captured count grows with the
+    factor** -- and a growth assertion measuring from outside the block would
+    read the loader's own curve as its subject's.
+
+    Both halves of that are pinned by tests rather than left as prose, because a
+    measurement in a docstring is the first thing to rot and the consumer this
+    matters to cannot check it without taking the dependency the protocol exists
+    to avoid. The number above was already wrong once, for exactly that reason.
 
     **The teardown is a rollback, not a delete.** Building inside a transaction
     and rolling it back at the end restores exactly the state the block started

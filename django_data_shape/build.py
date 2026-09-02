@@ -16,7 +16,9 @@ from django_data_shape.build_result import BuildResult
 from django_data_shape.fan_out import FanOut
 from django_data_shape.fan_out_plan import FanOutPlan
 from django_data_shape.generate_rows import generate_rows
+from django_data_shape.invalid_shape import InvalidShape
 from django_data_shape.order_tables import order_tables
+from django_data_shape.projection import Projection
 from django_data_shape.refuse_queries import refuse_queries
 from django_data_shape.require_postgres import require_postgres
 from django_data_shape.resolve_fan_out import resolve_fan_out
@@ -62,6 +64,20 @@ def build(
     cardinality are backend-neutral, planner realism is not. A query *count* is
     an ORM property and means the same on any backend, which is why a growth
     assertion can be honest here while a plan assertion still cannot.
+
+    A :class:`~django_data_shape.projection.Projection` sits in the same loop
+    rather than in a pass of its own, and where it sits is decided by
+    :func:`~django_data_shape.order_tables.order_tables` like everything else:
+    after the tables it reads, and before anything that reads it. Only the step
+    that produces the rows differs -- one statement instead of a generated
+    stream -- and the three steps after it are the same steps for the same
+    reasons. The emptiness check, because the keys still start at 1. The
+    sequence reset, because the rows still sit at 1..N with the sequence at 1,
+    and the first ``objects.create()`` in a test would still collide. And the
+    ``ANALYZE`` above all, because a table filled by ``INSERT ... SELECT`` and
+    left unanalyzed is exactly the unanalyzed million rows this package exists
+    to condemn -- the route the rows took in has nothing to do with whether the
+    planner can see them.
     """
     connection = connections[using]
     require_postgres(connection, "Building a shape", statistics=require_statistics)
@@ -74,15 +90,56 @@ def build(
     with transaction.atomic(using=using):
         # Parents first. Not because the database insists -- Django's foreign
         # keys are deferred, so any order commits -- but because a fan-out reads
-        # its parent's real keys, and a table with no rows yet has none.
+        # its parent's real keys and a projection selects from whole tables, and
+        # a table with no rows yet has neither.
         for table in order_tables(shape.tables):
-            _require_empty(connection, table)
-            plans = _resolve(connection, table, shape.seed)
-            loaded = _load(connection, table, shape.seed, plans)
-            _reset_sequence(connection, table)
-            _analyze(connection, table)
+            _require_empty(connection, table.db_table)
+            # The only thing that differs between the two kinds of declaration
+            # is where the rows come from. Everything after this branch is a
+            # property of a table that now has rows rather than of how they got
+            # there, which is why the tail below is shared rather than repeated:
+            # a projected table needs its sequence moved and its statistics
+            # gathered for exactly the reasons a loaded one does.
+            if isinstance(table, Projection):
+                loaded = _project(connection, table, shape.seed)
+            else:
+                plans = _resolve(connection, table, shape.seed)
+                loaded = _load(connection, table, shape.seed, plans)
+            _reset_sequence(connection, table.model)
+            _analyze(connection, table.db_table)
             results.append(TableResult(table=table.db_table, rows=loaded))
     return BuildResult(tables=tuple(results))
+
+
+def _project(connection: Any, projection: Projection, seed: int) -> int:
+    """Fill a table from tables already built, with one ``INSERT ... SELECT``.
+
+    No guard around it, unlike generation: a projection runs no code the caller
+    supplied, so there is nothing here that could reach the database when it
+    should not. The statement *is* the database call.
+
+    Inserting nothing is refused rather than reported. A projection that comes
+    out empty has not built a smaller world; it has left a declared table out of
+    the database entirely, and every test reading it then passes or fails for a
+    reason unrelated to the code. This is the same class of refusal
+    :class:`~django_data_shape.derivations.given.Given` makes during a load --
+    one of the few that cannot happen at declaration time, because what it
+    depends on lives in the other tables rather than in the declaration.
+    """
+    statement, params = projection.statement(connection, seed)
+    with connection.cursor() as cursor:
+        cursor.execute(statement, params)
+        inserted = int(cursor.rowcount)
+    if inserted == 0:
+        reads = ", ".join(model.__name__ for model in projection.reads)
+        raise InvalidShape(
+            f"The projection into {projection.db_table} inserted no rows, so this shape declared "
+            "a table and then left it empty. It copies a collection along a join, and a join "
+            f"matches nothing when either side is empty or when no rows pair up. It reads: "
+            f"{reads or 'whatever the statement you supplied selects from'}. Declare those "
+            "tables in the same shape so they are built first, or load them before building."
+        )
+    return inserted
 
 
 def _resolve(connection: Any, table: Table, seed: int) -> dict[str, FanOutPlan]:
@@ -103,7 +160,7 @@ def _resolve(connection: Any, table: Table, seed: int) -> dict[str, FanOutPlan]:
     return plans
 
 
-def _require_empty(connection: Any, table: Table) -> None:
+def _require_empty(connection: Any, db_table: str) -> None:
     """Refuse to build on top of rows that are already there.
 
     The keys this package assigns start at 1 every time, so a second build over
@@ -119,11 +176,11 @@ def _require_empty(connection: Any, table: Table) -> None:
     else's data.
     """
     with connection.cursor() as cursor:
-        cursor.execute(f"SELECT EXISTS (SELECT 1 FROM {connection.ops.quote_name(table.db_table)})")
+        cursor.execute(f"SELECT EXISTS (SELECT 1 FROM {connection.ops.quote_name(db_table)})")
         row = cursor.fetchone()
     if row[0]:
         raise ShapeNotEmpty(
-            f"{table.db_table} already holds rows, and this package assigns primary keys from 1, "
+            f"{db_table} already holds rows, and this package assigns primary keys from 1, "
             "so building over them would collide. If nothing in the test wrote them, the usual "
             "cause is a world that was already there: a session-scoped shape_fixture over this "
             "model holds its rows for the whole run, and a scaled world cannot build over them. "
@@ -253,7 +310,7 @@ def _insert(
     return loaded
 
 
-def _reset_sequence(connection: Any, table: Table) -> None:
+def _reset_sequence(connection: Any, model: type[Model]) -> None:
     """Move the identity sequence past the keys this package just assigned.
 
     Skipping this is the first bug the design invites: rows exist at ids 1..N
@@ -263,17 +320,23 @@ def _reset_sequence(connection: Any, table: Table) -> None:
     ``setval`` because it already knows how the column's sequence is named.
     """
     with connection.cursor() as cursor:
-        for statement in connection.ops.sequence_reset_sql(no_style(), [table.model]):
+        for statement in connection.ops.sequence_reset_sql(no_style(), [model]):
             cursor.execute(statement)
 
 
-def _analyze(connection: Any, table: Table) -> None:
+def _analyze(connection: Any, db_table: str) -> None:
     """Populate the statistics the planner reads.
 
     Rows alone change nothing: without this the planner falls back to a default
     selectivity and commits to it, which is how a two-million-row table gets
     bitmap-scanned through an index for a value matching 98% of it. Measured at
     81 ms on that table, because ``ANALYZE`` samples rather than scans.
+
+    Runs for a projected table exactly as it does for a loaded one. That is not
+    a detail: rows arriving by ``INSERT ... SELECT`` are as invisible to the
+    planner as rows arriving by ``COPY``, and a projection is the route most
+    likely to feel like it inherited its statistics from the tables it copied.
+    It does not -- statistics describe a table, not a query.
 
     Nothing is gathered on another backend, and SQLite is the case worth being
     explicit about: it has an ``ANALYZE`` of its own and running it is one line.
@@ -285,4 +348,4 @@ def _analyze(connection: Any, table: Table) -> None:
     if connection.vendor != "postgresql":
         return
     with connection.cursor() as cursor:
-        cursor.execute(f"ANALYZE {connection.ops.quote_name(table.db_table)}")
+        cursor.execute(f"ANALYZE {connection.ops.quote_name(db_table)}")

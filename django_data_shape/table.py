@@ -7,7 +7,6 @@ from types import MappingProxyType
 from typing import Any, cast
 
 from django.db.models import Field, Model
-from django.db.models.fields import NOT_PROVIDED
 
 from django_data_shape.derivations.derivation import Derivation
 from django_data_shape.derivations.scope import Scope
@@ -19,6 +18,7 @@ from django_data_shape.infer_key_strategy import infer_key_strategy
 from django_data_shape.invalid_shape import InvalidShape
 from django_data_shape.keys.key_strategy import KeyStrategy
 from django_data_shape.order_derivations import order_derivations
+from django_data_shape.utils import has_db_default, primary_key_field
 
 
 class Table:
@@ -158,17 +158,7 @@ class Table:
                 f"Its concrete fields are: {', '.join(sorted(known))}."
             )
 
-        pk_field = next((field for field in known.values() if field.primary_key), None)
-        if pk_field is None:
-            # A composite primary key is not among the concrete fields, because
-            # it has no column of its own. Without this the package raised a
-            # bare StopIteration from inside itself, which says nothing about
-            # what the caller did.
-            raise InvalidShape(
-                f"{self.model.__name__} has a composite primary key, which this package cannot "
-                "assign. A key strategy maps a row index to one value and a composite key is "
-                "several columns, so keys= cannot help either: this is arity, not type."
-            )
+        pk_field = primary_key_field(self.model)
         if self._keys is None:
             self._keys = infer_key_strategy(pk_field)
         if self._keys is None:
@@ -382,7 +372,7 @@ class Table:
         for name, field in undeclared:
             if field.has_default():
                 self._fields[name] = Constant(field.get_default())
-            elif field.null or self._has_db_default(field):
+            elif field.null or has_db_default(field):
                 continue
             else:
                 missing.append(name)
@@ -393,17 +383,6 @@ class Table:
                 "default, so it has to be declared. A column left to chance is the column whose "
                 "selectivity the plan then depends on."
             )
-
-    @staticmethod
-    def _has_db_default(field: Field[Any, Any]) -> bool:
-        """Whether the database itself will supply a value.
-
-        ``db_default`` arrived in Django 5.0 and this package supports 4.2, so
-        the attribute cannot be assumed to exist. Unlike ``default``, this one
-        is real DDL, which is why a column carrying it can be left out of the
-        ``COPY`` entirely.
-        """
-        return getattr(field, "db_default", NOT_PROVIDED) is not NOT_PROVIDED
 
     def __repr__(self) -> str:
         return f"Table({self.model.__name__}, rows={self.rows})"

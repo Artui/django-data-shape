@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from django_data_shape.invalid_shape import InvalidShape
+from django_data_shape.projection import Projection
 from django_data_shape.shape import Shape
 from django_data_shape.table import Table
 
@@ -69,6 +70,15 @@ def scaled_shape(shape: Shape, factor: int) -> Shape:
     original size is refused at the factor that breaks it -- naming the factor,
     because a message about a row count the caller never wrote is a message that
     knows more than it says.
+
+    **A :class:`~django_data_shape.projection.Projection` passes through
+    untouched, and needs no factor of its own.** It has no declared row count to
+    multiply: its size is ``count(per JOIN copying)``, so scaling the tables it
+    reads scales it by exactly the same amount without anything being said.
+    That is the determined-not-distributed property paying for itself -- a
+    mirroring vocabulary with a row count in it would have needed a rule here,
+    and would have had to pick between scaling the count and scaling the thing
+    the count was derived from.
     """
     # A whole number, checked rather than rounded. Rounding would let each table
     # decide its own size at a fractional factor, so two tables in one shape
@@ -84,11 +94,13 @@ def scaled_shape(shape: Shape, factor: int) -> Shape:
 
     try:
         tables = tuple(
+            table
+            if isinstance(table, Projection)
             # ``fields`` rather than keyword arguments, because a model may have
             # a column named ``rows`` or ``model``; and ``table.keys`` rather
             # than None, so a strategy the caller passed explicitly survives
             # instead of being re-inferred into a different one.
-            Table(
+            else Table(
                 table.model,
                 rows=table.rows * factor,
                 fields=dict(table.fields),
