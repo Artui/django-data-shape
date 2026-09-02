@@ -61,6 +61,20 @@ dependencies = [
 postgres = [
     "psycopg[binary]>=3.2.0",
 ]
+# The pytest surface in ``django_data_shape.fixtures``, and an extra rather than
+# a dependency because the rest of the package has nothing to do with pytest: a
+# project running its suite with Django's own runner still gets the vocabulary,
+# the generator and the loader. That split is also why those fixtures are not
+# re-exported from the top-level ``__init__`` -- importing them has to be the
+# thing that requires pytest, not importing the package.
+#
+# pytest-django is listed although no module here imports it: the fixtures ask
+# for ``django_db_setup`` and ``django_db_blocker`` by name, so the dependency is
+# real even though it is a fixture-name dependency rather than an import.
+pytest = [
+    "pytest>=8.0.0",
+    "pytest-django>=4.9.0",
+]
 
 [project.urls]
 Homepage = "https://github.com/Artui/django-data-shape"

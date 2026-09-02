@@ -438,6 +438,10 @@ dependencies = [
 postgres = [
     { name = "psycopg", extra = ["binary"] },
 ]
+pytest = [
+    { name = "pytest" },
+    { name = "pytest-django" },
+]
 
 [package.dev-dependencies]
 dev = [
@@ -463,8 +467,10 @@ docs = [
 requires-dist = [
     { name = "django", specifier = ">=4.2" },
     { name = "psycopg", extras = ["binary"], marker = "extra == 'postgres'", specifier = ">=3.2.0" },
+    { name = "pytest", marker = "extra == 'pytest'", specifier = ">=8.0.0" },
+    { name = "pytest-django", marker = "extra == 'pytest'", specifier = ">=4.9.0" },
 ]
-provides-extras = ["postgres"]
+provides-extras = ["postgres", "pytest"]
 
 [package.metadata.requires-dev]
 dev = [

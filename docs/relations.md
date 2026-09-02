@@ -62,6 +62,12 @@ nothing to validate afterwards.
 
 `childless=0.35` gives 35% of parents no children at all.
 
+The share is a probability per parent, not a quota, so it converges rather than
+holding exactly. Measured against a declared 30%: 15% at twenty parents, 27% at a
+hundred, 30.2% from a thousand upward. **Asserting on the achieved share in a
+small world is asserting on the seed** -- which matters for the scale harness,
+where the small factors are deliberately tiny.
+
 It is called out separately from the size distribution because it is the case
 hand-written fixtures always omit, and the one that changes what a query returns:
 a parent nobody references is the difference between an inner join and an outer

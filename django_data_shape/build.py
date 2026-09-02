@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from itertools import islice
 from typing import Any, cast
 
 from django.core.management.color import no_style
@@ -20,8 +22,14 @@ from django_data_shape.shape_not_empty import ShapeNotEmpty
 from django_data_shape.table import Table
 from django_data_shape.table_result import TableResult
 
+# Big enough that the per-statement overhead disappears and small enough that
+# the peak list is a rounding error next to the rows themselves.
+_INSERT_CHUNK = 1000
 
-def build(shape: Shape, using: str = DEFAULT_DB_ALIAS) -> BuildResult:
+
+def build(
+    shape: Shape, using: str = DEFAULT_DB_ALIAS, *, require_statistics: bool = True
+) -> BuildResult:
     """Generate, load, reset sequences and analyze every table in ``shape``.
 
     The order of those steps is the whole function, and it is not
@@ -36,9 +44,24 @@ def build(shape: Shape, using: str = DEFAULT_DB_ALIAS) -> BuildResult:
     statistics work proper -- per-column targets, and caching a built database
     as a template -- comes later. A loader that leaves its table unanalyzed
     ships the exact state this package exists to condemn.
+
+    ``require_statistics=False`` asks for rows and cardinality rather than for a
+    database the planner can reason about, and it is the only way to build on a
+    backend without ``COPY`` and column statistics. It is written as a
+    requirement being dropped rather than as work being skipped, because that is
+    what it does: **on PostgreSQL it changes nothing at all** -- the load is
+    still ``COPY`` and ``ANALYZE`` still runs, since both are free and leaving
+    them out would manufacture the unanalyzed table this package exists to
+    condemn. Elsewhere the rows are inserted instead and no statistics are
+    gathered, so cardinality is real and nothing about a plan is claimed.
+
+    The distinction is the one this package draws everywhere: generation and
+    cardinality are backend-neutral, planner realism is not. A query *count* is
+    an ORM property and means the same on any backend, which is why a growth
+    assertion can be honest here while a plan assertion still cannot.
     """
     connection = connections[using]
-    require_postgres(connection, "Building a shape")
+    require_postgres(connection, "Building a shape", statistics=require_statistics)
 
     results: list[TableResult] = []
     # One transaction around every table. Without it a shape whose second table
@@ -82,6 +105,13 @@ def _require_empty(connection: Any, table: Table) -> None:
     the same table collides on the primary key. That surfaced as a bare
     UniqueViolation naming an index, which tells the reader nothing about what
     they did or what to do instead.
+
+    The message names the likely cause and not only the remedy, because the
+    first consumer met this from a direction the remedy does not fit: a
+    session-scoped ``shape_fixture`` and a scaled world pointed at one model.
+    The rows are then real, correct, and put there by a fixture the failing test
+    never mentions -- so "empty the table first" reads as advice about somebody
+    else's data.
     """
     with connection.cursor() as cursor:
         cursor.execute(f"SELECT EXISTS (SELECT 1 FROM {connection.ops.quote_name(table.db_table)})")
@@ -89,7 +119,10 @@ def _require_empty(connection: Any, table: Table) -> None:
     if row[0]:
         raise ShapeNotEmpty(
             f"{table.db_table} already holds rows, and this package assigns primary keys from 1, "
-            "so building over them would collide. Empty the table first."
+            "so building over them would collide. If nothing in the test wrote them, the usual "
+            "cause is a world that was already there: a session-scoped shape_fixture over this "
+            "model holds its rows for the whole run, and a scaled world cannot build over them. "
+            "Give the two different models, or empty this table first."
         )
 
 
@@ -98,12 +131,7 @@ def _require_empty(connection: Any, table: Table) -> None:
 # class, so annotating the real wrapper type would mean asserting the checker
 # out of the way on every line that uses it.
 def _load(connection: Any, table: Table, seed: int, plans: dict[str, FanOutPlan]) -> int:
-    """Stream generated rows into the table with ``COPY FROM STDIN``.
-
-    ``bulk_create`` is the obvious alternative and is roughly an order of
-    magnitude too slow at the row counts that make a plan meaningful. ``COPY``
-    is also why the generator yields tuples rather than model instances: there
-    is no instance to build, and no ``save`` to run.
+    """Stream generated rows into the table, by the fastest route the backend has.
 
     Each declared value is passed through its field's ``get_db_prep_save``
     first, and that is not a formality. Skipping it is how a naive datetime got
@@ -111,7 +139,9 @@ def _load(connection: Any, table: Table, seed: int, plans: dict[str, FanOutPlan]
     non-UTC ``TIME_ZONE`` -- silently, on the exact column ``Sequential`` exists
     to make realistic -- and how a ``JSONField`` failed to load at all. The
     generator stays backend-neutral because the preparation happens here rather
-    than inside it.
+    than inside it, and that is also why the preparation sits **above** the
+    branch below: a value is prepared by its field for its connection, which is
+    the same work whichever statement carries it.
 
     Returns the number of rows the database actually took, not the number
     declared. They are the same today and stop being so once deduplicated
@@ -120,12 +150,31 @@ def _load(connection: Any, table: Table, seed: int, plans: dict[str, FanOutPlan]
     quote = connection.ops.quote_name
     pk_field = table.model._meta.pk
     columns = [quote(pk_field.column)] + [quote(field.column) for _, field in table.columns()]
-    statement = f"COPY {quote(table.db_table)} ({', '.join(columns)}) FROM STDIN"
     # The primary key is prepared like every other value. It did not need to be
     # while keys were always integers; a UUID key does, and a strategy the
     # caller wrote could return anything its column accepts.
     prepare = [pk_field.get_db_prep_save] + [field.get_db_prep_save for _, field in table.columns()]
+    rows = (
+        tuple(prep(value, connection) for prep, value in zip(prepare, row, strict=True))
+        for row in generate_rows(table, seed, plans)
+    )
 
+    if connection.vendor == "postgresql":
+        return _copy(connection, table.db_table, columns, rows)
+    return _insert(connection, table.db_table, columns, rows)
+
+
+def _copy(
+    connection: Any, db_table: str, columns: list[str], rows: Iterator[tuple[Any, ...]]
+) -> int:
+    """``COPY FROM STDIN``, which is the reason this package can be worth using.
+
+    ``bulk_create`` is the obvious alternative and is roughly an order of
+    magnitude too slow at the row counts that make a plan meaningful. ``COPY``
+    is also why the generator yields tuples rather than model instances: there
+    is no instance to build, and no ``save`` to run.
+    """
+    statement = f"COPY {connection.ops.quote_name(db_table)} ({', '.join(columns)}) FROM STDIN"
     with connection.cursor() as cursor:
         # ``copy`` is not in Django's WRAP_ERROR_ATTRS, so without this a
         # Postgres error escapes as a raw psycopg exception: the caller cannot
@@ -133,11 +182,39 @@ def _load(connection: Any, table: Table, seed: int, plans: dict[str, FanOutPlan]
         # block never learns it needs a rollback, so the next query inside it
         # fails with "current transaction is aborted" instead of a Django error.
         with connection.wrap_database_errors, cursor.copy(statement) as copy:
-            for row in generate_rows(table, seed, plans):
-                copy.write_row(
-                    tuple(prep(value, connection) for prep, value in zip(prepare, row, strict=True))
-                )
+            for row in rows:
+                copy.write_row(row)
         return int(cursor.rowcount)
+
+
+def _insert(
+    connection: Any, db_table: str, columns: list[str], rows: Iterator[tuple[Any, ...]]
+) -> int:
+    """The portable route, for a backend that has no ``COPY``.
+
+    Reached only when the caller said it does not require planner statistics,
+    which is the honest shape of the trade: this writes real rows in real
+    cardinality and buys nothing at all for a plan. It is slower than ``COPY``
+    and that is the wrong thing to worry about at the sizes it is for --
+    measured on SQLite, the insert costs about 1.6 ms per thousand rows against
+    8 ms to generate them, so the load is not what a growth assertion pays for.
+
+    Chunked rather than handed the whole iterator, because ``executemany``
+    materialises what it is given: streaming into ``COPY`` is the property this
+    package is built on, and a portable path that quietly held a million tuples
+    in memory would be a different bargain from the one above.
+    """
+    placeholders = ", ".join(["%s"] * len(columns))
+    statement = (
+        f"INSERT INTO {connection.ops.quote_name(db_table)} "
+        f"({', '.join(columns)}) VALUES ({placeholders})"
+    )
+    loaded = 0
+    with connection.cursor() as cursor:
+        while chunk := list(islice(rows, _INSERT_CHUNK)):
+            cursor.executemany(statement, chunk)
+            loaded += len(chunk)
+    return loaded
 
 
 def _reset_sequence(connection: Any, table: Table) -> None:
@@ -161,6 +238,15 @@ def _analyze(connection: Any, table: Table) -> None:
     selectivity and commits to it, which is how a two-million-row table gets
     bitmap-scanned through an index for a value matching 98% of it. Measured at
     81 ms on that table, because ``ANALYZE`` samples rather than scans.
+
+    Nothing is gathered on another backend, and SQLite is the case worth being
+    explicit about: it has an ``ANALYZE`` of its own and running it is one line.
+    It is deliberately not run. Plan realism on SQLite is out of this package's
+    scope -- support the generation, refuse the pretence -- and a table with
+    ``sqlite_stat1`` behind it would be this package claiming, in the only way a
+    library can, that the plan over it means something.
     """
+    if connection.vendor != "postgresql":
+        return
     with connection.cursor() as cursor:
         cursor.execute(f"ANALYZE {connection.ops.quote_name(table.db_table)}")

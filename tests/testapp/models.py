@@ -180,3 +180,16 @@ class Reading(models.Model):
 
     at = models.DateTimeField(primary_key=True)
     value = models.IntegerField()
+
+
+class Catalogue(models.Model):
+    """A table nothing else in the suite builds.
+
+    The one model reserved for the session-scoped fixture, because a world built
+    once for the session outlives every test in it: any other test that built
+    this table would meet rows it did not put there, and the refusal it got
+    would be right and useless. Reserving a model is cheaper than ordering the
+    suite around one fixture.
+    """
+
+    name = models.CharField(max_length=50)

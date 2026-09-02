@@ -59,7 +59,10 @@ build(shape)
 
 `build()` generates the rows, loads them with `COPY`, moves the identity sequence
 past the keys it assigned, and runs `ANALYZE` so the planner can see the shape.
-It raises on any backend that is not PostgreSQL rather than degrading quietly.
+It raises on any backend that is not PostgreSQL rather than degrading quietly --
+unless you say `require_statistics=False`, which asks for rows and cardinality
+instead of a database the planner can reason about, and is what the growth
+harness below is built on.
 
 ## Relations
 
@@ -86,6 +89,37 @@ The parents can be rows this package built or rows your own code did -- their
 real keys are read, not assumed, so the ORM can own the small tables while this
 owns the large ones.
 
+## From pytest
+
+```python
+# conftest.py
+from django_data_shape import Constant, Shape, Table
+from django_data_shape.fixtures import scale_fixture, shape_fixture
+
+orders = shape_fixture(Shape(Table(Order, rows=100_000, status=Constant("complete"))))
+world = scale_fixture(Shape(Table(Order, rows=100, status=Constant("complete"))))
+```
+
+`orders` is one world built once for the whole session, composed with
+pytest-django rather than replacing it. `world` is the **scale protocol**: make
+the world be at factor F, then let the caller run its block, which is what a
+query count asserted to be `O(1)` rather than `O(N)` needs.
+
+```python
+def test_the_dashboard_does_not_grow(world, django_assert_num_queries):
+    for factor in (1, 10):
+        with world(factor):
+            with django_assert_num_queries(3):
+                dashboard()
+```
+
+A factor varies the declaration rather than subsetting one larger build, and
+`pip install 'django-data-shape[pytest]'` is what these two need. **The growth
+harness works on any backend Django supports**, because a query count is an ORM
+property and means the same everywhere; the session world **skips with a stated
+reason** where a shaped database cannot exist, because a plan over it is the
+thing it exists to make honest.
+
 ## What it expects, and what it refuses
 
 A declaration that cannot describe a database raises before a row is generated,
@@ -93,7 +127,10 @@ naming the field. In particular:
 
 - **PostgreSQL and psycopg 3.** Rows stream into `COPY FROM STDIN`, which
   psycopg 2 cannot do without materialising them first. Both are refused by name
-  rather than degraded around.
+  rather than degraded around. PostgreSQL is required for the statistics half
+  only: `build(shape, require_statistics=False)` loads rows on any backend and
+  claims nothing about a plan. psycopg 2 is refused either way, because the
+  vendor picks the route and not the caller.
 - **A key type it can assign.** Integer keys count from one and UUID keys are
   derived from the seed; anything else is refused rather than guessed, and
   `keys=KeyFunction(...)` declares one.
@@ -105,8 +142,9 @@ naming the field. In particular:
 
 ## Status
 
-Early. Single tables and the model graph. Derived fields, collections copied
-along a join, per-group invariants and template-database reuse come next.
+Early. Single tables, the model graph and the pytest surface. Derived fields,
+collections copied along a join, per-group invariants and template-database reuse
+come next.
 
 Full documentation: <https://artui.github.io/django-data-shape/>
 

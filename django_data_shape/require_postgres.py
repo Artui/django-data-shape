@@ -7,7 +7,7 @@ from typing import Any
 from django_data_shape.unsupported_backend import UnsupportedBackend
 
 
-def require_postgres(connection: Any, operation: str) -> None:
+def require_postgres(connection: Any, operation: str, *, statistics: bool = True) -> None:
     """Refuse anything but PostgreSQL, naming what was refused and why.
 
     Takes the connection and reads ``vendor`` off it rather than importing a
@@ -16,6 +16,13 @@ def require_postgres(connection: Any, operation: str) -> None:
     reachable only by running the whole suite on the backend it refuses is a
     path the coverage gate cannot see, and this package gates coverage on
     Postgres precisely because that is where its real work happens.
+
+    ``statistics=False`` says the caller is asking for rows and cardinality
+    rather than for a database the planner can reason about, so any vendor is
+    allowed. **The driver check is not part of that bargain and still runs**: a
+    psycopg 2 connection to PostgreSQL takes the ``COPY`` path whatever the
+    caller asked for, and fails inside this package with a message about a
+    missing attribute rather than about a missing driver.
     """
     # The driver is read off the connection, exactly like ``vendor`` above, and
     # for the same reason: a refusal that could only be covered by installing
@@ -37,7 +44,7 @@ def require_postgres(connection: Any, operation: str) -> None:
             "materialising them first -- the cost this package exists to avoid. Install the "
             "'postgres' extra: pip install django-data-shape[postgres]."
         )
-    if connection.vendor != "postgresql":
+    if statistics and connection.vendor != "postgresql":
         raise UnsupportedBackend(
             f"{operation} needs PostgreSQL; connection '{connection.alias}' is "
             f"{connection.vendor}. Generation and cardinality are backend-neutral, but "
