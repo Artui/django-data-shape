@@ -7,7 +7,14 @@ from typing import Any, cast
 import pytest
 
 from django_data_shape import InvalidShape
-from django_data_shape.utils import draw, field_stream, has_db_default, primary_key_field
+from django_data_shape.utils import (
+    MAX_STATISTICS_TARGET,
+    check_statistics_target,
+    draw,
+    field_stream,
+    has_db_default,
+    primary_key_field,
+)
 from tests.testapp.models import Company
 
 
@@ -89,3 +96,41 @@ def test_a_model_with_no_concrete_primary_key_is_refused_as_arity() -> None:
 
     with pytest.raises(InvalidShape, match="arity, not type"):
         primary_key_field(cast("Any", _Keyless()))
+
+
+@pytest.mark.parametrize("target", [1, 100, MAX_STATISTICS_TARGET])
+def test_a_statistics_target_inside_postgres_own_range_is_accepted(target: int) -> None:
+    check_statistics_target("Order.status", target)
+
+
+def test_a_target_of_zero_is_refused_with_what_it_would_have_meant() -> None:
+    # PostgreSQL accepts it, and it means "collect no statistics for this
+    # column" -- which is the state this package exists to condemn rather than a
+    # way of saying the column does not matter. So it is told, not obeyed.
+    with pytest.raises(InvalidShape, match="collect no statistics") as raised:
+        check_statistics_target("Order.status", 0)
+
+    assert "Order.status" in str(raised.value)
+
+
+def test_a_negative_target_is_refused_for_the_same_reason() -> None:
+    # -1 is PostgreSQL's own spelling of "use the default", and it is refused
+    # rather than passed through: a declaration that wants the default says so
+    # by leaving the column out, and one that names a number should get that
+    # number.
+    with pytest.raises(InvalidShape, match="below one"):
+        check_statistics_target("Order.status", -1)
+
+
+def test_a_target_above_the_ceiling_is_refused_before_the_load_rather_than_after() -> None:
+    with pytest.raises(InvalidShape, match="ceiling is 10000"):
+        check_statistics_target("Order.status", MAX_STATISTICS_TARGET + 1)
+
+
+@pytest.mark.parametrize("target", [1.5, "200", True])
+def test_a_target_that_is_not_a_whole_number_is_refused(target: object) -> None:
+    # True included, and deliberately: it is an int as far as Python is
+    # concerned, so a bare isinstance check would accept it and ask PostgreSQL
+    # for a statistics target of one.
+    with pytest.raises(InvalidShape, match="not a whole number"):
+        check_statistics_target("Order.status", cast("int", target))

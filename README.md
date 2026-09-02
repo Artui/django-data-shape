@@ -145,6 +145,46 @@ hatch. There is no `rows=`: the count comes from the join, and comes back in the
 from a template is a service call, a million is one statement -- and it
 reproduces a correlation a `FanOut` on the child would destroy.
 
+## Statistics, and building once
+
+`ANALYZE` runs at the end of every build, because rows the planner cannot see are
+worse than no rows. How much of a column it records is decided by that column's
+**statistics target**, so a declaration wider than the target is one PostgreSQL
+would build and then not see -- and this refuses rather than producing it:
+
+```python
+Shape(
+    Table(
+        Event,
+        rows=2_000_000,
+        kind=Skew(weights),  # 150 event types
+        statistics={"kind": 300},  # the planner keeps 100 unless asked
+    )
+)
+```
+
+The target is declared, never inferred: it is a property of the column rather
+than of the distribution, and a package choosing one for you would be deciding
+how the planner sees your data on evidence your declaration does not contain.
+What the distributions are read for is the refusal.
+
+Building that database costs about seventeen seconds. Copying it costs about two
+hundred milliseconds, statistics included:
+
+```python
+from django_data_shape import clone_database, template_database
+
+template = template_database(shape)  # builds the first time, finds it after
+clone_database(template, "test_myapp", replace=True)
+```
+
+The template is named after a content hash of the declaration, the schema, the
+relevant settings and this package's version, so a stale one is never asked for.
+A shape holding a `Derived` or a `KeyFunction` is refused rather than hashed --
+there is no honest digest of a callable, and every way of guessing one agrees
+while the data has changed. See
+[Statistics and reuse](https://artui.github.io/django-data-shape/statistics/).
+
 ## From pytest
 
 ```python
@@ -201,9 +241,9 @@ naming the field. In particular:
 
 ## Status
 
-Early. Single tables, the model graph, the pytest surface and the derivation
-mechanism. Collections copied along a join, per-group invariants and
-template-database reuse come next.
+Early. Single tables, the model graph, the pytest surface, the derivation
+mechanism, projections, statistics targets and template-database reuse.
+Per-group invariants and many-to-many edges come next.
 
 Full documentation: <https://artui.github.io/django-data-shape/>
 

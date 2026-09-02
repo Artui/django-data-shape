@@ -59,6 +59,14 @@ class Uniform:
             # 2.68 a reader expects from the literal they wrote.
             return round(Decimal(repr(raw)), self._places)
 
+    def canonical(self) -> object:
+        """The bounds and the rounding. See ``Canonical``.
+
+        The precision computed in ``__init__`` is left out, because it is a
+        function of these three and adding it could only ever agree with them.
+        """
+        return (self._low, self._high, self._places)
+
     def __repr__(self) -> str:
         places = "" if self._places is None else f", places={self._places}"
         return f"Uniform({self._low!r}, {self._high!r}{places})"

@@ -87,5 +87,9 @@ class Aligned:
             rank = min(1.0 - rank, _BELOW_ONE)
         return self._distribution.value(row, rank)
 
+    def canonical(self) -> object:
+        """The rank, the distribution read at it, and the direction. See ``Canonical``."""
+        return (self._sources, self._distribution, self._reverse)
+
     def __repr__(self) -> str:
         return f"Aligned({self._sources[0]!r}, {self._distribution!r}, reverse={self._reverse!r})"

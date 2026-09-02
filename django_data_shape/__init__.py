@@ -2,6 +2,8 @@
 
 from django_data_shape.build import build
 from django_data_shape.build_result import BuildResult
+from django_data_shape.canonical import Canonical
+from django_data_shape.clone_database import clone_database
 from django_data_shape.derivation_queried_database import DerivationQueriedDatabase
 from django_data_shape.derivations.after import After
 from django_data_shape.derivations.aligned import Aligned
@@ -16,6 +18,7 @@ from django_data_shape.distributions.sequential import Sequential
 from django_data_shape.distributions.skew import Skew
 from django_data_shape.distributions.uniform import Uniform
 from django_data_shape.distributions.zipf import Zipf
+from django_data_shape.drop_database import drop_database
 from django_data_shape.fan_out import FanOut
 from django_data_shape.invalid_shape import InvalidShape
 from django_data_shape.keys.key_function import KeyFunction
@@ -28,9 +31,12 @@ from django_data_shape.scale_protocol import ScaleProtocol
 from django_data_shape.scaled_shape import scaled_shape
 from django_data_shape.scaled_world import scaled_world
 from django_data_shape.shape import Shape
+from django_data_shape.shape_digest import shape_digest
 from django_data_shape.shape_not_empty import ShapeNotEmpty
 from django_data_shape.table import Table
 from django_data_shape.table_result import TableResult
+from django_data_shape.template_database import template_database
+from django_data_shape.unhashable_shape import UnhashableShape
 from django_data_shape.unsupported_backend import UnsupportedBackend
 from django_data_shape.version import __version__
 
@@ -39,6 +45,7 @@ __all__ = [
     "Aligned",
     "Bounded",
     "BuildResult",
+    "Canonical",
     "Constant",
     "Derivation",
     "DerivationQueriedDatabase",
@@ -63,9 +70,14 @@ __all__ = [
     "TableResult",
     "Uniform",
     "Zipf",
+    "UnhashableShape",
     "UnsupportedBackend",
     "__version__",
     "build",
+    "clone_database",
+    "drop_database",
     "scaled_shape",
     "scaled_world",
+    "shape_digest",
+    "template_database",
 ]

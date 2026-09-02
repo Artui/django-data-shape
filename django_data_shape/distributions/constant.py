@@ -26,5 +26,9 @@ class Constant:
         """One, by definition. See ``Bounded``."""
         return 1
 
+    def canonical(self) -> object:
+        """The one value, which is the whole declaration. See ``Canonical``."""
+        return (self._value,)
+
     def __repr__(self) -> str:
         return f"Constant({self._value!r})"

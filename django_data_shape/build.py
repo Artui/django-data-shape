@@ -12,6 +12,7 @@ from django.core.management.color import no_style
 from django.db import DEFAULT_DB_ALIAS, connections, transaction
 from django.db.models import Model
 
+from django_data_shape.apply_statistics_targets import apply_statistics_targets
 from django_data_shape.build_result import BuildResult
 from django_data_shape.fan_out import FanOut
 from django_data_shape.fan_out_plan import FanOutPlan
@@ -45,10 +46,13 @@ def build(
     measurements this package was designed from. So the ``ANALYZE`` is here, at
     the end, owned by the library rather than left to the caller to remember.
 
-    That is also why a bare ``ANALYZE`` is in this release at all, when the
-    statistics work proper -- per-column targets, and caching a built database
-    as a template -- comes later. A loader that leaves its table unanalyzed
-    ships the exact state this package exists to condemn.
+    A bare ``ANALYZE`` shipped in 0.1.0 because a loader that leaves its table
+    unanalyzed ships the exact state this package exists to condemn. What it
+    gathers is bounded by each column's statistics target, and that is the other
+    half:
+    :func:`~django_data_shape.apply_statistics_targets.apply_statistics_targets`
+    puts the declared targets in place first, and refuses a declaration the
+    planner could not record whatever it did afterwards.
 
     ``require_statistics=False`` asks for rows and cardinality rather than for a
     database the planner can reason about, and it is the only way to build on a
@@ -94,6 +98,12 @@ def build(
         # a table with no rows yet has neither.
         for table in order_tables(shape.tables):
             _require_empty(connection, table.db_table)
+            # Before the rows rather than beside the ANALYZE, for two reasons
+            # that point the same way. A target changed after ANALYZE has run
+            # does nothing until the next one, so it has to be in place before
+            # the statistics are gathered; and the refusal it can raise is one
+            # nobody wants to pay a two-million-row load to hear.
+            apply_statistics_targets(connection, table)
             # The only thing that differs between the two kinds of declaration
             # is where the rows come from. Everything after this branch is a
             # property of a table that now has rows rather than of how they got

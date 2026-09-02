@@ -12,10 +12,11 @@ class Shape:
 
     A declaration and nothing else: it holds no connection, opens nothing, and
     has no ``build`` method. Building lives in a separate function on purpose,
-    because a shape has to stay inert data for two things that come later --
-    hashing it into a template-database cache key, and emitting one from a real
-    database's statistics. An object that could act would be an object with
-    state worth not hashing.
+    because a shape has to stay inert data for two things -- hashing it into a
+    template-database cache key, which
+    :func:`~django_data_shape.shape_digest.shape_digest` now does, and emitting
+    one from a real database's statistics, which is still to come. An object
+    that could act would be an object with state worth not hashing.
 
     The seed is part of the declaration rather than an argument to the build,
     for the same reason: two builds of the same shape must produce byte-identical
@@ -56,6 +57,24 @@ class Shape:
     @property
     def seed(self) -> int:
         return self._seed
+
+    def canonical(self) -> object:
+        """The seed and every declaration, keyed by table. See ``Canonical``.
+
+        A mapping rather than a sequence, and it loses nothing: the duplicate
+        check above means one table name appears once, and a dict keeps the
+        order it was built in. What it buys is that
+        :func:`~django_data_shape.shape_digest.shape_digest` can name the table a
+        refusal came from, which is the difference between "this shape cannot be
+        hashed" and "the compute= on orders.total cannot be hashed".
+
+        The order is **kept, not sorted**, unlike a table's fields. A raw
+        ``Projection`` names nothing it reads, so it is ordered after everything
+        and several of them fall back to the order they were declared in --
+        which means declaration order can reach the data, and a digest that
+        sorted it would give two different databases one key.
+        """
+        return (self.seed, {table.db_table: table for table in self.tables})
 
     def __repr__(self) -> str:
         names = ", ".join(table.model.__name__ for table in self.tables)

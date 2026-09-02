@@ -18,7 +18,7 @@ from django_data_shape.infer_key_strategy import infer_key_strategy
 from django_data_shape.invalid_shape import InvalidShape
 from django_data_shape.keys.key_strategy import KeyStrategy
 from django_data_shape.order_derivations import order_derivations
-from django_data_shape.utils import has_db_default, primary_key_field
+from django_data_shape.utils import check_statistics_target, has_db_default, primary_key_field
 
 
 class Table:
@@ -30,6 +30,23 @@ class Table:
     or ``model``, and Python's own argument binding would silently hand that
     keyword to this signature instead. Without the mapping form those models
     would simply be undeclarable.
+
+    ``statistics=`` maps a field name to the number of buckets the planner
+    should keep for that column::
+
+        Table(Order, rows=2_000_000, status=Skew(weights), statistics={"status": 500})
+
+    A target is a physical property of the column rather than of the
+    distribution, which is why it is declared beside the distributions and not
+    inside one: the same skew wants a different target in a table of two
+    thousand rows and a table of two million, and a caller's own distribution
+    would have to grow a parameter it has no use for. PostgreSQL keeps at most
+    ``target`` most-common values and ``target`` histogram bounds, and samples
+    300 times that many rows, so this is the dial that decides how much of a
+    declared shape the planner can actually record. A column left out keeps
+    whatever the schema gives it. See
+    :func:`~django_data_shape.apply_statistics_targets.apply_statistics_targets`
+    for what the build does with it, including the one thing it refuses.
 
     Every refusal below happens here, at declaration time, rather than during
     the load. A shape that cannot describe a database should say so before it
@@ -44,6 +61,7 @@ class Table:
         rows: int,
         fields: Mapping[str, Distribution | FanOut | Derivation] | None = None,
         keys: KeyStrategy | None = None,
+        statistics: Mapping[str, int] | None = None,
         **field_distributions: Distribution | FanOut | Derivation,
     ) -> None:
         if rows < 0:
@@ -62,6 +80,7 @@ class Table:
         self._rows = rows
         self._fields = declared
         self._keys = keys
+        self._statistics = dict(statistics or {})
         self._computation_order: tuple[str, ...] = ()
         self._validate()
 
@@ -91,6 +110,16 @@ class Table:
     def fields(self) -> Mapping[str, Distribution | FanOut | Derivation]:
         """The declared distributions, including defaults filled in from the model."""
         return MappingProxyType(self._fields)
+
+    @property
+    def statistics(self) -> Mapping[str, int]:
+        """The per-column statistics targets this table asks the planner for.
+
+        Empty unless the declaration said otherwise, which means the columns
+        keep whatever target the schema gives them -- ``default_statistics_target``
+        for a column no migration has touched.
+        """
+        return MappingProxyType(self._statistics)
 
     @property
     def db_table(self) -> str:
@@ -219,12 +248,45 @@ class Table:
             )
 
         self._resolve_defaults(known)
+        # After the defaults for the reason the derivation check is: a target on
+        # a column the model defaults rather than the caller declared is a
+        # target on a column this shape does fill, and before this point that
+        # column is not in ``fields`` to be recognised.
+        self._check_statistics(known)
         self._check_satisfiable(known)
         # After the defaults, not before: a derivation may legitimately read a
         # column the model defaulted rather than the caller declared, and before
         # this point that column is not in ``fields`` to be found.
         self._check_derivations(known)
         self._computation_order = order_derivations(self.model.__name__, self._fields)
+
+    def _check_statistics(self, known: dict[str, Field[Any, Any]]) -> None:
+        """Refuse a statistics target on a column this shape does not fill.
+
+        A target is a promise about what the planner will record for a column,
+        and it can only be kept for a column that has values in it. The two ways
+        to ask for one that cannot be kept are naming a field the model does not
+        have, and naming one this shape leaves alone -- a nullable column nobody
+        declared holds nothing but NULLs, so a bigger sample of it describes
+        nothing more precisely.
+
+        The primary key counts as filled, because this package assigns it.
+        """
+        for name in sorted(self._statistics):
+            where = f"{self.model.__name__}.{name}"
+            if name not in known:
+                raise InvalidShape(
+                    f"{self.model.__name__} has no field named {name}, so it cannot be given a "
+                    f"statistics target. Its concrete fields are: {', '.join(sorted(known))}."
+                )
+            if name not in self.fields and not known[name].primary_key:
+                raise InvalidShape(
+                    f"{where} has a statistics target, but this shape does not fill that column: "
+                    "it is nullable or database-defaulted and was left undeclared, so every row "
+                    "would hold the same nothing. Declare a distribution for it, or drop it from "
+                    "statistics=."
+                )
+            check_statistics_target(where, self._statistics[name])
 
     def _check_derivations(self, known: dict[str, Field[Any, Any]]) -> None:
         """Refuse a derivation whose sources are not there to be read.
@@ -383,6 +445,28 @@ class Table:
                 "default, so it has to be declared. A column left to chance is the column whose "
                 "selectivity the plan then depends on."
             )
+
+    def canonical(self) -> object:
+        """Everything about this table that decides a row. See ``Canonical``.
+
+        The model's label as well as its table name, because a project can
+        rename either without touching the other and a digest that read only one
+        would call two schemas the same.
+
+        The fields are **sorted**, unlike a skew's weights: they become a
+        ``COPY`` column list that ``columns()`` sorts anyway, so declaration
+        order provably does not reach a single row, and sorting means two
+        spellings of one declaration share a cached database instead of building
+        it twice.
+        """
+        return (
+            str(self.model._meta.label),
+            self.db_table,
+            self.rows,
+            {name: self._fields[name] for name in sorted(self._fields)},
+            self.keys,
+            {name: self._statistics[name] for name in sorted(self._statistics)},
+        )
 
     def __repr__(self) -> str:
         return f"Table({self.model.__name__}, rows={self.rows})"

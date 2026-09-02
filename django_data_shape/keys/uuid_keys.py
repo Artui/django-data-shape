@@ -33,5 +33,9 @@ class UuidKeys:
         raw[8] = (raw[8] & 0x3F) | 0x80
         return uuid.UUID(bytes=bytes(raw))
 
+    def canonical(self) -> object:
+        """Nothing to say: the digest is a function of the seed and the row. See ``Canonical``."""
+        return ()
+
     def __repr__(self) -> str:
         return "UuidKeys()"

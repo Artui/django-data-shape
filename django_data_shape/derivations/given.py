@@ -82,5 +82,14 @@ class Given:
             )
         return chosen.value(row, draw)
 
+    def canonical(self) -> object:
+        """The source, every case **in declaration order**, and the default.
+
+        See ``Canonical``. The cases are ordered for the same reason a ``Skew``'s
+        weights are: each one is a distribution whose own order decides values,
+        and a mapping this package reordered would be a mapping it had changed.
+        """
+        return (self._sources, self._cases, self._default)
+
     def __repr__(self) -> str:
         return f"Given({self._sources[0]!r}, {self._cases!r}, default={self._default!r})"

@@ -33,5 +33,9 @@ class Zipf:
         # zero, which keeps the power finite for every possible draw.
         return (1.0 - draw) ** (-1.0 / self._s)
 
+    def canonical(self) -> object:
+        """The exponent. See ``Canonical``."""
+        return (self._s,)
+
     def __repr__(self) -> str:
         return f"Zipf({self._s!r})"

@@ -71,5 +71,16 @@ class Skew:
         """How many values were declared. See ``Bounded``."""
         return len(self._values)
 
+    def canonical(self) -> object:
+        """The weights, **in declaration order**. See ``Canonical``.
+
+        The order is part of the declaration rather than a detail of how it was
+        written: the cumulative bounds above are laid out in it, so the same
+        weights given in a different order hand a different value to the same
+        draw. Sorting here would tell the template cache that two databases
+        which differ row for row are the same one.
+        """
+        return (self._weights,)
+
     def __repr__(self) -> str:
         return f"Skew({self._weights!r})"

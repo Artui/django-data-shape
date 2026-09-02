@@ -35,5 +35,14 @@ class SequentialKeys:
         """
         return f"({row}) + 1"
 
+    def canonical(self) -> object:
+        """Nothing to say: the rule is ``row + 1`` and has no parameters. See ``Canonical``.
+
+        The empty tuple is not the same as being absent -- the strategy's own
+        type name is part of the digest, so this differs from ``UuidKeys()``
+        below, which also has nothing to say.
+        """
+        return ()
+
     def __repr__(self) -> str:
         return "SequentialKeys()"

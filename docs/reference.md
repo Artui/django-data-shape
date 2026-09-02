@@ -14,6 +14,22 @@
 
 ::: django_data_shape.table_result.TableResult
 
+## Statistics and reuse
+
+::: django_data_shape.apply_statistics_targets.apply_statistics_targets
+
+::: django_data_shape.shape_digest.shape_digest
+
+::: django_data_shape.canonical.Canonical
+
+::: django_data_shape.template_database.template_database
+
+::: django_data_shape.clone_database.clone_database
+
+::: django_data_shape.drop_database.drop_database
+
+::: django_data_shape.require_clone_strategy.require_clone_strategy
+
 ## The pytest surface
 
 ::: django_data_shape.fixtures.shape_fixture.shape_fixture
@@ -77,3 +93,5 @@
 ::: django_data_shape.unsupported_backend.UnsupportedBackend
 
 ::: django_data_shape.derivation_queried_database.DerivationQueriedDatabase
+
+::: django_data_shape.unhashable_shape.UnhashableShape
