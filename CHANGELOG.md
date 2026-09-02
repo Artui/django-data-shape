@@ -45,6 +45,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   check against and nothing is claimed.
 
 ### Notes
+- **The `ty` floor was raised to `0.0.32`, because the declared one was false.**
+  `ty==0.0.1a10` cannot parse the `[tool.ty.environment]` table this repository
+  has shipped since its first commit -- it fails with a TOML parse error. The
+  `lowest declared versions` job passed only because the resolver it runs under
+  rounds the pre-release up. A floor nothing can actually resolve to is not a
+  floor.
 - **Fan-out sizes are not rank-ordered on the parent key**, in either direction,
   and this is now written down where a reader meets it -- on `FanOut` itself and
   beside the inversion. It is deliberate rather than an oversight: ordering the
