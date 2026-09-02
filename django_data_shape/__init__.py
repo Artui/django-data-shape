@@ -15,6 +15,9 @@ from django_data_shape.keys.key_function import KeyFunction
 from django_data_shape.keys.key_strategy import KeyStrategy
 from django_data_shape.keys.sequential_keys import SequentialKeys
 from django_data_shape.keys.uuid_keys import UuidKeys
+from django_data_shape.scale_protocol import ScaleProtocol
+from django_data_shape.scaled_shape import scaled_shape
+from django_data_shape.scaled_world import scaled_world
 from django_data_shape.shape import Shape
 from django_data_shape.shape_not_empty import ShapeNotEmpty
 from django_data_shape.table import Table
@@ -31,6 +34,7 @@ __all__ = [
     "InvalidShape",
     "KeyFunction",
     "KeyStrategy",
+    "ScaleProtocol",
     "SequentialKeys",
     "UuidKeys",
     "Sequential",
@@ -44,4 +48,6 @@ __all__ = [
     "UnsupportedBackend",
     "__version__",
     "build",
+    "scaled_shape",
+    "scaled_world",
 ]

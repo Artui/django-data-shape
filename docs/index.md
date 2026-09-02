@@ -114,6 +114,14 @@ as a distribution rather than a number, plus the childless tail and where the
 children physically sit. The parents can be ones this package built or ones your
 own code did. See [Relations](relations.md).
 
+## From pytest
+
+A session-scoped fixture builds a shape once for a whole run, and a scale
+harness makes the same world at several sizes so a query count can be asserted
+to be `O(1)` rather than `O(N)`. Both skip with a stated reason where a shaped
+database cannot exist rather than passing over one that does not. See
+[From pytest](pytest.md).
+
 ## Not in this release
 
 Derived fields, collections copied along a join, per-group invariants,

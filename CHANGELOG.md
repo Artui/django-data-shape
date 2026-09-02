@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **The pytest surface**, in `django_data_shape.fixtures`. `shape_fixture(shape)`
+  returns a session-scoped fixture that builds a shape once for a whole run;
+  bind it to a name in `conftest.py` and request that name from a test. It
+  composes with pytest-django rather than replacing it, asking for
+  `django_db_setup` and `django_db_blocker` by name so the coupling is to two
+  fixture names and not to pytest-django's internals. Session scope is
+  load-bearing: pytest creates higher-scoped fixtures first, so the rows are
+  committed before the transaction that wraps a test is opened, and every test
+  sees them while everything a test writes is rolled back with it.
+- **The scale protocol**, which is what a growth assertion asks a world for:
+  make the world be at factor F, then let the caller run its block.
+  `scaled_world(shape, factor)` is a context manager that builds it and undoes
+  it; `scale_fixture(shape)` is the same thing as a fixture; and `ScaleProtocol`
+  is the structural type both satisfy, so a consumer asserting that a query
+  count is `O(1)` rather than `O(N)` depends on the shape of the call rather
+  than on this package. What the context manager yields is a plain row count,
+  not a `BuildResult`, for the same reason: a seam a stranger cannot implement
+  is not a seam.
+- `scaled_shape(shape, factor)`, the declaration transform underneath it. **A
+  factor varies the declaration rather than subsetting one larger build**, because
+  a subset is not a smaller database but the same database with a filter -- the
+  statistics still describe every row, and the block under test would have to
+  cooperate by restricting itself, which puts the harness inside the thing being
+  measured. Every table scales, parents included, so the average fan-out is the
+  same at every factor and two worlds differ in size alone. The scaled tables go
+  through `Table`'s own constructor, so a declaration that only holds at its
+  original size is refused at the factor that breaks it, naming the factor.
+- `skip_unless_postgres(connection, operation)`, the pytest twin of the backend
+  refusal. Both fixtures skip with the refusal's own message as the reason where
+  a shaped database cannot exist, so a suite that also runs on SQLite reports
+  what it did not check rather than passing over a database nobody shaped.
+- A `pytest` extra. It is an extra rather than a dependency because the rest of
+  the package has nothing to do with pytest, which is also why these fixtures are
+  not re-exported from the top-level `__init__`: importing them is what requires
+  pytest, not importing the package.
+
 ## [0.3.0] — 2026-09-01
 
 ### Fixed

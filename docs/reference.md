@@ -12,6 +12,20 @@
 
 ::: django_data_shape.table_result.TableResult
 
+## The pytest surface
+
+::: django_data_shape.fixtures.shape_fixture.shape_fixture
+
+::: django_data_shape.fixtures.scale_fixture.scale_fixture
+
+::: django_data_shape.fixtures.skip_unless_postgres.skip_unless_postgres
+
+::: django_data_shape.scale_protocol.ScaleProtocol
+
+::: django_data_shape.scaled_world.scaled_world
+
+::: django_data_shape.scaled_shape.scaled_shape
+
 ## Keys
 
 ::: django_data_shape.keys.key_strategy.KeyStrategy
