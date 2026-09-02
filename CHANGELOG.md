@@ -9,9 +9,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.7.0] — 2026-09-02
 
-## [0.6.0] — 2026-09-02
-
-### Added
 - **Statistics targets, declared per column.** `Table(..., statistics={"status":
   500})` and the same on `Projection` issue `ALTER TABLE ... ALTER COLUMN ... SET
   STATISTICS` before the rows are loaded, so the `ANALYZE` that ends every build
@@ -77,13 +74,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A `Statistics and reuse` documentation page, with the `django_db_setup` recipe
   for cloning per session, the shorter version that goes through Django's own
   `TEST["TEMPLATE"]` setting, and what the cache does not support.
-
-### Changed
 - Building a world on PostgreSQL now emits sixteen statements for a two-table
   shape rather than fourteen: statistics targets add one catalogue read per
   table. Still fixed whatever the scale factor, which is the property
   `scaled_world` documents and the suite pins.
 
+## [0.6.0] — 2026-09-02
 
 ### Added
 - **`Projection`: a table populated by `INSERT ... SELECT` over tables already
