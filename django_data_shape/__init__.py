@@ -1,8 +1,10 @@
 """A realistically shaped test database from Django models."""
 
+from django_data_shape.apply_statistics_targets import apply_statistics_targets
 from django_data_shape.build import build
 from django_data_shape.build_result import BuildResult
 from django_data_shape.canonical import Canonical
+from django_data_shape.check_constraints import check_constraints
 from django_data_shape.check_invariants import check_invariants
 from django_data_shape.children_per_parent import ChildrenPerParent
 from django_data_shape.clone_database import clone_database
@@ -35,6 +37,7 @@ from django_data_shape.keys.sequential_keys import SequentialKeys
 from django_data_shape.keys.sql_keys import SqlKeys
 from django_data_shape.keys.uuid_keys import UuidKeys
 from django_data_shape.projection import Projection
+from django_data_shape.require_clone_strategy import require_clone_strategy
 from django_data_shape.scale_protocol import ScaleProtocol
 from django_data_shape.scaled_shape import scaled_shape
 from django_data_shape.scaled_world import scaled_world
@@ -88,11 +91,14 @@ __all__ = [
     "UuidKeys",
     "WorldChanged",
     "Zipf",
+    "apply_statistics_targets",
     "build",
+    "check_constraints",
     "check_invariants",
     "clone_database",
     "drop_database",
     "fan_out_sizes",
+    "require_clone_strategy",
     "scaled_shape",
     "scaled_world",
     "shape_digest",

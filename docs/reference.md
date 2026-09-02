@@ -112,6 +112,8 @@
 
 ::: django_data_shape.derivation_queried_database.DerivationQueriedDatabase
 
+::: django_data_shape.shape_not_empty.ShapeNotEmpty
+
 ::: django_data_shape.unhashable_shape.UnhashableShape
 
 ::: django_data_shape.invariant_violated.InvariantViolated
