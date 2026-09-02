@@ -66,6 +66,14 @@ def shape_fixture(shape: Shape, *, using: str = DEFAULT_DB_ALIAS) -> object:
     :func:`~django_data_shape.scaled_world.scaled_world` at factor 1 -- which
     undoes itself and therefore does not care.
 
+    **One world per table.** A session world holds its rows for the whole run,
+    so :func:`~django_data_shape.fixtures.scale_fixture.scale_fixture` over the
+    same model cannot build: the second build meets a table that is not empty
+    and is refused. Give the two different models -- the session world the tables
+    a plan assertion needs to be big, the scale harness the tables a growth
+    assertion counts. It is the first thing a consumer composing both hits, and
+    the refusal now names it.
+
     On a connection that cannot carry a shaped database the fixture skips with
     the reason rather than raising, so a suite that also runs on SQLite reports
     what it did not check instead of erroring or, worse, passing.

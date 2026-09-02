@@ -6,7 +6,15 @@ from types import SimpleNamespace
 
 import pytest
 
-from django_data_shape import BuildResult, Constant, ScaleProtocol, Shape, Table
+from django_data_shape import (
+    BuildResult,
+    Constant,
+    ScaleProtocol,
+    Shape,
+    ShapeNotEmpty,
+    Table,
+    scaled_world,
+)
 from django_data_shape.fixtures import scale_fixture, shape_fixture, skip_unless_postgres
 from tests.testapp.models import Catalogue, Company
 
@@ -63,6 +71,24 @@ def test_and_the_next_test_does_not_see_what_it_wrote(catalogue: BuildResult) ->
     # rolled back with that test. Neither half is ours -- the first is
     # django_db_setup plus django_db_blocker, the second is pytest-django's db
     # fixture -- and the pair is what makes one build serve a whole session.
+    assert Catalogue.objects.count() == 25
+
+
+@pytest.mark.django_db
+def test_a_scaled_world_over_the_session_world_is_refused_by_name(catalogue: BuildResult) -> None:
+    # The first thing a consumer composing both fixtures hits, and the reason the
+    # refusal names a cause rather than only a remedy: the rows are real, correct
+    # and put there by a fixture this test never mentions, so "empty the table
+    # first" on its own reads as advice about somebody else's data.
+    world = Shape(Table(Catalogue, rows=5, name=Constant("widget")))
+
+    with pytest.raises(ShapeNotEmpty) as raised, scaled_world(world, 1):
+        pass
+
+    assert "shape_fixture" in str(raised.value)
+    # And nothing was disturbed on the way out. The refusal happens before a row
+    # is written, inside a transaction that rolls back, so the session world the
+    # rest of the run depends on is untouched.
     assert Catalogue.objects.count() == 25
 
 

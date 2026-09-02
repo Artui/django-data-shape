@@ -59,7 +59,10 @@ build(shape)
 
 `build()` generates the rows, loads them with `COPY`, moves the identity sequence
 past the keys it assigned, and runs `ANALYZE` so the planner can see the shape.
-It raises on any backend that is not PostgreSQL rather than degrading quietly.
+It raises on any backend that is not PostgreSQL rather than degrading quietly --
+unless you say `require_statistics=False`, which asks for rows and cardinality
+instead of a database the planner can reason about, and is what the growth
+harness below is built on.
 
 ## Relations
 
@@ -111,9 +114,11 @@ def test_the_dashboard_does_not_grow(world, django_assert_num_queries):
 ```
 
 A factor varies the declaration rather than subsetting one larger build, and
-`pip install 'django-data-shape[pytest]'` is what these two need. On a backend
-that cannot carry a shaped database both **skip with a stated reason** rather
-than passing over one nobody shaped.
+`pip install 'django-data-shape[pytest]'` is what these two need. **The growth
+harness works on any backend Django supports**, because a query count is an ORM
+property and means the same everywhere; the session world **skips with a stated
+reason** where a shaped database cannot exist, because a plan over it is the
+thing it exists to make honest.
 
 ## What it expects, and what it refuses
 
@@ -122,7 +127,10 @@ naming the field. In particular:
 
 - **PostgreSQL and psycopg 3.** Rows stream into `COPY FROM STDIN`, which
   psycopg 2 cannot do without materialising them first. Both are refused by name
-  rather than degraded around.
+  rather than degraded around. PostgreSQL is required for the statistics half
+  only: `build(shape, require_statistics=False)` loads rows on any backend and
+  claims nothing about a plan. psycopg 2 is refused either way, because the
+  vendor picks the route and not the caller.
 - **A key type it can assign.** Integer keys count from one and UUID keys are
   derived from the seed; anything else is refused rather than guessed, and
   `keys=KeyFunction(...)` declares one.

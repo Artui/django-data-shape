@@ -103,9 +103,16 @@ rather than found by the database halfway through a load. A generated database t
 than one that refuses to exist, because the suite it feeds asserts on rows that
 could never occur.
 
-`build()` raises `UnsupportedBackend` on anything but PostgreSQL. Generation and
-cardinality are backend-neutral; `COPY` and column statistics are not, and a
+`build()` raises `UnsupportedBackend` on anything but PostgreSQL, because a
 shaped database whose plans mean nothing is worse than no shaped database.
+
+`build(shape, require_statistics=False)` is the other half of the same sentence.
+Generation and cardinality really are backend-neutral, so it loads rows anywhere
+-- with `COPY` and `ANALYZE` where the backend has them, plain inserts where it
+does not -- and claims nothing about a plan. It is what the growth harness uses,
+because a query count is an ORM property and means the same on any backend. On
+PostgreSQL it changes nothing: the statistics are free, so they are still
+gathered.
 
 ## Relations
 
@@ -118,9 +125,10 @@ own code did. See [Relations](relations.md).
 
 A session-scoped fixture builds a shape once for a whole run, and a scale
 harness makes the same world at several sizes so a query count can be asserted
-to be `O(1)` rather than `O(N)`. Both skip with a stated reason where a shaped
-database cannot exist rather than passing over one that does not. See
-[From pytest](pytest.md).
+to be `O(1)` rather than `O(N)`. The harness works on any backend, because a
+query count is an ORM property; the session world skips with a stated reason
+where a shaped database cannot exist, because its job is to be believed by a
+planner. See [From pytest](pytest.md).
 
 ## Not in this release
 

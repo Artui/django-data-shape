@@ -43,6 +43,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the package has nothing to do with pytest, which is also why these fixtures are
   not re-exported from the top-level `__init__`: importing them is what requires
   pytest, not importing the package.
+- **`build(shape, require_statistics=False)` loads rows on any backend.** It asks
+  for rows and cardinality rather than for a database the planner can reason
+  about, and it is written as a requirement being dropped rather than as work
+  being skipped: on PostgreSQL it changes nothing at all, since `COPY` and
+  `ANALYZE` are both free and leaving them out would manufacture the unanalyzed
+  table this package exists to condemn. Elsewhere the rows are inserted in chunks
+  and no statistics are gathered. SQLite's own `ANALYZE` is deliberately not run,
+  because running it would claim the plan realism this package says it will not
+  claim. The driver check is unaffected: psycopg 2 is still refused on a
+  PostgreSQL connection, because the vendor picks the route and not the caller.
+- **The growth harness works on every backend Django supports** and no longer
+  skips. A query count is an ORM property and means the same anywhere, so a
+  growth assertion is honest off PostgreSQL where a plan assertion is not, and
+  the scale harness was the only thing standing between a consumer on SQLite and
+  the milestone's headline seam. `shape_fixture` still skips: it exists to build
+  a world a planner will believe.
+
+### Fixed
+- `ScaleProtocol` rejected the implementations its own docstring offered. A
+  structural type matches parameter names too, so a hand-rolled callable taking
+  `n` rather than `factor` did not satisfy it -- exactly the five-line callable
+  the documentation tells a consumer to write. The factor is positional-only now,
+  and two files of consumers and impostors are type-checked by the suite, because
+  a type-level claim with no type-level test is what let this ship.
+- `ShapeNotEmpty` names the likely cause and not only the remedy. The first
+  consumer met it by composing both fixtures over one model, where the rows are
+  real, correct and written by a fixture the failing test never mentions -- so
+  "empty the table first" read as advice about somebody else's data.
 
 ## [0.3.0] — 2026-09-01
 

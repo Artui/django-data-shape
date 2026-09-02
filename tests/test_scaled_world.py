@@ -5,27 +5,21 @@ from __future__ import annotations
 import datetime
 
 import pytest
-from django.db import connection
 
 from django_data_shape import Constant, FanOut, Shape, Skew, Table, Zipf, scaled_world
 from tests.testapp.models import Company, Order, Session
 
-# The same rule the loader's own tests follow: skipped with a stated reason
-# rather than passed vacuously. Scaling a declaration is arithmetic and is
-# tested without a database next door; building the world it describes is COPY,
-# a reset sequence and ANALYZE, and none of those mean anything here.
+# No backend skip, unlike the loader's own tests, and the difference is the
+# point: a growth harness asks for rows and cardinality rather than for a
+# database the planner can reason about, so it builds on any backend and this
+# module has to prove that on both. The one thing it must not do is assert
+# anything about a plan.
 #
 # django_db rather than transaction=True, on purpose: the nested case is the one
 # a consumer meets, and it is the one where the teardown has to be a savepoint
 # rollback that leaves the test's own transaction alive. The transactional case
 # gets a single test of its own at the bottom.
-pytestmark = [
-    pytest.mark.django_db,
-    pytest.mark.skipif(
-        connection.vendor != "postgresql",
-        reason="COPY loading and planner statistics need PostgreSQL",
-    ),
-]
+pytestmark = [pytest.mark.django_db]
 
 _AWARE = datetime.datetime(2020, 1, 1, tzinfo=datetime.timezone.utc)
 

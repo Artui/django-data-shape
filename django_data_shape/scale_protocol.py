@@ -22,6 +22,14 @@ class ScaleProtocol(Protocol):
 
     Two details are deliberate.
 
+    **The factor is positional-only, and that is not a detail.** A structural
+    type matches parameter names as well as types unless a parameter is marked
+    positional-only, so without the ``/`` the protocol would have accepted only
+    implementations that happened to spell the argument ``factor`` -- a protocol
+    about this package's naming rather than about the shape of the call, and one
+    that rejected the five-line callable the paragraph above offers. Callers pass
+    the factor positionally; implementations name it whatever reads best.
+
     **It is a context manager, not a plain call.** A world has to be taken down
     as well as put up, and only whatever built it knows how to undo it. A
     protocol that only built would leave every implementation to invent its own
@@ -37,4 +45,4 @@ class ScaleProtocol(Protocol):
     which is the opposite of what a seam is for.
     """
 
-    def __call__(self, factor: int) -> AbstractContextManager[int]: ...
+    def __call__(self, factor: int, /) -> AbstractContextManager[int]: ...
