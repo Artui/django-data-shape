@@ -13,7 +13,7 @@
         <link rel="canonical" href="https://artui.github.io/django-data-shape/reference/">
       
       
-        <link rel="prev" href="../keys/">
+        <link rel="prev" href="../pytest/">
       
       
       
@@ -340,6 +340,33 @@
       
   
   
+  
+  
+    <li class="md-nav__item">
+      <a href="../pytest/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    From pytest
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
     
   
   
@@ -529,6 +556,83 @@
     <span class="md-ellipsis">
       
         TableResult
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-pytest-surface" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The pytest surface
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#django_data_shape.fixtures.shape_fixture.shape_fixture" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        shape_fixture
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#django_data_shape.fixtures.scale_fixture.scale_fixture" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        scale_fixture
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#django_data_shape.fixtures.skip_unless_postgres.skip_unless_postgres" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        skip_unless_postgres
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#django_data_shape.scale_protocol.ScaleProtocol" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ScaleProtocol
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#django_data_shape.scaled_world.scaled_world" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        scaled_world
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#django_data_shape.scaled_shape.scaled_shape" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        scaled_shape
       
     </span>
   </a>
@@ -906,6 +1010,83 @@
     <span class="md-ellipsis">
       
         TableResult
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-pytest-surface" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The pytest surface
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#django_data_shape.fixtures.shape_fixture.shape_fixture" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        shape_fixture
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#django_data_shape.fixtures.scale_fixture.scale_fixture" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        scale_fixture
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#django_data_shape.fixtures.skip_unless_postgres.skip_unless_postgres" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        skip_unless_postgres
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#django_data_shape.scale_protocol.ScaleProtocol" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ScaleProtocol
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#django_data_shape.scaled_world.scaled_world" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        scaled_world
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#django_data_shape.scaled_shape.scaled_shape" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        scaled_shape
       
     </span>
   </a>
@@ -1431,7 +1612,9 @@ default interleaves them the way rows really arrive.</p>
 
 
 <a href="#django_data_shape.build.build" class="headerlink" title="Permanent link">&para;</a></h2>
-<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">build</span><span class="p">(</span><span class="n">shape</span><span class="p">:</span> <span class="n">Shape</span><span class="p">,</span> <span class="n">using</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="n">DEFAULT_DB_ALIAS</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">BuildResult</span>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">build</span><span class="p">(</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>    <span class="n">shape</span><span class="p">:</span> <span class="n">Shape</span><span class="p">,</span> <span class="n">using</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="n">DEFAULT_DB_ALIAS</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">require_statistics</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">BuildResult</span>
 </span></code></pre></div>
 
     <div class="doc doc-contents first">
@@ -1448,6 +1631,19 @@ the end, owned by the library rather than left to the caller to remember.</p>
 statistics work proper -- per-column targets, and caching a built database
 as a template -- comes later. A loader that leaves its table unanalyzed
 ships the exact state this package exists to condemn.</p>
+<p><code>require_statistics=False</code> asks for rows and cardinality rather than for a
+database the planner can reason about, and it is the only way to build on a
+backend without <code>COPY</code> and column statistics. It is written as a
+requirement being dropped rather than as work being skipped, because that is
+what it does: <strong>on PostgreSQL it changes nothing at all</strong> -- the load is
+still <code>COPY</code> and <code>ANALYZE</code> still runs, since both are free and leaving
+them out would manufacture the unanalyzed table this package exists to
+condemn. Elsewhere the rows are inserted instead and no statistics are
+gathered, so cardinality is real and nothing about a plan is claimed.</p>
+<p>The distinction is the one this package draws everywhere: generation and
+cardinality are backend-neutral, planner realism is not. A query <em>count</em> is
+an ORM property and means the same on any backend, which is why a growth
+assertion can be honest here while a plan assertion still cannot.</p>
 
 
     </div>
@@ -1582,6 +1778,390 @@ soon as through tables are generated alongside the models that declare them.</p>
 
 
   </div>
+
+    </div>
+
+</div><h2 id="the-pytest-surface">The pytest surface<a class="headerlink" href="#the-pytest-surface" title="Permanent link">&para;</a></h2>
+
+
+<div class="doc doc-object doc-function">
+
+
+<h2 id="django_data_shape.fixtures.shape_fixture.shape_fixture" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">shape_fixture</span>
+
+
+<a href="#django_data_shape.fixtures.shape_fixture.shape_fixture" class="headerlink" title="Permanent link">&para;</a></h2>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">shape_fixture</span><span class="p">(</span><span class="n">shape</span><span class="p">:</span> <span class="n">Shape</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">using</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="n">DEFAULT_DB_ALIAS</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">object</span>
+</span></code></pre></div>
+
+    <div class="doc doc-contents first">
+
+        <p>A session-scoped pytest fixture that builds <code>shape</code> once.</p>
+<p>Bind it to a name in <code>conftest.py</code> and request that name from a test::</p>
+<div class="language-text highlight"><pre><span></span><code>from django_data_shape import Constant, Shape, Table
+from django_data_shape.fixtures import shape_fixture
+
+orders = shape_fixture(Shape(Table(Order, rows=100_000, status=Constant("new"))))
+</code></pre></div>
+<p>::</p>
+<div class="language-text highlight"><pre><span></span><code>import pytest
+
+@pytest.mark.django_db
+def test_the_dashboard_query(orders):
+    assert orders.rows == 100_000
+</code></pre></div>
+<p>It <strong>composes with pytest-django rather than replacing it</strong>. The fixture
+requests <code>django_db_setup</code>, which is the seam a project overrides to
+decide how its test database is made, so whatever a project has done there
+-- a template database, <code>--reuse-db</code>, a different creation strategy -- has
+already happened before a row is generated. It then writes through
+<code>django_db_blocker.unblock()</code>, the mechanism pytest-django documents for
+populating a database once. Neither of those is imported: they are asked for
+by name, so this package depends on two fixture names and not on
+pytest-django's internals.</p>
+<p><strong>Session scope is load-bearing, not a performance choice.</strong> pytest creates
+higher-scoped fixtures before lower-scoped ones, so a session-scoped build
+always runs before the function-scoped <code>db</code> fixture opens the transaction
+that wraps a test -- which is what makes the rows committed and visible to
+every later test. A function-scoped build would be ordered against <code>db</code> by
+the accident of argument order, and on the losing side of that order it
+would be rolled back with the test that happened to build it.</p>
+<p>Yields the :class:<code>~django_data_shape.build_result.BuildResult</code>, so a test
+can assert on the size of the world it was handed.</p>
+<p><strong>One caveat, and it is worth stating plainly</strong>: a test marked
+<code>django_db(transaction=True)</code> truncates every table at teardown, and takes
+the session's rows with it. Nothing rebuilds them, so a later test that
+reads this fixture is measuring an empty database. Keep transactional tests
+off the tables a shape owns, mark them <code>serialized_rollback=True</code>, or
+build per test with
+:func:<code>~django_data_shape.scaled_world.scaled_world</code> at factor 1 -- which
+undoes itself and therefore does not care.</p>
+<p><strong>One world per table.</strong> A session world holds its rows for the whole run,
+so :func:<code>~django_data_shape.fixtures.scale_fixture.scale_fixture</code> over the
+same model cannot build: the second build meets a table that is not empty
+and is refused. Give the two different models -- the session world the tables
+a plan assertion needs to be big, the scale harness the tables a growth
+assertion counts. It is the first thing a consumer composing both hits, and
+the refusal now names it.</p>
+<p>On a connection that cannot carry a shaped database the fixture skips with
+the reason rather than raising, so a suite that also runs on SQLite reports
+what it did not check instead of erroring or, worse, passing.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h2 id="django_data_shape.fixtures.scale_fixture.scale_fixture" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">scale_fixture</span>
+
+
+<a href="#django_data_shape.fixtures.scale_fixture.scale_fixture" class="headerlink" title="Permanent link">&para;</a></h2>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">scale_fixture</span><span class="p">(</span><span class="n">shape</span><span class="p">:</span> <span class="n">Shape</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">using</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="n">DEFAULT_DB_ALIAS</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">object</span>
+</span></code></pre></div>
+
+    <div class="doc doc-contents first">
+
+        <p>A pytest fixture yielding a :class:<code>~django_data_shape.scale_protocol.ScaleProtocol</code>.</p>
+<p>The pytest face of the scale protocol. Bind it in <code>conftest.py</code>::</p>
+<div class="language-text highlight"><pre><span></span><code>from django_data_shape import Constant, Shape, Table
+from django_data_shape.fixtures import scale_fixture
+
+world = scale_fixture(Shape(Table(Order, rows=100, status=Constant("new"))))
+</code></pre></div>
+<p>and a growth assertion has somewhere to ask for a bigger world::</p>
+<div class="language-text highlight"><pre><span></span><code>def test_the_dashboard_query_is_constant(world, django_assert_num_queries):
+    for factor in (1, 10):
+        with world(factor):
+            with django_assert_num_queries(3):
+                dashboard()
+</code></pre></div>
+<p>The declared row counts are the world at factor 1, so the base declaration
+should be the smallest world that still means something -- a hundred rows
+against a thousand is the regime this is for, and it is milliseconds per
+factor. Size, in the two-million-row sense that makes a query <em>plan</em>
+realistic, is a different assertion with a different cost and does not vary
+a factor at all.</p>
+<p>Function-scoped, and it requests pytest-django's <code>db</code> fixture, which does
+two things worth knowing. A test using this needs no <code>django_db</code> marker of
+its own. And each world is then built inside the transaction that wraps the
+test, so tearing it down is a savepoint rollback: cheap, exact, and leaving
+the test's own transaction usable afterwards. A test that marks itself
+<code>transaction=True</code> still works -- the marker wins over the fixture, and
+the rollback is then an ordinary one.</p>
+<p><strong>Not over a model a session world already holds.</strong> Each world here is built
+from empty and undone again, so a table that
+:func:<code>~django_data_shape.fixtures.shape_fixture.shape_fixture</code> filled for
+the session is one this cannot build into at all -- the rows are still there,
+and the build is refused. The two compose over a graph by taking different
+models, not by taking turns over one.</p>
+<p><strong>It works on any backend Django supports</strong>, because what a growth
+assertion measures -- the number of queries a block emits -- is an ORM
+property rather than a planner one. Where the backend has <code>COPY</code> and
+column statistics the world is built with them; where it does not, the rows
+are inserted and no statistics are gathered, so the cardinality is real and
+nothing about a plan is claimed. That is the one place this package builds
+outside PostgreSQL, and it is allowed precisely because the assertion it
+serves does not need the planner. A plan assertion still skips: see
+:func:<code>~django_data_shape.fixtures.skip_unless_postgres.skip_unless_postgres</code>.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h2 id="django_data_shape.fixtures.skip_unless_postgres.skip_unless_postgres" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">skip_unless_postgres</span>
+
+
+<a href="#django_data_shape.fixtures.skip_unless_postgres.skip_unless_postgres" class="headerlink" title="Permanent link">&para;</a></h2>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">skip_unless_postgres</span><span class="p">(</span><span class="n">connection</span><span class="p">:</span> <span class="n">Any</span><span class="p">,</span> <span class="n">operation</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span>
+</span></code></pre></div>
+
+    <div class="doc doc-contents first">
+
+        <p>Skip the current test, with a stated reason, where <code>operation</code> cannot mean anything.</p>
+<p>The pytest twin of
+:func:<code>~django_data_shape.require_postgres.require_postgres</code>, and the two
+differ only in how the same sentence is delivered. A function that is called
+raises; a fixture that cannot supply what it promised skips, because a test
+that never ran is honest and a test that ran against a database nobody
+shaped is not. Silently yielding an unbuilt world would be the vacuous pass
+this package exists to expose, and returning a warning would be one nobody
+reads.</p>
+<p>The reason is the refusal's own message rather than a shorter one written
+here, so the skip line names the same three things the exception does: what
+was refused, which connection, and what that connection actually is.</p>
+<p>Public because a consumer writing its own fixture over a shaped database
+needs exactly this, and because a plan assertion in a downstream package has
+the same obligation to skip rather than pass.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h2 id="django_data_shape.scale_protocol.ScaleProtocol" class="doc doc-heading">
+            <span class="doc doc-object-name doc-class-name">ScaleProtocol</span>
+
+
+<a href="#django_data_shape.scale_protocol.ScaleProtocol" class="headerlink" title="Permanent link">&para;</a></h2>
+
+
+    <div class="doc doc-contents first">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="typing.Protocol">Protocol</span></code></p>
+
+
+
+        <p>Make the world be at <code>factor</code>, then let the caller run its block.</p>
+<p>The seam between this package and a consumer that asserts a query count is
+<code>O(1)</code> rather than <code>O(N)</code> by running one block at several scale factors.
+Such a consumer depends on <strong>this shape</strong>, not on this package: anything
+callable as <code>at(factor)</code> returning a context manager will do, so a project
+on a backend this package refuses -- or one that has not adopted it yet --
+supplies its own five-line callable and the assertion works unchanged.
+:func:<code>~django_data_shape.fixtures.scale_fixture.scale_fixture</code> yields an
+implementation of it, and
+:func:<code>~django_data_shape.scaled_world.scaled_world</code> bound to a shape is
+another.</p>
+<p>Two details are deliberate.</p>
+<p><strong>The factor is positional-only, and that is not a detail.</strong> A structural
+type matches parameter names as well as types unless a parameter is marked
+positional-only, so without the <code>/</code> the protocol would have accepted only
+implementations that happened to spell the argument <code>factor</code> -- a protocol
+about this package's naming rather than about the shape of the call, and one
+that rejected the five-line callable the paragraph above offers. Callers pass
+the factor positionally; implementations name it whatever reads best.</p>
+<p><strong>It is a context manager, not a plain call.</strong> A world has to be taken down
+as well as put up, and only whatever built it knows how to undo it. A
+protocol that only built would leave every implementation to invent its own
+teardown, and the one this package uses -- roll back to the savepoint the
+world was built inside -- is not something a caller could arrange from
+outside.</p>
+<p><strong>What it yields is a number, not one of this package's types.</strong> The value
+is how many rows the world actually holds, which is a diagnostic rather than
+the growth curve's x-axis: the caller passed the factor in and already knows
+it. Yielding a <code>BuildResult</code> would have been richer and would have made
+the protocol unimplementable by anyone who has not installed this package,
+which is the opposite of what a seam is for.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h2 id="django_data_shape.scaled_world.scaled_world" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">scaled_world</span>
+
+
+<a href="#django_data_shape.scaled_world.scaled_world" class="headerlink" title="Permanent link">&para;</a></h2>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">scaled_world</span><span class="p">(</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>    <span class="n">shape</span><span class="p">:</span> <span class="n">Shape</span><span class="p">,</span> <span class="n">factor</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">using</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="n">DEFAULT_DB_ALIAS</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Iterator</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span>
+</span></code></pre></div>
+
+    <div class="doc doc-contents first">
+
+        <p>Build <code>shape</code> at <code>factor</code>, run the caller's block, then undo it.</p>
+<p>The implementation of :class:<code>~django_data_shape.scale_protocol.ScaleProtocol</code>
+for a project that uses this package. Bound to a shape it <em>is</em> one::</p>
+<div class="language-text highlight"><pre><span></span><code>world = functools.partial(scaled_world, Shape(Table(Order, rows=100)))
+
+for factor in (1, 10):
+    with world(factor) as rows:
+        ...
+</code></pre></div>
+<p>Yields the number of rows the world holds, which is what the database took
+rather than what the declaration asked for -- the two are the same today and
+stop being so once deduplicated many-to-many edges arrive, and a growth
+curve annotated with a number nothing achieved would be worse than one
+annotated with none.</p>
+<p><strong>It does not require planner statistics, and that is what makes it
+portable.</strong> A growth assertion counts queries, and a query count is an ORM
+property that means the same on any backend -- so this builds wherever there
+are rows to build, using <code>COPY</code> and <code>ANALYZE</code> where the backend has them
+and plain inserts where it does not. Nothing about a plan is claimed on a
+backend that cannot support the claim, which is the same line this package
+draws everywhere: generation and cardinality are backend-neutral, planner
+realism is not. A <em>plan</em> assertion still belongs behind
+:func:<code>~django_data_shape.fixtures.skip_unless_postgres.skip_unless_postgres</code>.</p>
+<p><strong>Open a query capture inside the block, never around it.</strong> Building a world
+emits statements of its own, and a capture wrapped around <code>world(factor)</code>
+counts them along with the block's. On PostgreSQL that is mild and fixed --
+measured at twelve statements for a two-table shape, because <code>COPY</code> does
+not go through Django's <code>execute_wrapper</code> and only the emptiness check, the
+parent key read, the sequence reset, the <code>ANALYZE</code> and the savepoints do.
+Off PostgreSQL it is neither: the inserts are ordinary statements, one per
+thousand rows, <strong>so the captured count grows with the factor</strong> and a growth
+assertion measuring from outside the block would read the loader's own curve
+as its subject's.</p>
+<p><strong>The teardown is a rollback, not a delete.</strong> Building inside a transaction
+and rolling it back at the end restores exactly the state the block started
+from, which matters twice: this package never issues a destructive statement
+against a table it did not fill, and inside a pytest-django <code>db</code> test the
+rollback is to a savepoint, so it costs nothing and leaves the enclosing
+test transaction usable afterwards. Outside one it is an ordinary
+transaction rollback, so the same code is correct in both places.</p>
+<p>One thing the rollback does not undo, because the database will not: an
+identity sequence moved past the keys a build assigned stays moved, since
+<code>setval</code> is not transactional. Nothing here reads it -- keys are assigned,
+not drawn -- so the only visible effect is that a row created by the ORM
+after a world is torn down gets a larger id than it otherwise would.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h2 id="django_data_shape.scaled_shape.scaled_shape" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">scaled_shape</span>
+
+
+<a href="#django_data_shape.scaled_shape.scaled_shape" class="headerlink" title="Permanent link">&para;</a></h2>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">scaled_shape</span><span class="p">(</span><span class="n">shape</span><span class="p">:</span> <span class="n">Shape</span><span class="p">,</span> <span class="n">factor</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Shape</span>
+</span></code></pre></div>
+
+    <div class="doc doc-contents first">
+
+        <p><code>shape</code> with every declared row count multiplied by <code>factor</code>.</p>
+<p>This is the answer to the question a growth assertion asks -- <em>make the
+world be at factor F</em> -- and the choice worth stating is that a factor
+varies the <strong>declaration</strong>. The alternative, and the one that looks cheaper,
+is to build once at the largest factor and let a smaller factor see only
+part of it. Three things say otherwise:</p>
+<ul>
+<li><strong>A subset is not a smaller database; it is the same database with a
+  filter.</strong> The table still holds every row, the statistics still describe
+  every row, and an index still spans every row. Worse, the <em>block under
+  test</em> would have to cooperate -- to restrict itself to the subset -- so
+  the harness would leak into the code being measured. A growth assertion
+  whose subject has to know it is being scaled is measuring the harness.</li>
+<li><strong>A fan-out is a partition of the child key range, so taking a subset
+  changes the shape rather than the size.</strong> Cutting the children short
+  removes whole parents under <code>grouped</code> placement and thins every parent
+  under <code>arrival</code>, so the childless share and the tail -- the two things
+  the declaration exists to state -- would come out different at every
+  factor, and the curve would be fitted over worlds of different shapes.
+  Multiplying the row counts keeps the distribution and varies only its
+  size, which is what "the same world, bigger" has to mean.</li>
+<li><strong>A shape is inert, hashable data, and a scaled shape is another one.</strong>
+  That is the representation the template-database cache will key on, so
+  each factor gets a cache key for free and caching makes a repeated factor
+  cheap without changing this protocol. A subset has no key of its own; it
+  is a query over somebody else's build.</li>
+</ul>
+<p>The cost objection does not survive the numbers either. Growth assertions
+run at small absolute scales -- a hundred rows against a thousand -- where
+building is milliseconds and where the question is the <em>shape of the count
+curve</em> rather than plan realism. The two-million-row build is the plan
+assertion's problem, and plan assertions do not vary a factor.</p>
+<p>Every table is scaled, parents included, and that is the point rather than a
+simplification: scaling only the child table would change the average
+fan-out along with the size, so the two worlds would differ in a second way
+and the curve would no longer be about size alone.</p>
+<p><strong>One factor moves every dimension at once, and there is deliberately no
+per-table factor.</strong> A consumer's most useful finding is often "this count is
+O(parents), not O(orders)", which a single factor cannot name because both
+axes move together. The answer is not a <code>scale=False</code> on <code>Table</code>: holding
+the child count fixed while the parents grow also changes the average
+fan-out, so a curve measured that way mixes two causes, and a boolean would
+hide exactly the confound the reader needs to see. The honest way to vary one
+dimension is to write the declaration that varies it -- and nothing has to
+change for that, because the protocol takes a <strong>callable</strong> rather than a
+shape. "Which dimension varies" is a property of the function a consumer
+binds, so the seam already supports it and would not need to be reopened.</p>
+<p>Recording that as a decision rather than an oversight: a per-table factor is
+purely additive, so it can be added the day a real curve needs one, while
+freezing a meaning for it now would answer a question -- what a pinned parent
+means for a fan-out declared over it -- that no measured case has asked yet.</p>
+<p>The scaled tables are rebuilt through <code>Table</code>'s own constructor rather
+than assembled behind it, so a declaration that is only valid at its
+original size is refused at the factor that breaks it -- naming the factor,
+because a message about a row count the caller never wrote is a message that
+knows more than it says.</p>
+
 
     </div>
 
