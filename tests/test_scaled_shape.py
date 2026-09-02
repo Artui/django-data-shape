@@ -11,13 +11,23 @@ from django_data_shape import (
     FanOut,
     InvalidShape,
     KeyFunction,
+    Projection,
     Shape,
     Skew,
     Table,
     Zipf,
     scaled_shape,
 )
-from tests.testapp.models import Company, Order, Session, SlugPk, Subscriber
+from tests.testapp.models import (
+    Company,
+    Event,
+    EventSession,
+    Order,
+    Session,
+    SlugPk,
+    Subscriber,
+    TemplateSession,
+)
 
 # No database at all. Scaling is arithmetic over a declaration, so it is one of
 # the parts that means the same thing on every backend -- which is also why the
@@ -137,3 +147,19 @@ def test_a_scaled_shape_is_a_shape_like_any_other() -> None:
     # Not a private variant: it reaches build() through the same door and reads
     # back the same way in a failure message.
     assert repr(scaled) == "Shape(Order, seed=7)"
+
+
+def test_a_projection_passes_through_untouched_and_needs_no_factor() -> None:
+    # It has no declared row count to multiply: its size is count(per JOIN
+    # copying), so scaling the tables it reads scales it by the same amount
+    # without anything being said. That is the determined-not-distributed
+    # property paying for itself -- a mirroring vocabulary carrying a row count
+    # would have needed a rule here, and would have had to choose between
+    # scaling the count and scaling what the count was derived from.
+    projection = Projection(EventSession, per=Event, copying=TemplateSession)
+    shape = Shape(projection, Table(Event, rows=100, template=FanOut(Zipf()), name=Constant("e")))
+
+    scaled = scaled_shape(shape, 10)
+
+    assert scaled.tables[0] is projection
+    assert scaled.tables[1].rows == 1000

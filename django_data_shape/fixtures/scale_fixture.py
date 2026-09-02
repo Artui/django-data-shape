@@ -54,6 +54,22 @@ def scale_fixture(shape: Shape, *, using: str = DEFAULT_DB_ALIAS) -> object:
     and the build is refused. The two compose over a graph by taking different
     models, not by taking turns over one.
 
+    **Open a query capture inside the block, never around it.** Repeated here
+    from :func:`~django_data_shape.scaled_world.scaled_world` and not merely
+    cross-referenced, because the person who can make this mistake is the one
+    writing the test, and they reach this function without ever opening that
+    one. Building a world emits statements of its own::
+
+        with world(factor):
+            with django_assert_num_queries(3):   # inside
+                dashboard()
+
+    A capture wrapped around ``world(factor)`` counts the build as well as the
+    block. On PostgreSQL that is a fixed overhead -- fourteen statements for a
+    two-table shape, at every factor. Off PostgreSQL the rows go in as ordinary
+    inserts, one statement per thousand, **so the count grows with the factor**
+    and the assertion reads the loader's growth curve instead of its subject's.
+
     **It works on any backend Django supports**, because what a growth
     assertion measures -- the number of queries a block emits -- is an ORM
     property rather than a planner one. Where the backend has ``COPY`` and

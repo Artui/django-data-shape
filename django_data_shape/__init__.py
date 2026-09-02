@@ -21,7 +21,9 @@ from django_data_shape.invalid_shape import InvalidShape
 from django_data_shape.keys.key_function import KeyFunction
 from django_data_shape.keys.key_strategy import KeyStrategy
 from django_data_shape.keys.sequential_keys import SequentialKeys
+from django_data_shape.keys.sql_keys import SqlKeys
 from django_data_shape.keys.uuid_keys import UuidKeys
+from django_data_shape.projection import Projection
 from django_data_shape.scale_protocol import ScaleProtocol
 from django_data_shape.scaled_shape import scaled_shape
 from django_data_shape.scaled_world import scaled_world
@@ -47,9 +49,11 @@ __all__ = [
     "InvalidShape",
     "KeyFunction",
     "KeyStrategy",
+    "Projection",
     "ScaleProtocol",
     "Scope",
     "SequentialKeys",
+    "SqlKeys",
     "UuidKeys",
     "Sequential",
     "Shape",

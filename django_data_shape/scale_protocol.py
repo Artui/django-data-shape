@@ -37,12 +37,44 @@ class ScaleProtocol(Protocol):
     world was built inside -- is not something a caller could arrange from
     outside.
 
-    **What it yields is a number, not one of this package's types.** The value
-    is how many rows the world actually holds, which is a diagnostic rather than
-    the growth curve's x-axis: the caller passed the factor in and already knows
-    it. Yielding a ``BuildResult`` would have been richer and would have made
-    the protocol unimplementable by anyone who has not installed this package,
-    which is the opposite of what a seam is for.
+    **What it yields is a row count or nothing, never one of this package's
+    types.** The value is how many rows the world actually holds, and it is a
+    diagnostic rather than the growth curve's x-axis: the caller passed the
+    factor in and already knows it. Yielding a ``BuildResult`` would have been
+    richer and would have made the protocol unimplementable by anyone who has
+    not installed this package, which is the opposite of what a seam is for.
+
+    ``None`` is allowed for the same reason the value is optional in spirit
+    already. The five-line callable the paragraph above offers is the one a
+    consumer writes first::
+
+        @contextmanager
+        def world(n: int) -> Iterator[None]:
+            build_my_fixtures(100 * n)
+            yield
+
+    and it has no count to report, only rows. Requiring one would have made the
+    invitation false -- which it was, in this exact way, until the type below
+    was widened. **A caller reading the value has to tolerate ``None``**; an
+    implementation that can count cheaply should still yield the number, because
+    a growth curve annotated with what the world actually held is worth more
+    than one annotated with what was asked for.
+
+    Worth recording, because this is the *second* time the docstring promised
+    more than the signature allowed: the first was the parameter name, fixed by
+    making ``factor`` positional-only, and both were found by a consumer rather
+    than by review. A type-level promise with no type-level test behind it is
+    what let each of them ship, so
+    ``tests/scale_protocol_consumers.py`` now carries the invited implementation
+    itself and the suite type-checks it.
+
+    Spelled without this class -- for a consumer who would rather restate the
+    shape than import it -- it is exactly::
+
+        Callable[[int], AbstractContextManager[int | None]]
+
+    Given here so that restatements converge on one, rather than on a looser
+    ``ContextManager[Any]`` that would accept things this does not.
     """
 
-    def __call__(self, factor: int, /) -> AbstractContextManager[int]: ...
+    def __call__(self, factor: int, /) -> AbstractContextManager[int | None]: ...

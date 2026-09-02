@@ -173,13 +173,18 @@ def test_the_dashboard_query_does_not_grow(world, django_assert_num_queries):
                 dashboard()
 ```
 
-On PostgreSQL the hazard is mild and fixed -- twelve statements for a two-table
-shape, because `COPY` does not pass through Django's `execute_wrapper` and only
+On PostgreSQL the hazard is mild and fixed -- fourteen statements for a two-table
+shape, at every factor, because `COPY` does not pass through Django's
+`execute_wrapper` and only
 the emptiness check, the parent key read, the sequence reset, the `ANALYZE` and
 the savepoints do. Off PostgreSQL it is neither mild nor fixed: the inserts are
 ordinary statements, one per thousand rows, so the count a capture sees **grows
 with the factor**, and a growth assertion measuring from outside the block would
 read the loader's curve as its subject's.
+
+Both halves are pinned by tests in this package's own suite rather than left as
+prose. The number above was already wrong once, and the consumer it matters to
+cannot check it without taking the dependency the protocol exists to avoid.
 
 ### Varying one dimension
 
@@ -271,10 +276,29 @@ matches parameter names too, so without it the protocol would have accepted only
 implementations that happened to spell the argument `factor`, which is a rule
 about this package's naming rather than about the shape of the call.
 
-The value yielded is how many rows the world holds. It is a diagnostic: the
-growth curve's x-axis is the factor, which the caller passed in and already
-knows. That is also why it is a plain number rather than a `BuildResult` -- a
-seam a stranger cannot implement is not a seam.
+Restated without importing `ScaleProtocol`, for a consumer who would rather spell
+the shape than depend on it, it is exactly:
+
+```python
+Callable[[int], AbstractContextManager[int | None]]
+```
+
+The value yielded is how many rows the world holds, **or `None`**. It is a
+diagnostic: the growth curve's x-axis is the factor, which the caller passed in
+and already knows. That is also why it is a plain number rather than a
+`BuildResult` -- a seam a stranger cannot implement is not a seam -- and why
+`None` is allowed, because the shortest honest implementation of this protocol
+builds rows and has no count to hand back:
+
+```python
+@contextlib.contextmanager
+def world(n):
+    build_my_fixtures(100 * n)
+    yield
+```
+
+A caller reading the value has to tolerate `None`. An implementation that can
+count cheaply should still yield the number.
 
 For a shape with more than one table that number is the **sum across tables**,
 which is a total rather than an axis: a world of 100 companies and 1,000 orders

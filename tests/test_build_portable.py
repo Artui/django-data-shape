@@ -23,6 +23,7 @@ from django_data_shape import (
     Derived,
     FanOut,
     Given,
+    Projection,
     Sequential,
     Shape,
     Skew,
@@ -32,7 +33,17 @@ from django_data_shape import (
     Zipf,
     build,
 )
-from tests.testapp.models import Account, Company, Order, Session, Ticket
+from tests.testapp.models import (
+    Account,
+    Company,
+    Event,
+    EventSession,
+    Order,
+    Session,
+    Template,
+    TemplateSession,
+    Ticket,
+)
 
 pytestmark = pytest.mark.django_db(databases=["default", "not_postgres"])
 
@@ -214,3 +225,42 @@ def test_the_guard_covers_the_portable_route_too() -> None:
     # would leave the rule true where it is easy and false where it is not.
     with pytest.raises(DerivationQueriedDatabase, match="may not call the database"):
         build(shape, using=_ALIAS, require_statistics=False)
+
+
+def test_a_projection_fills_its_table_off_postgres_too() -> None:
+    # A projection is one statement in ordinary SQL -- an INSERT ... SELECT with
+    # a window function -- so it is on the backend-neutral side of the line this
+    # package draws. What it does not buy off PostgreSQL is the same thing
+    # nothing else buys there: statistics, and therefore a plan worth reading.
+    build(
+        Shape(
+            Projection(EventSession, per=Event, copying=TemplateSession),
+            Table(Template, rows=4, name=Constant("t")),
+            Table(
+                TemplateSession,
+                rows=12,
+                template=FanOut(Uniform(1, 3)),
+                title=Constant("s"),
+                minutes=Sequential(15, 1),
+            ),
+            Table(Event, rows=9, template=FanOut(Uniform(1, 3)), name=Constant("e")),
+            seed=2,
+        ),
+        using=_ALIAS,
+        require_statistics=False,
+    )
+
+    sizes = {
+        template_id: TemplateSession.objects.using(_ALIAS).filter(template_id=template_id).count()
+        for template_id in Template.objects.using(_ALIAS).values_list("id", flat=True)
+    }
+    expected = sum(
+        sizes[template_id]
+        for template_id in Event.objects.using(_ALIAS).values_list("template_id", flat=True)
+    )
+
+    assert expected > 0
+    assert EventSession.objects.using(_ALIAS).count() == expected
+    assert sorted(EventSession.objects.using(_ALIAS).values_list("id", flat=True)) == list(
+        range(1, expected + 1)
+    )

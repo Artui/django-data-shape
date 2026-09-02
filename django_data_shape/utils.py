@@ -3,9 +3,54 @@
 from __future__ import annotations
 
 import hashlib
+from typing import Any
+
+from django.db.models import Field, Model
+from django.db.models.fields import NOT_PROVIDED
+
+from django_data_shape.invalid_shape import InvalidShape
 
 _MASK64 = (1 << 64) - 1
 _GOLDEN = 0x9E3779B97F4A7C15
+
+
+def primary_key_field(model: type[Model]) -> Field[Any, Any]:
+    """The one concrete field that is ``model``'s primary key, or a refusal.
+
+    A composite primary key has no column of its own, so it is not among the
+    concrete fields at all and the obvious lookup raises a bare
+    ``StopIteration`` from inside this package -- which says nothing about what
+    the caller did. The message has to say ``keys=`` cannot help either, or a
+    reader told only "unsupported" will reasonably try the escape hatch that
+    solves every other unusual key and fail twice.
+
+    Shared rather than written at each entry point because both routes into a
+    table -- generating rows for it, and projecting into it -- ask this same
+    question first, and a refusal worded two ways is a refusal that will drift.
+    """
+    field = next((field for field in model._meta.concrete_fields if field.primary_key), None)
+    if field is None:
+        raise InvalidShape(
+            f"{model.__name__} has a composite primary key, which this package cannot assign. A "
+            "key strategy maps a row index to one value and a composite key is several columns, "
+            "so keys= cannot help either: this is arity, not type."
+        )
+    return field
+
+
+def has_db_default(field: Field[Any, Any]) -> bool:
+    """Whether the database itself will supply a value for this column.
+
+    ``db_default`` arrived in Django 5.0 and this package supports 4.2, so the
+    attribute cannot be assumed to exist. Unlike ``default``, this one is real
+    DDL, which is why a column carrying it can be left out of a ``COPY`` or an
+    ``INSERT ... SELECT`` entirely and still be filled.
+
+    Here rather than beside either caller because both routes into a table ask
+    the same question of a column, and the Django-version detail behind the
+    answer is one nobody should have to find twice.
+    """
+    return getattr(field, "db_default", NOT_PROVIDED) is not NOT_PROVIDED
 
 
 def field_stream(seed: int, table: str, field: str) -> int:

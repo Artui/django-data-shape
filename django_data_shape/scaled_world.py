@@ -43,14 +43,19 @@ def scaled_world(shape: Shape, factor: int, *, using: str = DEFAULT_DB_ALIAS) ->
 
     **Open a query capture inside the block, never around it.** Building a world
     emits statements of its own, and a capture wrapped around ``world(factor)``
-    counts them along with the block's. On PostgreSQL that is mild and fixed --
-    measured at twelve statements for a two-table shape, because ``COPY`` does
-    not go through Django's ``execute_wrapper`` and only the emptiness check, the
-    parent key read, the sequence reset, the ``ANALYZE`` and the savepoints do.
-    Off PostgreSQL it is neither: the inserts are ordinary statements, one per
-    thousand rows, **so the captured count grows with the factor** and a growth
-    assertion measuring from outside the block would read the loader's own curve
-    as its subject's.
+    counts them along with the block's. On PostgreSQL that is mild and **fixed**:
+    fourteen statements for a two-table shape at every factor, because ``COPY``
+    does not go through Django's ``execute_wrapper`` and only the emptiness
+    check, the parent key read, the sequence reset, the ``ANALYZE`` and the
+    savepoints do. Off PostgreSQL it is neither: the inserts are ordinary
+    statements, one per thousand rows, **so the captured count grows with the
+    factor** -- and a growth assertion measuring from outside the block would
+    read the loader's own curve as its subject's.
+
+    Both halves of that are pinned by tests rather than left as prose, because a
+    measurement in a docstring is the first thing to rot and the consumer this
+    matters to cannot check it without taking the dependency the protocol exists
+    to avoid. The number above was already wrong once, for exactly that reason.
 
     **The teardown is a rollback, not a delete.** Building inside a transaction
     and rolling it back at the end restores exactly the state the block started

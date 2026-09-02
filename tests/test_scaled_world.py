@@ -5,6 +5,8 @@ from __future__ import annotations
 import datetime
 
 import pytest
+from django.db import DEFAULT_DB_ALIAS, connection, connections
+from django.test.utils import CaptureQueriesContext
 
 from django_data_shape import Constant, FanOut, Shape, Skew, Table, Zipf, scaled_world
 from tests.testapp.models import Company, Order, Session
@@ -130,3 +132,54 @@ def test_it_also_undoes_a_world_it_opened_the_transaction_for() -> None:
         assert rows == 20
 
     assert Order.objects.count() == 0
+
+
+# The statement cost of building a world, pinned rather than described. Both
+# numbers were prose in a docstring until a consumer needed them and could not
+# check them without taking the dependency the scale protocol exists to avoid --
+# and the PostgreSQL one was wrong by two when it was finally measured. They are
+# measurements, so a deliberate change to the loader may move them; what must
+# not change silently is which of the two is a constant and which is a curve.
+_POSTGRES_STATEMENTS = 14
+_PORTABLE_STATEMENTS = 10
+_ROWS_PER_INSERT = 1000
+
+
+def _statements(shape: Shape, factor: int, alias: str) -> int:
+    with (
+        CaptureQueriesContext(connections[alias]) as captured,
+        scaled_world(shape, factor, using=alias),
+    ):
+        pass
+    return len(captured)
+
+
+@pytest.mark.skipif(
+    connection.vendor != "postgresql", reason="the COPY route needs PostgreSQL to be measured"
+)
+def test_building_a_world_costs_the_same_on_postgres_at_every_factor() -> None:
+    # The half that makes a capture around the block merely wrong rather than
+    # catastrophic: COPY is not a wrapped statement, so the overhead is the
+    # emptiness check, the parent key read, the sequence reset, the ANALYZE and
+    # the savepoints -- none of which depend on how many rows there are.
+    shape = _graph(companies=10, sessions=_ROWS_PER_INSERT)
+
+    assert _statements(shape, 1, DEFAULT_DB_ALIAS) == _POSTGRES_STATEMENTS
+    assert _statements(shape, 5, DEFAULT_DB_ALIAS) == _POSTGRES_STATEMENTS
+
+
+@pytest.mark.django_db(databases=["default", "not_postgres"])
+def test_and_a_cost_that_grows_with_the_factor_where_there_is_no_copy() -> None:
+    # The half a growth assertion has to know about. Every insert here is a
+    # wrapped statement, one per chunk, so a capture opened around the world
+    # measures the loader's curve rather than the subject's -- and it is a curve
+    # with the same shape as the one being asserted about, which is the worst
+    # possible confound.
+    shape = _graph(companies=10, sessions=_ROWS_PER_INSERT)
+
+    at_one = _statements(shape, 1, "not_postgres")
+    at_five = _statements(shape, 5, "not_postgres")
+
+    assert at_one == _PORTABLE_STATEMENTS
+    # Four more chunks of sessions; the ten companies still fit in one.
+    assert at_five == _PORTABLE_STATEMENTS + 4

@@ -6,6 +6,8 @@
 
 ::: django_data_shape.fan_out.FanOut
 
+::: django_data_shape.projection.Projection
+
 ::: django_data_shape.build.build
 
 ::: django_data_shape.build_result.BuildResult
@@ -49,6 +51,8 @@
 ::: django_data_shape.keys.uuid_keys.UuidKeys
 
 ::: django_data_shape.keys.key_function.KeyFunction
+
+::: django_data_shape.keys.sql_keys.SqlKeys
 
 ## Distributions
 

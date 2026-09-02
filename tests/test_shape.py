@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from django_data_shape import Constant, InvalidShape, Shape, Table
-from tests.testapp.models import Company
+from django_data_shape import Constant, FanOut, InvalidShape, Projection, Shape, Table, Zipf
+from tests.testapp.models import Company, Event, EventSession, TemplateSession
 
 
 def _company(rows: int = 1) -> Table:
@@ -48,3 +48,15 @@ def test_a_shape_cannot_be_edited_past_its_own_validation() -> None:
     for attribute, value in (("tables", ()), ("seed", 2)):
         with pytest.raises(AttributeError):
             setattr(shape, attribute, value)
+
+
+def test_a_model_declared_as_both_a_table_and_a_projection_is_refused() -> None:
+    # The same over-determination as declaring it twice, and worse for being
+    # harder to see: one of the two would silently win by load order.
+    with pytest.raises(InvalidShape, match="declared twice"):
+        Shape(
+            Table(
+                EventSession, rows=5, event=FanOut(Zipf()), title=Constant("s"), minutes=Constant(1)
+            ),
+            Projection(EventSession, per=Event, copying=TemplateSession),
+        )

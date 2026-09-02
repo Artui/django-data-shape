@@ -1,8 +1,14 @@
-"""The draw derivation everything else rests on."""
+"""The draw derivation everything else rests on, and the two shared lookups."""
 
 from __future__ import annotations
 
-from django_data_shape.utils import draw, field_stream
+from typing import Any, cast
+
+import pytest
+
+from django_data_shape import InvalidShape
+from django_data_shape.utils import draw, field_stream, has_db_default, primary_key_field
+from tests.testapp.models import Company
 
 
 def test_a_draw_is_uniform_in_the_unit_interval() -> None:
@@ -48,3 +54,38 @@ def test_a_stream_is_stable_across_processes() -> None:
     # test data rather than like a bug here.
     assert field_stream(seed=0, table="orders", field="status") == 10965613546237361956
     assert draw(field_stream(seed=0, table="orders", field="status"), 0) == 0.9705692634847262
+
+
+def test_a_database_default_is_left_to_the_database() -> None:
+    # A stub rather than a model, so this runs on Django 4.2 as well -- db_default
+    # arrived in 5.0, and the branch it guards is the only reason a column may
+    # legitimately be left out of a COPY or an INSERT ... SELECT. Mutating this
+    # helper to return False left the whole suite green before this existed,
+    # because the `or` arm next to its one caller was already covered.
+    class _Field:
+        db_default = "eu"
+
+    class _Older:
+        pass
+
+    assert has_db_default(cast("Any", _Field()))
+    assert not has_db_default(cast("Any", _Older()))
+
+
+def test_the_primary_key_lookup_finds_the_one_concrete_key_field() -> None:
+    # Shared by both routes into a table, so it is tested where it lives rather
+    # than twice at the entry points. The refusal it makes for a composite key
+    # is version-gated and lives beside the declarations that reach it.
+    assert primary_key_field(Company).name == "id"
+
+
+def test_a_model_with_no_concrete_primary_key_is_refused_as_arity() -> None:
+    class _Meta:
+        concrete_fields: tuple[object, ...] = ()
+
+    class _Keyless:
+        __name__ = "Keyless"
+        _meta = _Meta()
+
+    with pytest.raises(InvalidShape, match="arity, not type"):
+        primary_key_field(cast("Any", _Keyless()))

@@ -32,6 +32,20 @@ def hand_rolled(n: int) -> Iterator[int]:
         made.clear()
 
 
+# The one a consumer writes *first*, and the one the docstring's "five-line
+# callable" sentence actually describes: it builds rows and yields nothing,
+# because it has rows rather than a count. This is the reproduction of the
+# second time the protocol's prose promised more than its type allowed -- before
+# the yield was widened, ty rejected exactly this.
+@contextmanager
+def bare_world(n: int) -> Iterator[None]:
+    made = [Company(name="acme") for _ in range(100 * n)]
+    try:
+        yield
+    finally:
+        made.clear()
+
+
 # The same thing with state, because a consumer wanting to count builds or hold a
 # connection reaches for a class and would otherwise find the protocol closed.
 class Recorded:
@@ -50,5 +64,6 @@ _SHAPE = Shape(Table(Company, rows=100, name=Constant("acme")))
 _bound = partial(scaled_world, _SHAPE)
 
 hand_rolled_is_one: ScaleProtocol = hand_rolled
+bare_world_is_one: ScaleProtocol = bare_world
 recorded_is_one: ScaleProtocol = Recorded()
 bound_scaled_world_is_one: ScaleProtocol = _bound

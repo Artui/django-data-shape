@@ -72,6 +72,7 @@ nav:
   - Home: index.md
   - Relations: relations.md
   - Derivations: derivations.md
+  - Projections: projections.md
   - Keys: keys.md
   - From pytest: pytest.md
   - API reference: reference.md

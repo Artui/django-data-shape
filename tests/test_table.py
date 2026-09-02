@@ -222,22 +222,6 @@ def test_a_nullable_relation_may_be_omitted_and_loads_null() -> None:
     assert "referrer" not in Table(Referred, rows=1, label=Constant("x")).fields
 
 
-def test_a_database_default_is_left_to_the_database() -> None:
-    # A stub rather than a model, so this runs on Django 4.2 as well -- db_default
-    # arrived in 5.0, and the branch it guards is the only reason a column may
-    # legitimately be left out of the COPY. Mutating _has_db_default to return
-    # False left the whole suite green before this existed, because the `or`
-    # arm next to it was already covered.
-    class _Field:
-        db_default = "eu"
-
-    class _Older:
-        pass
-
-    assert Table._has_db_default(cast("Any", _Field()))
-    assert not Table._has_db_default(cast("Any", _Older()))
-
-
 def test_a_constant_cannot_fill_a_unique_column_twice() -> None:
     # Arithmetic, decidable here. It used to be discovered by the database
     # partway through a load that had already written most of a table.

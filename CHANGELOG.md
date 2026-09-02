@@ -7,6 +7,109 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`Projection`: a table populated by `INSERT ... SELECT` over tables already
+  built.** It covers the shape a distribution cannot -- a collection copied along
+  a join, where the child count is *determined* rather than drawn. An `Event` is
+  created from a `Template` and its `EventSession` rows mirror that template's
+  `TemplateSession` rows, so how many sessions an event has is
+  `count(TemplateSession WHERE template = event.template)` and nothing chose it.
+- The statement is **derived from the model graph** for the common
+  copy-the-collection case: `Projection(EventSession, per=Event,
+  copying=TemplateSession)` is the whole declaration. The join is the model both
+  sides reach in one step, the foreign key to `per` gets that row's key, a
+  foreign key to `copying` gets the copied row's key, a column named the same as
+  one on the source is copied from it, a plain `default=` is written as a bound
+  parameter and a nullable column is left out. Zero and several candidate joins
+  are both refused by name rather than guessed between.
+- `sql=` with `columns=` is the escape hatch for anything shaped oddly. The
+  columns are field names checked against the model, and the primary key has to
+  be among them, because this package owns the keys and a statement it did not
+  write has to say what they are.
+- `SqlKeys`, an extension of `KeyStrategy` for a strategy that can also say
+  itself in SQL. `SequentialKeys` implements it -- `row + 1` over a row index the
+  database computes -- and it is what fills a projected table's key column.
+
+### Why this rather than a vocabulary for mirroring
+- **It is what the real system already collapses into at scale.** One event built
+  from a template is a service call; a million is one statement, and a projection
+  is that statement. It is also the honest answer to the per-row creation hook
+  this package declines: the need underneath that request is real, and this meets
+  the collection half of it without making the default path anything but a set
+  operation.
+- **It needs no new distribution machinery at all** -- no mirror mode, no
+  inverted fan-out, no derived-cardinality vocabulary.
+- **It reproduces a correlation PostgreSQL cannot see.** Sessions-per-event is
+  correlated with the template, so events from a big template all have many
+  sessions. A `FanOut(Zipf())` on `EventSession.event` draws that count
+  independently and produces a join selectivity real data never has.
+
+### Decisions worth carrying
+- **There is no `rows=` on a projection, and that is the point.** Its cardinality
+  is decided by the tables it copies from, so declaring it too would be the
+  over-determination this package refuses everywhere else. The achieved count
+  comes back in the `BuildResult`, which is what that type was built to report --
+  and it means `scaled_shape` passes a projection through untouched, because
+  scaling the tables it reads scales it by exactly the same amount.
+- **A projected table's keys come from the same place as every other table's.**
+  The strategy on the declaration decides them; it just has to have a SQL form,
+  because there is no declared row count to enumerate in Python and the rows
+  never pass through it. `UuidKeys` and `KeyFunction` are refused by name rather
+  than approximated with a different hash in SQL, which would give one strategy
+  two meanings depending on which statement filled the table.
+- **A projection sits in `build()`'s one loop, not in a pass of its own.** Only
+  the step that produces the rows differs; the emptiness check, the sequence
+  reset and the `ANALYZE` after it are the same steps for the same reasons.
+  **The `ANALYZE` above all**: rows arriving by `INSERT ... SELECT` are as
+  invisible to the planner as rows arriving by `COPY`, and statistics describe a
+  table rather than the query that filled it.
+- **A projected table may itself be a fan-out parent.** Running every projection
+  last would have forbidden that by scheduling accident rather than by anything
+  true about the data, so `order_tables` now sorts the whole declaration graph --
+  fan-out edges and projection edges alike -- and a cycle is refused by name. A
+  raw `sql=` projection names nothing it reads, because nothing here parses SQL,
+  and is ordered after every table and every derived projection instead.
+- **A projection that inserts no rows fails the build.** An empty projected table
+  is not a smaller world; it is a declared table left out of the database, and
+  every test reading it then passes or fails for a reason unrelated to the code.
+
+### Fixed
+- **`ScaleProtocol` yields `int | None`, not `int`.** Its docstring invited a
+  consumer on an unsupported backend to supply a five-line callable, and the
+  obvious five-line callable builds rows and just yields -- which `ty` rejected.
+  **This was the second time the same protocol's prose promised more than its
+  signature allowed**, the first being the parameter name that 0.4.0 fixed by
+  making `factor` positional-only, and both were found by a consumer rather than
+  by review. A caller reading the value now has to tolerate `None`; an
+  implementation that can count cheaply should still yield the number.
+  `tests/scale_protocol_consumers.py` carries the invited implementation itself,
+  so the type-level promise has a type-level test behind it -- which is what was
+  missing both times.
+- `ScaleProtocol`'s docstring and the pytest page now give the exact
+  `Callable[[int], AbstractContextManager[int | None]]` spelling, so a consumer
+  restating the shape rather than importing it converges on one form instead of
+  a looser `ContextManager[Any]`.
+- **The "open a query capture inside the block" hazard is repeated on
+  `scale_fixture`.** It lived only on `scaled_world`, which the world *author*
+  calls; the person who can make the mistake is writing the test and reaches the
+  fixture without ever opening the other function.
+- **The statement-cost measurement is pinned by tests instead of stated in
+  prose.** It said twelve statements for a two-table shape and the real number is
+  fourteen. Two tests now hold both halves: the PostgreSQL cost is the same at
+  every factor, and the portable cost grows by one statement per thousand rows --
+  which is the half that matters, because it is a curve with the same shape as
+  the one a growth assertion is trying to measure.
+
+### Changed
+- `Shape` accepts a `Table` or a `Projection`. Declaring one model as both is
+  refused by the same check that refuses declaring it twice -- it is the same
+  over-determination, and worse for being harder to see.
+
+### Internal
+- `primary_key_field` and `has_db_default` moved to `utils`, where both routes
+  into a table can ask them. A composite-primary-key refusal worded two ways is
+  a refusal that will drift.
+
 ## [0.5.0] — 2026-09-02
 
 ### Added

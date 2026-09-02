@@ -95,7 +95,7 @@ class Defaulted(models.Model):
     token = models.UUIDField(default=uuid.uuid4)
 
 
-class Event(models.Model):
+class Prepared(models.Model):
     """A model for checking that field preparation actually happens.
 
     ``at`` is the interesting column: written without Django's own preparation a
@@ -251,3 +251,139 @@ class Supply(models.Model):
 
     vendor = models.ForeignKey(Vendor, on_delete=models.CASCADE)
     vendor_name = models.CharField(max_length=50)
+
+
+class Template(models.Model):
+    """The thing an event is created from, and the collection's real owner.
+
+    The motivating graph for a projection, kept as its own four models rather
+    than folded onto ``Company``: the point being tested is that a child
+    collection's cardinality is *determined* by a table two edges away, and that
+    only shows when both sides of the join exist.
+    """
+
+    name = models.CharField(max_length=50)
+
+
+class TemplateSession(models.Model):
+    """The collection that gets copied."""
+
+    template = models.ForeignKey(Template, on_delete=models.CASCADE, related_name="sessions")
+    title = models.CharField(max_length=50)
+    minutes = models.IntegerField()
+
+
+class Venue(models.Model):
+    """A second thing an event points at, so a join can be ambiguous."""
+
+    name = models.CharField(max_length=50)
+
+
+class Event(models.Model):
+    """Created from a template, and the table a projection makes one row per."""
+
+    template = models.ForeignKey(Template, on_delete=models.CASCADE, related_name="events")
+    venue = models.ForeignKey(Venue, null=True, on_delete=models.SET_NULL)
+    name = models.CharField(max_length=50)
+
+
+class EventSession(models.Model):
+    """One of each kind of column a derived projection has to decide about.
+
+    ``event`` is the edge the rows hang off, ``source`` points back at the row
+    that was copied, ``title`` and ``minutes`` match by name, ``channel`` has a
+    plain default and ``note`` is nullable. That is the whole rule set in one
+    model, which is what makes a single build able to falsify all of it.
+    """
+
+    event = models.ForeignKey(Event, on_delete=models.CASCADE, related_name="sessions")
+    source = models.ForeignKey(TemplateSession, null=True, on_delete=models.SET_NULL)
+    title = models.CharField(max_length=50)
+    minutes = models.IntegerField()
+    channel = models.CharField(max_length=20, default="web")
+    note = models.TextField(null=True)
+
+
+class Attendance(models.Model):
+    """A fan-out child of a projected table.
+
+    Here to answer the question a projection raises about load order: a table
+    filled by a statement is still a table, so something else may fan out over
+    it -- provided the ordering pass puts the projection first.
+    """
+
+    session = models.ForeignKey(EventSession, on_delete=models.CASCADE)
+    name = models.CharField(max_length=50)
+
+
+class Rehearsal(models.Model):
+    """A collection joinable to an event through two different models.
+
+    Template *and* venue, where ``TemplateSession`` shares only the template.
+    Which collection is being copied is then genuinely undecidable, and guessing
+    would build a different database from the one that was declared.
+    """
+
+    template = models.ForeignKey(Template, on_delete=models.CASCADE)
+    venue = models.ForeignKey(Venue, on_delete=models.CASCADE)
+    title = models.CharField(max_length=50)
+
+
+class SparseSession(models.Model):
+    """A projected model with a column nothing can fill.
+
+    ``headcount`` is not null, has no default, and is not a column the copied
+    collection carries under that name.
+    """
+
+    event = models.ForeignKey(Event, on_delete=models.CASCADE)
+    title = models.CharField(max_length=50)
+    headcount = models.IntegerField()
+
+
+class TokenSession(models.Model):
+    """A projected model with a callable default.
+
+    Refused for the reason ``Table`` refuses one, and for a second reason on top
+    of it: the rows are made by one statement and never pass through Python, so
+    there is no per-row moment at which the callable could be called.
+    """
+
+    event = models.ForeignKey(Event, on_delete=models.CASCADE)
+    title = models.CharField(max_length=50)
+    token = models.UUIDField(default=uuid.uuid4)
+
+
+class UuidSession(models.Model):
+    """A projected model whose keys cannot be written in SQL."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    event = models.ForeignKey(Event, on_delete=models.CASCADE)
+    title = models.CharField(max_length=50)
+
+
+class DualSession(models.Model):
+    """A projected model with two edges into the table it is projected per.
+
+    Which one the projected rows hang off is then a question the model graph
+    cannot answer, and answering it by picking the first would build a different
+    database from the one that was declared.
+    """
+
+    event = models.ForeignKey(Event, on_delete=models.CASCADE, related_name="+")
+    replaces = models.ForeignKey(Event, on_delete=models.CASCADE, related_name="+")
+    title = models.CharField(max_length=50)
+
+
+class AuditedSession(models.Model):
+    """A projected table reserved for the statistics assertion.
+
+    Its own model for the reason ``Catalogue`` has one, and a sharper version of
+    it: ``pg_statistic`` rows are **not** rolled back and survive the truncation
+    between transactional tests, so one test's ``ANALYZE`` of a shared model
+    would make another test's assertion true without the code under test having
+    done anything. Nothing else in the suite builds this table.
+    """
+
+    event = models.ForeignKey(Event, on_delete=models.CASCADE)
+    title = models.CharField(max_length=50)

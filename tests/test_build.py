@@ -18,7 +18,7 @@ from django_data_shape import (
     UnsupportedBackend,
 )
 from django_data_shape import build as build_shape
-from tests.testapp.models import Company, Event, Order
+from tests.testapp.models import Company, Order, Prepared
 
 # Skipped with a reason on any other backend rather than silently passing. This
 # module is the package's own claim under test -- COPY, a reset sequence, real
@@ -151,13 +151,13 @@ def test_a_naive_datetime_is_stored_where_save_would_have_put_it() -> None:
     # fix build() raised none at all, which is the sharpest evidence that no
     # field preparation was happening.
     with pytest.warns(RuntimeWarning, match="received a naive datetime"):
-        build_shape(Shape(Table(Event, rows=1, at=Constant(naive), tags=Constant({"a": 1}))))
+        build_shape(Shape(Table(Prepared, rows=1, at=Constant(naive), tags=Constant({"a": 1}))))
 
-    saved = Event.objects.create(at=naive, tags={"b": 2})
+    saved = Prepared.objects.create(at=naive, tags={"b": 2})
     # Both sides read back from the database: the point is what was *stored*,
     # and the in-memory instance still holds the naive value it was handed.
     saved.refresh_from_db()
-    loaded = Event.objects.exclude(pk=saved.pk).get()
+    loaded = Prepared.objects.exclude(pk=saved.pk).get()
 
     assert loaded.at == saved.at
     assert loaded.at == datetime.datetime(2020, 1, 1, 18, 0, tzinfo=datetime.timezone.utc)
@@ -166,9 +166,9 @@ def test_a_naive_datetime_is_stored_where_save_would_have_put_it() -> None:
 def test_a_json_column_loads_at_all() -> None:
     # psycopg has no adapter for a bare dict, so without preparation this does
     # not merely land wrong -- the build fails outright.
-    build_shape(Shape(Table(Event, rows=3, at=Constant(_AWARE), tags=Constant({"a": [1, 2]}))))
+    build_shape(Shape(Table(Prepared, rows=3, at=Constant(_AWARE), tags=Constant({"a": [1, 2]}))))
 
-    assert Event.objects.get(pk=1).tags == {"a": [1, 2]}
+    assert Prepared.objects.get(pk=1).tags == {"a": [1, 2]}
 
 
 def test_analyze_is_fresh_rather_than_merely_present() -> None:
