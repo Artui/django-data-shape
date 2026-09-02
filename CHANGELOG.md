@@ -7,6 +7,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **The inversion a skew exists for is reachable from outside.**
+  `fan_out_sizes(shape, Order, "company")` returns a `ChildrenPerParent` -- an
+  ordinary read-only mapping from parent key to child count, plus `ranked()` for
+  the head and the tail and `childless()` for the parents nobody references. A
+  fan-out was made a partition of the child key range rather than a draw per
+  child *because* a partition can be inverted; until now the property was
+  private, so a consumer wanting to assert on the busiest parent had to
+  `GROUP BY` the child table first -- an aggregate over the entire world, run
+  inside the session about to measure a plan, to recover something the
+  declaration already knew. This costs one `SELECT` over the **parent** table
+  instead, which is the asymmetry worth having at fifty thousand parents and two
+  million children.
+- **It is recomputed rather than remembered, and that is what makes it survive a
+  cache hit.** A `template_database` build happens once and every later run
+  clones, generating nothing at all, so anything carried off a `BuildResult`
+  would simply not exist on that path. The partition is a pure function of the
+  declaration, the seed and the parent's primary keys, so it is re-derived
+  through the very code the build runs -- the clone holds the parents, the
+  declaration holds the rest, and the template key already covers this package's
+  own version, so a database built by a release that drew differently is never
+  the one being read.
+- **`WorldChanged`**, for the one failure recomputation makes possible. The
+  partition takes exactly one thing from the database, so a parent table that has
+  gained or lost rows since the build yields a partition of a world nobody built
+  -- every number plausible and every one of them wrong. Where the parent is
+  declared in the same shape, which every cacheable shape is, that is now checked
+  and refused by name. Where the parents came from the ORM there is nothing to
+  check against and nothing is claimed.
+
+### Notes
+- **Fan-out sizes are not rank-ordered on the parent key**, in either direction,
+  and this is now written down where a reader meets it -- on `FanOut` itself and
+  beside the inversion. It is deliberate rather than an oversight: ordering the
+  sizes on the key would put a correlation between a parent's id and its child
+  count into the child table, and a correlated foreign key is planner-visible, so
+  it would be this package manufacturing exactly the flattering shape it exists
+  to remove. Reach for either end through `ranked()` or `childless()`, never
+  through `id=1`. A test pins it so it cannot be tidied away by accident.
+- **A session-scoped `shape_fixture` is there for tests that never asked for it.**
+  The rows are committed outside every test's transaction, so an ordinary
+  per-test fixture over the same model does not start from an empty table -- and
+  because the session fixture is only instantiated when something requests it,
+  the resulting failure appears in a full suite run and not when the file is run
+  alone, in files that never mention this package. Documented beside the existing
+  `scale_fixture` and `transaction=True` caveats. It is not detected, and cannot
+  be: this package cannot see the other test, and the only mechanism that could
+  -- intercepting writes to a model some shape owns -- is a per-row hook, which is
+  the one thing this library refuses to have at all.
+
 ## [0.8.0] — 2026-09-02
 
 ### Added

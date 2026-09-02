@@ -6,6 +6,10 @@
 
 ::: django_data_shape.fan_out.FanOut
 
+::: django_data_shape.fan_out_sizes.fan_out_sizes
+
+::: django_data_shape.children_per_parent.ChildrenPerParent
+
 ::: django_data_shape.projection.Projection
 
 ::: django_data_shape.build.build
@@ -111,3 +115,5 @@
 ::: django_data_shape.unhashable_shape.UnhashableShape
 
 ::: django_data_shape.invariant_violated.InvariantViolated
+
+::: django_data_shape.world_changed.WorldChanged

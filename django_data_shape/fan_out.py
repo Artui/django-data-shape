@@ -19,6 +19,17 @@ class FanOut:
     realistic heavy tail, ``Uniform(1, 10)`` for something flatter. The weights
     are normalised, so their scale is irrelevant and only their spread matters.
 
+    **A parent's weight is keyed on its position in the parent table, not
+    ordered by it.** The large groups are scattered through the key range rather
+    than gathered at the low keys, so "the whales are the low ids" is false and
+    so is the reverse. That is deliberate: ordering them would put a correlation
+    between a parent's key and its child count into the child table, and a
+    correlated foreign key is planner-visible -- it would be this package
+    manufacturing the flattering, unreal shape it exists to remove. Reach for the
+    head or the tail through
+    :func:`~django_data_shape.fan_out_sizes.fan_out_sizes`, which is the
+    inversion the partition representation exists to make possible.
+
     ``childless`` is the share of parents with **no** children at all. It is
     called out separately because it is the case hand-written fixtures always
     omit and the one that changes what a join does: a parent nobody references
