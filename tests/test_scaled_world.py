@@ -2,13 +2,24 @@
 
 from __future__ import annotations
 
+import contextlib
 import datetime
 
 import pytest
 from django.db import DEFAULT_DB_ALIAS, connection, connections
 from django.test.utils import CaptureQueriesContext
 
-from django_data_shape import Constant, FanOut, Shape, Skew, Table, Zipf, scaled_world
+from django_data_shape import (
+    Constant,
+    FanOut,
+    Invariant,
+    InvariantViolated,
+    Shape,
+    Skew,
+    Table,
+    Zipf,
+    scaled_world,
+)
 from tests.testapp.models import Company, Order, Session
 
 # No backend skip, unlike the loader's own tests, and the difference is the
@@ -194,3 +205,21 @@ def test_and_a_cost_that_grows_with_the_factor_where_there_is_no_copy() -> None:
     assert at_one == _PORTABLE_STATEMENTS
     # Four more chunks of sessions; the ten companies still fit in one.
     assert at_five == _PORTABLE_STATEMENTS + 4
+
+
+def test_a_scaled_world_is_checked_against_the_rules_the_shape_declared() -> None:
+    """The symptom the declaration-level fix exists to prevent.
+
+    Dropping the invariants left this call succeeding: the world built, the
+    rule that says it is impossible never ran, and a growth assertion went on to
+    measure a database its own declaration had already ruled out. Nothing raised
+    and nothing warned, which is why it needs a test at this level and not only
+    at the level of the shape that comes back.
+    """
+    impossible = Invariant("every company is a violation", sql="SELECT id FROM testapp_company")
+    shape = Shape(Table(Company, rows=4, name=Constant("acme")), invariants=(impossible,))
+
+    # entered through an ExitStack rather than a ``with`` body, because the
+    # build raises on the way in and a body would be a line that never runs.
+    with pytest.raises(InvariantViolated), contextlib.ExitStack() as entering:
+        entering.enter_context(scaled_world(shape, 1))

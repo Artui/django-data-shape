@@ -97,18 +97,30 @@ def scaled_shape(shape: Shape, factor: int) -> Shape:
             table
             if isinstance(table, Projection)
             # ``fields`` rather than keyword arguments, because a model may have
-            # a column named ``rows`` or ``model``; and ``table.keys`` rather
-            # than None, so a strategy the caller passed explicitly survives
-            # instead of being re-inferred into a different one.
+            # a column named ``rows`` or ``model``. Everything else is forwarded
+            # as the caller wrote it: ``keys`` so a strategy passed explicitly
+            # survives instead of being re-inferred into a different one, and
+            # ``statistics`` because a target is a property of the declaration
+            # rather than of its size -- a table that needs 300 buckets to be
+            # described honestly needs them at every factor, and dropping them
+            # leaves the scaled world described by fewer buckets than the
+            # declaration asked for, with nothing raised.
             else Table(
                 table.model,
                 rows=table.rows * factor,
                 fields=dict(table.fields),
                 keys=table.keys,
+                statistics=dict(table.statistics),
             )
             for table in shape.tables
         )
     except InvalidShape as invalid:
         raise InvalidShape(f"At scale factor {factor}: {invalid}") from invalid
 
-    return Shape(*tables, seed=shape.seed)
+    # The invariants come across unchanged, and that is the whole of the
+    # reasoning: an invariant is a claim about the world the declaration
+    # describes, and a scaled world is that same declaration at another size. A
+    # rule dropped here would stop being checked in every world a growth
+    # assertion builds -- which is every world nobody looks at directly -- while
+    # the build still succeeded and the suite still passed.
+    return Shape(*tables, seed=shape.seed, invariants=tuple(shape.invariants))
