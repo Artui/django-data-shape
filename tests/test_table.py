@@ -391,3 +391,71 @@ def test_the_parent_columns_a_table_reads_are_reported_per_relation() -> None:
 
 def test_a_table_with_no_parent_derivations_reads_nothing_extra() -> None:
     assert Table(Session, rows=5, company=FanOut(Zipf()), label=Constant("s")).parent_fields() == {}
+
+
+def test_a_statistics_target_on_a_field_the_model_does_not_have_is_refused() -> None:
+    with pytest.raises(InvalidShape, match="Order has no field named nope") as raised:
+        Table(
+            Order,
+            rows=3,
+            status=Constant("a"),
+            total=Constant(1),
+            created_at=Sequential(0, 1),
+            statistics={"nope": 200},
+        )
+
+    assert "statistics target" in str(raised.value)
+
+
+def test_a_statistics_target_on_a_column_this_shape_leaves_empty_is_refused() -> None:
+    # note is nullable and undeclared, so every row would hold the same nothing.
+    # A bigger sample of a column of NULLs describes nothing more precisely, so
+    # the target is a promise that could not be kept.
+    with pytest.raises(InvalidShape, match="does not fill that column"):
+        Table(
+            Order,
+            rows=3,
+            status=Constant("a"),
+            total=Constant(1),
+            created_at=Sequential(0, 1),
+            statistics={"note": 200},
+        )
+
+
+def test_a_statistics_target_on_a_column_the_model_defaulted_is_accepted() -> None:
+    # channel is never declared -- Table fills it from the model's own default --
+    # and it is a column this shape writes, so it can carry a target. Which is
+    # why the check runs after the defaults are resolved rather than before.
+    table = Table(
+        Order,
+        rows=3,
+        status=Constant("a"),
+        total=Constant(1),
+        created_at=Sequential(0, 1),
+        statistics={"channel": 200},
+    )
+
+    assert table.statistics == {"channel": 200}
+
+
+def test_a_statistics_target_on_the_primary_key_is_accepted() -> None:
+    # The one column that is not in fields= and is still filled: this package
+    # assigns it. Refusing it would be refusing a target on the column every
+    # foreign key in the database points at.
+    assert Table(Company, rows=3, name=Constant("acme"), statistics={"id": 400}).statistics == {
+        "id": 400
+    }
+
+
+def test_the_targets_are_read_only_like_every_other_part_of_a_declaration() -> None:
+    table = Table(Company, rows=3, name=Constant("acme"), statistics={"name": 400})
+
+    with pytest.raises(TypeError):
+        cast("Any", table.statistics)["name"] = 500
+
+
+def test_a_table_that_asks_for_nothing_says_so_rather_than_guessing() -> None:
+    # An empty mapping rather than a default filled in from somewhere: a column
+    # left out keeps whatever target the schema gives it, and this package does
+    # not decide that on the caller's behalf.
+    assert Table(Company, rows=3, name=Constant("acme")).statistics == {}

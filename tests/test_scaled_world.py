@@ -142,10 +142,15 @@ def test_it_also_undoes_a_world_it_opened_the_transaction_for() -> None:
 # not change silently is which of the two is a constant and which is a curve.
 # Counted with CaptureQueriesContext inside a non-transactional django_db test,
 # which is what pytestmark above gives every test in this module. Both of those
-# choices move the number: through execute_wrapper the same shape is nine, and a
-# transaction=True test is one savepoint fewer. The constants are therefore a
+# choices move the number: through execute_wrapper the same shape is eleven, and
+# a transaction=True test is one savepoint fewer. The constants are therefore a
 # regression guard on this module's own measurement, not a published figure.
-_POSTGRES_STATEMENTS = 14
+#
+# It moved from fourteen to sixteen in 0.7.0, when statistics targets added one
+# catalogue read per table -- a deliberate change to the loader, and exactly the
+# kind these constants exist to make visible rather than silent. What did not
+# move is the property being asserted: still fixed whatever the factor.
+_POSTGRES_STATEMENTS = 16
 _PORTABLE_STATEMENTS = 10
 _ROWS_PER_INSERT = 1000
 
@@ -165,8 +170,9 @@ def _statements(shape: Shape, factor: int, alias: str) -> int:
 def test_building_a_world_costs_the_same_on_postgres_at_every_factor() -> None:
     # The half that makes a capture around the block merely wrong rather than
     # catastrophic: COPY is not a wrapped statement, so the overhead is the
-    # emptiness check, the parent key read, the sequence reset, the ANALYZE and
-    # the savepoints -- none of which depend on how many rows there are.
+    # emptiness check, the statistics-target read, the parent key read, the
+    # sequence reset, the ANALYZE and the savepoints -- none of which depend on
+    # how many rows there are.
     shape = _graph(companies=10, sessions=_ROWS_PER_INSERT)
 
     assert _statements(shape, 1, DEFAULT_DB_ALIAS) == _POSTGRES_STATEMENTS

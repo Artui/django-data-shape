@@ -79,5 +79,9 @@ class After:
         parent = cast("Any", sources[0])
         return parent + self._at_least + self._within * draw
 
+    def canonical(self) -> object:
+        """The source it reads and the gap it adds. See ``Canonical``."""
+        return (self._sources, self._within, self._at_least)
+
     def __repr__(self) -> str:
         return f"After({self._sources[0]!r}, within={self._within!r}, at_least={self._at_least!r})"

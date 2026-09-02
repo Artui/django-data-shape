@@ -27,5 +27,9 @@ class Sequential:
     def value(self, row: int, draw: float) -> object:
         return self._start + row * self._step
 
+    def canonical(self) -> object:
+        """The start and the step. See ``Canonical``."""
+        return (self._start, self._step)
+
     def __repr__(self) -> str:
         return f"Sequential({self._start!r}, {self._step!r})"

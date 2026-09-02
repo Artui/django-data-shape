@@ -271,3 +271,49 @@ def test_a_raw_projection_leaving_the_key_out_is_refused() -> None:
         Projection(EventSession, sql="SELECT 1", columns=("event", "title"))
 
     assert "sequence" in str(raised.value)
+
+
+def test_a_projection_takes_a_statistics_target_for_a_column_it_writes() -> None:
+    projection = Projection(
+        EventSession, per=Event, copying=TemplateSession, statistics={"title": 250}
+    )
+
+    assert projection.statistics == {"title": 250}
+
+
+def test_a_statistics_target_on_a_field_the_model_does_not_have_is_refused() -> None:
+    with pytest.raises(InvalidShape, match="EventSession has no field named nope"):
+        Projection(EventSession, per=Event, copying=TemplateSession, statistics={"nope": 250})
+
+
+def test_a_statistics_target_on_a_column_the_statement_leaves_out_is_refused() -> None:
+    # note is nullable and is not a column TemplateSession carries, so the
+    # derived statement leaves it out entirely: every projected row would hold
+    # the same nothing, and a bigger sample of it would describe nothing.
+    with pytest.raises(InvalidShape, match="does not write that column"):
+        Projection(EventSession, per=Event, copying=TemplateSession, statistics={"note": 250})
+
+
+def test_a_statistics_target_is_checked_against_a_statement_the_caller_wrote_too() -> None:
+    # The same rule read off columns= rather than off the derived plan, which is
+    # the only thing this package knows about a select it did not write.
+    written = Projection(
+        EventSession,
+        columns=("id", "event", "title", "minutes"),
+        sql="SELECT 1, 1, 'x', 1",
+        statistics={"title": 250},
+    )
+
+    assert written.statistics == {"title": 250}
+    with pytest.raises(InvalidShape, match="does not write that column"):
+        Projection(
+            EventSession,
+            columns=("id", "event", "title", "minutes"),
+            sql="SELECT 1, 1, 'x', 1",
+            statistics={"channel": 250},
+        )
+
+
+def test_a_target_outside_postgres_own_range_is_refused_here_as_well() -> None:
+    with pytest.raises(InvalidShape, match="collect no statistics"):
+        Projection(EventSession, per=Event, copying=TemplateSession, statistics={"title": 0})

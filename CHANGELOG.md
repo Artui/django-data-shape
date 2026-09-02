@@ -10,6 +10,80 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.6.0] — 2026-09-02
 
 ### Added
+- **Statistics targets, declared per column.** `Table(..., statistics={"status":
+  500})` and the same on `Projection` issue `ALTER TABLE ... ALTER COLUMN ... SET
+  STATISTICS` before the rows are loaded, so the `ANALYZE` that ends every build
+  reads them. PostgreSQL keeps at most `statistics_target` most-common values and
+  that many histogram bounds and samples 300 times as many rows, so this is the
+  dial that decides how much of a declared shape the planner can record.
+- **A target is declared, never inferred, and the distributions are read only to
+  refuse.** A `Bounded` distribution offering more distinct values than its
+  column's effective target is refused by name, with the number and the
+  `statistics=` that would fix it. Choosing a target from the distribution would
+  be this package deciding how the planner sees a column on evidence the
+  declaration does not carry -- the same hundred-value skew wants a large target
+  where those values are a predicate and wants nothing of the sort where they are
+  not. So the luck is not replaced by a guess; it is made impossible to have
+  without being told.
+- Both orderings that decide whether any of it works are owned by the library: a
+  target set after `ANALYZE` does nothing until the next one, and a refusal that
+  costs a two-million-row `COPY` first is one nobody thanks you for. Both run
+  before the load.
+- **`shape_digest`: a content hash of a whole declaration**, stable across
+  processes and equal for two shapes exactly when they would build the same
+  rows. BLAKE2b over a tagged, length-prefixed encoding rather than Python's
+  `hash()`, which is salted per interpreter run. Everything reachable
+  contributes: row counts, distributions and their parameters, fan-outs with
+  their childless and null shares and their placement, derivations, a
+  projection's whole derived statement, key strategies, statistics targets and
+  the seed.
+- `Canonical`, the third opt-in protocol beside `Bounded` and `SqlKeys`: a
+  declaration that is data says what it is made of, and a consumer's own
+  distribution joins in by implementing it.
+- **`UnhashableShape`, and what this refuses to hash.** `Derived` and
+  `KeyFunction` each wrap a callable, and there is no honest digest of one: two
+  lambdas share a name, a closure carries values from elsewhere, and identical
+  bytecode returns something different when a constant it reads is edited in
+  another module. Every one of those failures agrees while the data has changed,
+  which is the one direction a cache key must never be wrong in. Such a shape is
+  refused by name -- naming the table and the column -- rather than hashed
+  approximately.
+- **`template_database`: build a shape once per machine and keep it.** It creates
+  the database under a working name, migrates, builds, and renames on success, so
+  the existence of the final name is the same claim as "this one is finished".
+  The name is a digest of the declaration, every migration on disk, every
+  installed model's columns, `USE_TZ`, `TIME_ZONE` and this package's version, so
+  a stale database is never asked for. A PostgreSQL advisory lock on the digest
+  makes a parallel run build it once rather than once per worker, and connections
+  to a finished template are turned off because the one failure mode of the whole
+  mechanism is PostgreSQL refusing to copy a database something is attached to.
+- **`clone_database`: `CREATE DATABASE ... TEMPLATE ... STRATEGY = file_copy`**,
+  which is the operation that makes any of this worth doing. Measured here on a
+  two-million-row, 183 MB database: the build is 16.6 s and the clone is 194-228
+  ms, against 704-721 ms on PostgreSQL's default `wal_log`. The statistics and
+  the per-column targets are ordinary catalogue contents and come with the copy,
+  so a cloned database is planner-ready without gathering anything again.
+- `drop_database`, because a content-addressed cache has nothing safe to garbage
+  collect: nothing that survives is ever wrong, only unused, and dropping one on
+  a guess would mean deleting a database because this package stopped recognising
+  its name.
+- `require_clone_strategy`, the second backend gate. `CREATE DATABASE ...
+  STRATEGY` arrived in PostgreSQL 15, so an older server is refused by name with
+  `strategy=None` as the way through -- and, like the vendor gate, it reads a
+  version off the connection so the refusal is covered by passing one rather than
+  by installing the server it refuses.
+- A `Statistics and reuse` documentation page, with the `django_db_setup` recipe
+  for cloning per session, the shorter version that goes through Django's own
+  `TEST["TEMPLATE"]` setting, and what the cache does not support.
+
+### Changed
+- Building a world on PostgreSQL now emits sixteen statements for a two-table
+  shape rather than fourteen: statistics targets add one catalogue read per
+  table. Still fixed whatever the scale factor, which is the property
+  `scaled_world` documents and the suite pins.
+
+
+### Added
 - **`Projection`: a table populated by `INSERT ... SELECT` over tables already
   built.** It covers the shape a distribution cannot -- a collection copied along
   a join, where the child count is *determined* rather than drawn. An `Event` is

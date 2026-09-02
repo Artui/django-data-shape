@@ -53,6 +53,47 @@ def has_db_default(field: Field[Any, Any]) -> bool:
     return getattr(field, "db_default", NOT_PROVIDED) is not NOT_PROVIDED
 
 
+# PostgreSQL's own ceiling: ``ALTER TABLE ... SET STATISTICS`` rejects anything
+# above this with "statistics target %d is too high", and refusing here means the
+# reader is told at declaration time rather than partway through a build.
+MAX_STATISTICS_TARGET = 10_000
+
+
+def check_statistics_target(where: str, target: int) -> None:
+    """Refuse a statistics target the planner could not act on.
+
+    Shared because a table and a projection both accept one and a refusal
+    worded two ways is a refusal that will drift.
+
+    Zero is refused rather than passed through, and it is the interesting end.
+    PostgreSQL accepts it, and it means *collect no statistics for this column*
+    -- which is precisely the state this package exists to condemn. A column
+    with rows and no statistics is worse than a column with no rows, because the
+    planner falls back to a default selectivity and commits to it. A declaration
+    that wanted to say "this column does not matter" has said something much
+    stronger by accident, so it is told rather than obeyed.
+    """
+    if not isinstance(target, int) or isinstance(target, bool):
+        raise InvalidShape(
+            f"{where} has a statistics target of {target!r}, which is not a whole number. A "
+            "target is a count of buckets: the planner keeps at most that many most-common "
+            "values and that many histogram bounds, and samples 300 times as many rows."
+        )
+    if target < 1:
+        raise InvalidShape(
+            f"{where} has a statistics target of {target}, and PostgreSQL reads anything below "
+            "one as 'collect no statistics for this column'. That is the state this package "
+            "exists to condemn -- rows the planner cannot see are worse than no rows, because it "
+            "guesses a default selectivity and commits to it. Leave the column out of "
+            "statistics= to keep the schema's own target."
+        )
+    if target > MAX_STATISTICS_TARGET:
+        raise InvalidShape(
+            f"{where} has a statistics target of {target}, and PostgreSQL's ceiling is "
+            f"{MAX_STATISTICS_TARGET}. ALTER TABLE would refuse it, after the load."
+        )
+
+
 def field_stream(seed: int, table: str, field: str) -> int:
     """A stable 64-bit stream id for one table's one field.
 

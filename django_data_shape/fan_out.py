@@ -75,6 +75,10 @@ class FanOut:
     def placement(self) -> str:
         return self._placement
 
+    def canonical(self) -> object:
+        """The size distribution and the three shares that shape it. See ``Canonical``."""
+        return (self._sizes, self._childless, self._null, self._placement)
+
     def __repr__(self) -> str:
         return (
             f"FanOut({self._sizes!r}, childless={self._childless!r}, "

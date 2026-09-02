@@ -387,3 +387,40 @@ class AuditedSession(models.Model):
 
     event = models.ForeignKey(Event, on_delete=models.CASCADE)
     title = models.CharField(max_length=50)
+
+
+class Bucketed(models.Model):
+    """A table reserved for the assertion that a declared statistics target lands.
+
+    Its own model for the reason ``AuditedSession`` has one, and one turn
+    sharper. ``ALTER TABLE ... SET STATISTICS`` is DDL that commits with the
+    build, and neither it nor the ``pg_statistic`` rows it changes are rolled
+    back between transactional tests -- so a target set by one test is still
+    there for the next, and an assertion about a shared table would pass or fail
+    on whichever test ran first.
+    """
+
+    code = models.CharField(max_length=20)
+
+
+class Narrowed(models.Model):
+    """A table reserved for the refusal that a target is what avoids.
+
+    Separate from ``Bucketed`` for exactly the reason above: this one must meet
+    the server's own default target, and a test that had raised the target on a
+    shared table would make the refusal not happen.
+    """
+
+    code = models.CharField(max_length=20)
+
+
+class TargetedSession(models.Model):
+    """A projected table reserved for the assertion that a projection takes a target too.
+
+    A collection copied along a join carries the source's skew into a second
+    table, and the route the rows took in has nothing to do with whether the
+    planner can record it.
+    """
+
+    event = models.ForeignKey(Event, on_delete=models.CASCADE)
+    title = models.CharField(max_length=50)

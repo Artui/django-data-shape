@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
+from types import MappingProxyType
 from typing import Any, cast
 
 from django.db.models import Field, Model
@@ -11,7 +12,12 @@ from django_data_shape.infer_key_strategy import infer_key_strategy
 from django_data_shape.invalid_shape import InvalidShape
 from django_data_shape.keys.key_strategy import KeyStrategy
 from django_data_shape.keys.sql_keys import SqlKeys
-from django_data_shape.utils import field_stream, has_db_default, primary_key_field
+from django_data_shape.utils import (
+    check_statistics_target,
+    field_stream,
+    has_db_default,
+    primary_key_field,
+)
 
 # The two table aliases the derived statement uses. Named rather than inlined
 # because they appear in the join, the select list and the ordering, and a
@@ -154,12 +160,14 @@ class Projection:
         sql: str | None = None,
         params: Sequence[object] = (),
         keys: KeyStrategy | None = None,
+        statistics: Mapping[str, int] | None = None,
     ) -> None:
         self._model = model
         self._per = per
         self._copying = copying
         self._sql = sql
         self._params = tuple(params)
+        self._statistics = dict(statistics or {})
         self._copied: tuple[tuple[str, str, str], ...] = ()
         self._literals: tuple[tuple[str, object], ...] = ()
         self._columns: tuple[str, ...] = ()
@@ -171,6 +179,11 @@ class Projection:
             self._derive(pk_field, columns, keys)
         else:
             self._adopt(pk_field, columns, keys)
+        # Last, because it is the only check that reads the column list rather
+        # than the declaration: both routes above decide which columns the
+        # statement writes, and a target on a column nothing writes is a target
+        # on nothing.
+        self._check_statistics()
 
     @property
     def model(self) -> type[Model]:
@@ -179,6 +192,17 @@ class Projection:
     @property
     def db_table(self) -> str:
         return str(self.model._meta.db_table)
+
+    @property
+    def statistics(self) -> Mapping[str, int]:
+        """The per-column statistics targets this projection asks the planner for.
+
+        A projected table needs them for exactly the reason a loaded one does. A
+        collection copied along a join carries the source's skew into a second
+        table, and the planner records that skew only if the column's target can
+        hold it -- the route the rows took in has nothing to do with it.
+        """
+        return MappingProxyType(self._statistics)
 
     @property
     def reads(self) -> tuple[type[Model], ...]:
@@ -368,6 +392,55 @@ class Projection:
                 "keys depend on a value no declaration mentions."
             )
         self._columns = tuple(_column(known[name]) for name in columns)
+
+    def _check_statistics(self) -> None:
+        """Refuse a statistics target on a column this statement does not write.
+
+        The same rule ``Table`` applies, read off the column list instead of off
+        the declared fields: a column the insert leaves out holds NULLs or a
+        database default, and a bigger sample of it describes nothing more
+        precisely.
+        """
+        known = {field.name: field for field in self._model._meta.concrete_fields}
+        for name in sorted(self._statistics):
+            where = f"{self._model.__name__}.{name}"
+            if name not in known:
+                raise InvalidShape(
+                    f"{self._model.__name__} has no field named {name}, so it cannot be given a "
+                    f"statistics target. Its concrete fields are: {', '.join(sorted(known))}."
+                )
+            if _column(known[name]) not in self._columns:
+                raise InvalidShape(
+                    f"{where} has a statistics target, but this projection does not write that "
+                    "column: it is nullable or database-defaulted, so every projected row would "
+                    "hold the same nothing. Copy it from the source by giving it that name, "
+                    "write the statement with sql=, or drop it from statistics=."
+                )
+            check_statistics_target(where, self._statistics[name])
+
+    def canonical(self) -> object:
+        """Everything about this projection that decides a row. See ``Canonical``.
+
+        The derived plan rather than only the two models it was derived from:
+        the join, the copied columns and the bound defaults are what the
+        statement actually does, and they are what changes when a model this
+        projection reads grows a field. A digest over ``per`` and ``copying``
+        alone would call two different statements the same.
+        """
+        return (
+            str(self.model._meta.label),
+            self.db_table,
+            None if self._per is None else str(self._per._meta.label),
+            None if self._copying is None else str(self._copying._meta.label),
+            self._columns,
+            self._sql,
+            self._params,
+            self._copied,
+            self._literals,
+            self._join,
+            self._keys,
+            {name: self._statistics[name] for name in sorted(self._statistics)},
+        )
 
     def __repr__(self) -> str:
         if self._sql is not None:

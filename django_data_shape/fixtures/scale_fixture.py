@@ -65,7 +65,7 @@ def scale_fixture(shape: Shape, *, using: str = DEFAULT_DB_ALIAS) -> object:
                 dashboard()
 
     A capture wrapped around ``world(factor)`` counts the build as well as the
-    block. On PostgreSQL that is a fixed overhead -- fourteen statements for a
+    block. On PostgreSQL that is a fixed overhead -- sixteen statements for a
     two-table shape, at every factor. Off PostgreSQL the rows go in as ordinary
     inserts, one statement per thousand, **so the count grows with the factor**
     and the assertion reads the loader's growth curve instead of its subject's.
