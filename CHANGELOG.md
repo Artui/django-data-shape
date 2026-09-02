@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-09-02
+
 ### Added
 - **The derivation mechanism**: one scope-parameterised thing rather than four
   bespoke ones. `Derived`, `After`, `Given` and `Aligned` all ask the same
@@ -277,7 +279,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   into `COPY FROM STDIN`, which psycopg 2 cannot do without materialising them
   first.
 
-[Unreleased]: https://github.com/Artui/django-data-shape/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/Artui/django-data-shape/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/Artui/django-data-shape/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/Artui/django-data-shape/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/Artui/django-data-shape/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/Artui/django-data-shape/compare/v0.1.1...v0.2.0
