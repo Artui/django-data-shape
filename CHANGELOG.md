@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-09-02
+
 ### Added
 - **The pytest surface**, in `django_data_shape.fixtures`. `shape_fixture(shape)`
   returns a session-scoped fixture that builds a shape once for a whole run;
@@ -212,7 +214,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   into `COPY FROM STDIN`, which psycopg 2 cannot do without materialising them
   first.
 
-[Unreleased]: https://github.com/Artui/django-data-shape/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/Artui/django-data-shape/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/Artui/django-data-shape/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/Artui/django-data-shape/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/Artui/django-data-shape/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/Artui/django-data-shape/compare/v0.1.0...v0.1.1
