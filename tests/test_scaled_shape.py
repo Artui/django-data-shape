@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime
+import inspect
 
 import pytest
 
@@ -10,6 +11,7 @@ from django_data_shape import (
     Constant,
     FanOut,
     InvalidShape,
+    Invariant,
     KeyFunction,
     Projection,
     Shape,
@@ -17,6 +19,7 @@ from django_data_shape import (
     Table,
     Zipf,
     scaled_shape,
+    shape_digest,
 )
 from tests.testapp.models import (
     Company,
@@ -163,3 +166,63 @@ def test_a_projection_passes_through_untouched_and_needs_no_factor() -> None:
 
     assert scaled.tables[0] is projection
     assert scaled.tables[1].rows == 1000
+
+
+def test_a_scaled_shape_still_checks_the_rules_the_shape_declared() -> None:
+    # A growth assertion builds every world through this function, so an
+    # invariant dropped here is a rule that stops being checked in exactly the
+    # worlds nobody watches -- with no error and no warning.
+    rule = Invariant("every company is a violation", sql="SELECT id FROM testapp_company")
+    shape = Shape(Table(Company, rows=10, name=Constant("acme")), invariants=(rule,))
+
+    assert scaled_shape(shape, 10).invariants == (rule,)
+
+
+def test_a_scaled_table_keeps_the_statistics_target_it_declared() -> None:
+    # Dropped, this makes a table that needs a raised target unscalable at any
+    # factor at all, including 1 -- the world simply comes back described by
+    # fewer buckets than the declaration asked for.
+    shape = Shape(Table(Company, rows=10, name=Constant("acme"), statistics={"name": 300}))
+
+    assert scaled_shape(shape, 10).tables[0].statistics == {"name": 300}
+
+
+def test_scaling_at_factor_one_changes_nothing_about_the_declaration() -> None:
+    # The identity that makes the two above hard to get wrong again: at factor 1
+    # a scaled shape is the same declaration, so anything the copy loses shows
+    # up here without needing a test per field. The digest is the comparison
+    # that works, because it reduces a declaration to a value -- ``canonical``
+    # returns the tables themselves, which compare by identity.
+    rule = Invariant("every company is a violation", sql="SELECT id FROM testapp_company")
+    table = Table(Company, rows=10, name=Constant("acme"), statistics={"name": 300})
+    shape = Shape(table, seed=7, invariants=(rule,))
+
+    assert shape_digest(scaled_shape(shape, 1)) == shape_digest(shape)
+
+
+@pytest.mark.parametrize(
+    ("constructor", "handled"),
+    [
+        (Table, {"model", "rows", "fields", "keys", "statistics", "field_distributions"}),
+        (Shape, {"tables", "seed", "invariants"}),
+    ],
+)
+def test_every_constructor_parameter_is_accounted_for_when_a_shape_is_rebuilt(
+    constructor: type, handled: set[str]
+) -> None:
+    """The guard against the next field being dropped as quietly as these two.
+
+    ``scaled_shape`` reassembles both objects through their own constructors, so
+    a parameter added to either is silently left behind unless somebody
+    remembers this function. Nothing else notices: the rebuilt shape is valid,
+    the suite passes, and the declaration just means less than it says. This
+    fails the day a parameter is added, which is the day the choice is being
+    made anyway.
+    """
+    parameters = set(inspect.signature(constructor.__init__).parameters) - {"self"}
+
+    assert parameters == handled, (
+        f"{constructor.__name__}.__init__ has parameters scaled_shape does not "
+        f"account for: {sorted(parameters - handled)}. Forward it in "
+        "scaled_shape, or add it here with a comment saying why it is not."
+    )
