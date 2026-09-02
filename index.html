@@ -388,6 +388,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#projections" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Projections
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#from-pytest" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -459,6 +470,33 @@
     
   
     Derivations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="projections/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Projections
   
 
     
@@ -645,6 +683,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#projections" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Projections
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#from-pytest" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -800,6 +849,13 @@ gathered.</p>
 as a distribution rather than a number, plus the childless tail and where the
 children physically sit. The parents can be ones this package built or ones your
 own code did. See <a href="relations/">Relations</a>.</p>
+<h2 id="projections">Projections<a class="headerlink" href="#projections" title="Permanent link">&para;</a></h2>
+<p>Some tables are not distributed at all, they are copied. An event created from a
+template has exactly the sessions that template has, so its child count is
+<em>determined</em> rather than drawn -- and correlated with the template, which is the
+cross-table correlation Postgres cannot see. <code>Projection</code> fills such a table with
+one <code>INSERT ... SELECT</code> derived from the model graph, which is what a creation
+service collapses into at scale. See <a href="projections/">Projections</a>.</p>
 <h2 id="from-pytest">From pytest<a class="headerlink" href="#from-pytest" title="Permanent link">&para;</a></h2>
 <p>A session-scoped fixture builds a shape once for a whole run, and a scale
 harness makes the same world at several sizes so a query count can be asserted
@@ -808,8 +864,8 @@ query count is an ORM property; the session world skips with a stated reason
 where a shaped database cannot exist, because its job is to be believed by a
 planner. See <a href="pytest/">From pytest</a>.</p>
 <h2 id="not-in-this-release">Not in this release<a class="headerlink" href="#not-in-this-release" title="Permanent link">&para;</a></h2>
-<p>Derived fields, collections copied along a join, per-group invariants,
-many-to-many edges, and reusing a built database as a template.</p>
+<p>Per-group invariants, many-to-many edges, and reusing a built database as a
+template.</p>
 
 
 

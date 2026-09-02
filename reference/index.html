@@ -343,6 +343,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../projections/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Projections
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../keys/" class="md-nav__link">
         
   
@@ -558,6 +585,45 @@
       
     </span>
   </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#django_data_shape.projection.Projection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Projection
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Projection">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#django_data_shape.projection.Projection.reads" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        reads
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#django_data_shape.projection.Projection.statement" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        statement
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -796,6 +862,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="SequentialKeys">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#django_data_shape.keys.sequential_keys.SequentialKeys.key_sql" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        key_sql
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -814,6 +897,17 @@
     <span class="md-ellipsis">
       
         KeyFunction
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#django_data_shape.keys.sql_keys.SqlKeys" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SqlKeys
       
     </span>
   </a>
@@ -1126,6 +1220,45 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#django_data_shape.projection.Projection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Projection
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Projection">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#django_data_shape.projection.Projection.reads" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        reads
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#django_data_shape.projection.Projection.statement" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        statement
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#django_data_shape.build.build" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1360,6 +1493,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="SequentialKeys">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#django_data_shape.keys.sequential_keys.SequentialKeys.key_sql" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        key_sql
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1378,6 +1528,17 @@
     <span class="md-ellipsis">
       
         KeyFunction
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#django_data_shape.keys.sql_keys.SqlKeys" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SqlKeys
       
     </span>
   </a>
@@ -1604,6 +1765,14 @@ state worth not hashing.</p>
 for the same reason: two builds of the same shape must produce byte-identical
 databases, and a seed passed at build time would let them differ while the
 declaration claimed they could not.</p>
+<p>A declaration is a :class:<code>~django_data_shape.table.Table</code> -- so many rows,
+distributed like this -- or a
+:class:<code>~django_data_shape.projection.Projection</code>, which has no row count of
+its own because its cardinality is decided by the tables it copies from. The
+duplicate check below covers both kinds together on purpose: declaring one
+model as a table <em>and</em> as a projection is the same over-determination as
+declaring it twice, and it would silently mean whichever the load order
+happened to reach last.</p>
 
 
 
@@ -1899,6 +2068,218 @@ default interleaves them the way rows really arrive.</p>
 
 </div>
 
+<div class="doc doc-object doc-class">
+
+
+
+<h2 id="django_data_shape.projection.Projection" class="doc doc-heading">
+            <span class="doc doc-object-name doc-class-name">Projection</span>
+
+
+<a href="#django_data_shape.projection.Projection" class="headerlink" title="Permanent link">&para;</a></h2>
+
+
+    <div class="doc doc-contents first">
+
+
+
+        <p>One row per pair, copied along a join, by <code>INSERT ... SELECT</code>.</p>
+<p>The shape it exists for is a collection copied across an edge. A
+<code>Template</code> has <code>TemplateSession</code> rows; an <code>Event</code> is created <em>from</em> a
+template, and its <code>EventSession</code> rows mirror that template's sessions::</p>
+<div class="language-text highlight"><pre><span></span><code>Shape(
+    Table(Template, rows=500, name=Constant("t")),
+    Table(TemplateSession, rows=4_000, template=FanOut(Zipf()), title=Constant("s")),
+    Table(Event, rows=200_000, template=FanOut(Zipf()), name=Constant("e")),
+    Projection(EventSession, per=Event, copying=TemplateSession),
+)
+</code></pre></div>
+<p>That reads as <em>one <code>EventSession</code> per <code>Event</code>, copying
+<code>TemplateSession</code></em>, and it is the whole declaration: the join, the column
+list and the keys are all derived from the model graph.</p>
+<p><strong>Why a projection rather than a vocabulary for mirroring.</strong> Three reasons,
+and the first is the one that decides it.</p>
+<ul>
+<li>It is what the real system already collapses into at scale. One event
+  built from a template is a service call; a million of them is one
+  statement. A projection <em>is</em> that statement, so the test database is built
+  the way the production table would be backfilled rather than the way one
+  row is created.</li>
+<li>It needs no new distribution machinery at all. A mirroring mode on
+  <code>FanOut</code> would need an inverted fan-out, a derived cardinality and a way
+  to say "as many as over there" -- three vocabulary items to express
+  something that is not a distribution in the first place.</li>
+<li>It reproduces a correlation PostgreSQL cannot see. Sessions-per-event is
+  correlated with the template, so every event built from a big template has
+  many sessions. A plain <code>FanOut</code> on <code>EventSession.event</code> draws that
+  count independently and hands the planner a join selectivity real data
+  never has -- which is the cross-table correlation this package exists to
+  make reproducible.</li>
+</ul>
+<p><strong>The cardinality is determined, not declared, and that is why this is not a
+<code>Table</code>.</strong> There is no <code>rows=</code> here: the row count is
+<code>count(Event JOIN TemplateSession)</code>, decided by the tables already built.
+Declaring it as well would be the over-determination this package refuses
+everywhere else -- <code>rows=</code> on both sides of a one-to-one, an edge count
+beside both marginals of a many-to-many, a status skew beside the fan-out
+that already fixes it. The count comes back in the
+:class:<code>~django_data_shape.build_result.BuildResult</code> like every other
+table's, which is what that type was built to report.</p>
+<p><strong>The join is derived from the model graph.</strong> <code>per</code> and <code>copying</code> are
+joined through a model they both reach in one step -- here both have a
+foreign key to <code>Template</code> -- and <code>per</code>'s own primary key counts as a
+step of length zero, so a source that points straight at <code>per</code> works the
+same way. Exactly one such link has to exist; zero and several are both
+refused by name, because guessing which edge was meant would build a
+different database from the one that was declared.</p>
+<p><strong>The columns are derived too</strong>, in this order, for every column of the
+projected model except its primary key:</p>
+<ul>
+<li>the foreign key to <code>per</code> gets that row's key;</li>
+<li>a foreign key to <code>copying</code> gets the copied row's key, which is how a
+  projected collection records where it came from;</li>
+<li>a column whose <strong>name</strong> matches one on <code>copying</code> is copied from it. The
+  match is by name, so the two columns have to hold compatible types and the
+  database says so if they do not;</li>
+<li>a column with a plain (non-callable) Django <code>default=</code> gets that value
+  as a bound parameter, for the same reason
+  :class:<code>~django_data_shape.table.Table</code> fills one: a Django default is
+  applied by <code>save()</code> and is not DDL, so a column left out would fail its
+  not-null check rather than quietly take it;</li>
+<li>a nullable column, or one with a real <code>db_default</code>, is left out of the
+  statement;</li>
+<li>anything else is refused by name, pointing at <code>sql=</code>.</li>
+</ul>
+<p><strong>Where the rows land physically is decided rather than defaulted.</strong> The
+statement orders by <code>per</code>'s key and then the copied row's, which is both
+deterministic -- two builds of one shape have to agree -- and the honest
+physical layout. There is deliberately no <code>placement=</code> here, unlike on
+:class:<code>~django_data_shape.fan_out.FanOut</code>, and the reason is a real
+difference rather than an omission: a fan-out's children arrive over time,
+interleaved, so grouping them is a lie. A copied collection is written in
+one transaction per parent, so grouped <em>is</em> arrival order, and the two
+orders a fan-out has to choose between are the same order here.</p>
+<p><strong>The keys come from the same place as every other table's.</strong> The strategy
+on this declaration decides them, exactly as it does for a <code>Table</code>. It
+just has to be able to say itself in SQL -- see
+:class:<code>~django_data_shape.keys.sql_keys.SqlKeys</code> -- because there is no
+declared row count to enumerate in Python and the rows never pass through
+it. Today that means an integer key; a UUID or a caller's own function is
+refused by name at declaration time rather than approximated with a
+different hash, which would give one strategy two meanings depending on
+which statement filled the table.</p>
+<p><strong><code>sql=</code> is the escape hatch, and it is the whole statement's <code>SELECT</code>.</strong>
+For anything shaped oddly -- a filter, an aggregate, a three-way join, a
+window -- pass the columns and the select that fills them::</p>
+<div class="language-text highlight"><pre><span></span><code>Projection(
+    EventSession,
+    columns=("id", "event", "title"),
+    sql=(
+        "SELECT row_number() OVER (ORDER BY e.id), e.id, t.title "
+        "FROM event e JOIN templatesession t ON t.template_id = e.template_id "
+        "WHERE t.title &lt;&gt; %s"
+    ),
+    params=("hidden",),
+)
+</code></pre></div>
+<p>The columns are field names and are checked against the model, so a typo is
+refused here rather than by the database. The primary key has to be among
+them: this package owns the keys, and a projection whose statement the
+caller wrote has to say what they are rather than leave them to a sequence
+whose current value is not part of any declaration. Nothing else about the
+select is inspected -- that is what an escape hatch is -- but the build
+still gives it the emptiness check, the sequence reset, the <code>ANALYZE</code> and
+the transaction.</p>
+<p>Like :class:<code>~django_data_shape.shape.Shape</code> and
+:class:<code>~django_data_shape.table.Table</code>, this is inert data: every attribute
+is read-only and every derived plan is a tuple, so a declaration stays
+hashable and serialisable for the template-database cache that will key on
+it.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+<div class="doc doc-object doc-attribute">
+
+
+
+<h3 id="django_data_shape.projection.Projection.reads" class="doc doc-heading">
+            <span class="doc doc-object-name doc-attribute-name">reads</span>
+
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-property"><code>property</code></small>
+  </span>
+
+<a href="#django_data_shape.projection.Projection.reads" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="n">reads</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">type</span><span class="p">[</span><span class="n">Model</span><span class="p">],</span> <span class="o">...</span><span class="p">]</span>
+</span></code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>The models this projection selects from, or nothing for a raw one.</p>
+<p>What :func:<code>~django_data_shape.order_tables.order_tables</code> sorts on. A
+derived projection names its two inputs, so it can be ordered after them
+precisely; a statement this package did not write names nothing, and is
+ordered after everything instead.</p>
+
+    </div>
+
+</div>
+
+
+
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="django_data_shape.projection.Projection.statement" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">statement</span>
+
+
+<a href="#django_data_shape.projection.Projection.statement" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">statement</span><span class="p">(</span><span class="n">connection</span><span class="p">:</span> <span class="n">Any</span><span class="p">,</span> <span class="n">seed</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">object</span><span class="p">,</span> <span class="o">...</span><span class="p">]]</span>
+</span></code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>The <code>INSERT ... SELECT</code> this declaration means, and its parameters.</p>
+<p>Rendered here rather than stored, because quoting belongs to the
+connection and a declaration must not hold one. Everything the statement
+is made of was decided when the declaration was validated; this only
+spells it.</p>
+<p>A model default lands as a bound parameter rather than as a literal in
+the SQL, so a string default carrying a quote is the driver's problem
+and not this package's.</p>
+
+
+    </div>
+
+</div>
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
 <div class="doc doc-object doc-function">
 
 
@@ -1939,6 +2320,19 @@ gathered, so cardinality is real and nothing about a plan is claimed.</p>
 cardinality are backend-neutral, planner realism is not. A query <em>count</em> is
 an ORM property and means the same on any backend, which is why a growth
 assertion can be honest here while a plan assertion still cannot.</p>
+<p>A :class:<code>~django_data_shape.projection.Projection</code> sits in the same loop
+rather than in a pass of its own, and where it sits is decided by
+:func:<code>~django_data_shape.order_tables.order_tables</code> like everything else:
+after the tables it reads, and before anything that reads it. Only the step
+that produces the rows differs -- one statement instead of a generated
+stream -- and the three steps after it are the same steps for the same
+reasons. The emptiness check, because the keys still start at 1. The
+sequence reset, because the rows still sit at 1..N with the sequence at 1,
+and the first <code>objects.create()</code> in a test would still collide. And the
+<code>ANALYZE</code> above all, because a table filled by <code>INSERT ... SELECT</code> and
+left unanalyzed is exactly the unanalyzed million rows this package exists
+to condemn -- the route the rows took in has nothing to do with whether the
+planner can see them.</p>
 
 
     </div>
@@ -2194,6 +2588,20 @@ from empty and undone again, so a table that
 the session is one this cannot build into at all -- the rows are still there,
 and the build is refused. The two compose over a graph by taking different
 models, not by taking turns over one.</p>
+<p><strong>Open a query capture inside the block, never around it.</strong> Repeated here
+from :func:<code>~django_data_shape.scaled_world.scaled_world</code> and not merely
+cross-referenced, because the person who can make this mistake is the one
+writing the test, and they reach this function without ever opening that
+one. Building a world emits statements of its own::</p>
+<div class="language-text highlight"><pre><span></span><code>with world(factor):
+    with django_assert_num_queries(3):   # inside
+        dashboard()
+</code></pre></div>
+<p>A capture wrapped around <code>world(factor)</code> counts the build as well as the
+block. On PostgreSQL that is a fixed overhead -- fourteen statements for a
+two-table shape, at every factor. Off PostgreSQL the rows go in as ordinary
+inserts, one statement per thousand, <strong>so the count grows with the factor</strong>
+and the assertion reads the loader's growth curve instead of its subject's.</p>
 <p><strong>It works on any backend Django supports</strong>, because what a growth
 assertion measures -- the number of queries a block emits -- is an ORM
 property rather than a planner one. Where the backend has <code>COPY</code> and
@@ -2285,12 +2693,39 @@ protocol that only built would leave every implementation to invent its own
 teardown, and the one this package uses -- roll back to the savepoint the
 world was built inside -- is not something a caller could arrange from
 outside.</p>
-<p><strong>What it yields is a number, not one of this package's types.</strong> The value
-is how many rows the world actually holds, which is a diagnostic rather than
-the growth curve's x-axis: the caller passed the factor in and already knows
-it. Yielding a <code>BuildResult</code> would have been richer and would have made
-the protocol unimplementable by anyone who has not installed this package,
-which is the opposite of what a seam is for.</p>
+<p><strong>What it yields is a row count or nothing, never one of this package's
+types.</strong> The value is how many rows the world actually holds, and it is a
+diagnostic rather than the growth curve's x-axis: the caller passed the
+factor in and already knows it. Yielding a <code>BuildResult</code> would have been
+richer and would have made the protocol unimplementable by anyone who has
+not installed this package, which is the opposite of what a seam is for.</p>
+<p><code>None</code> is allowed for the same reason the value is optional in spirit
+already. The five-line callable the paragraph above offers is the one a
+consumer writes first::</p>
+<div class="language-text highlight"><pre><span></span><code>@contextmanager
+def world(n: int) -&gt; Iterator[None]:
+    build_my_fixtures(100 * n)
+    yield
+</code></pre></div>
+<p>and it has no count to report, only rows. Requiring one would have made the
+invitation false -- which it was, in this exact way, until the type below
+was widened. <strong>A caller reading the value has to tolerate <code>None</code></strong>; an
+implementation that can count cheaply should still yield the number, because
+a growth curve annotated with what the world actually held is worth more
+than one annotated with what was asked for.</p>
+<p>Worth recording, because this is the <em>second</em> time the docstring promised
+more than the signature allowed: the first was the parameter name, fixed by
+making <code>factor</code> positional-only, and both were found by a consumer rather
+than by review. A type-level promise with no type-level test behind it is
+what let each of them ship, so
+<code>tests/scale_protocol_consumers.py</code> now carries the invited implementation
+itself and the suite type-checks it.</p>
+<p>Spelled without this class -- for a consumer who would rather restate the
+shape than import it -- it is exactly::</p>
+<div class="language-text highlight"><pre><span></span><code>Callable[[int], AbstractContextManager[int | None]]
+</code></pre></div>
+<p>Given here so that restatements converge on one, rather than on a looser
+<code>ContextManager[Any]</code> that would accept things this does not.</p>
 
 
 
@@ -2361,14 +2796,27 @@ realism is not. A <em>plan</em> assertion still belongs behind
 :func:<code>~django_data_shape.fixtures.skip_unless_postgres.skip_unless_postgres</code>.</p>
 <p><strong>Open a query capture inside the block, never around it.</strong> Building a world
 emits statements of its own, and a capture wrapped around <code>world(factor)</code>
-counts them along with the block's. On PostgreSQL that is mild and fixed --
-measured at twelve statements for a two-table shape, because <code>COPY</code> does
-not go through Django's <code>execute_wrapper</code> and only the emptiness check, the
-parent key read, the sequence reset, the <code>ANALYZE</code> and the savepoints do.
-Off PostgreSQL it is neither: the inserts are ordinary statements, one per
-thousand rows, <strong>so the captured count grows with the factor</strong> and a growth
-assertion measuring from outside the block would read the loader's own curve
-as its subject's.</p>
+counts them along with the block's. On PostgreSQL that is mild and <strong>fixed</strong>:
+fourteen statements for a two-table shape at every factor, because <code>COPY</code>
+does not go through Django's <code>execute_wrapper</code> and only the emptiness
+check, the parent key read, the sequence reset, the <code>ANALYZE</code> and the
+savepoints do.</p>
+<p>That fourteen is counted with <code>CaptureQueriesContext</code> -- what
+<code>django_assert_num_queries</code> reads -- inside a non-transactional <code>django_db</code>
+test. <strong>Both halves of that sentence move the number</strong>: the same shape counted
+through <code>execute_wrapper</code>, which is what a capture built on that hook sees,
+is nine, because the savepoints and the emptiness check reach the query log by
+a route the wrapper does not; and a <code>transaction=True</code> test drops one more
+savepoint. So do not read the absolute figure as a constant of this package.
+<strong>What is invariant, and what the tests below pin, is the shape of each: fixed
+on PostgreSQL whatever the factor, growing off it.</strong> Off PostgreSQL it is neither: the inserts are ordinary
+statements, one per thousand rows, <strong>so the captured count grows with the
+factor</strong> -- and a growth assertion measuring from outside the block would
+read the loader's own curve as its subject's.</p>
+<p>Both halves of that are pinned by tests rather than left as prose, because a
+measurement in a docstring is the first thing to rot and the consumer this
+matters to cannot check it without taking the dependency the protocol exists
+to avoid. The number above was already wrong once, for exactly that reason.</p>
 <p><strong>The teardown is a rollback, not a delete.</strong> Building inside a transaction
 and rolling it back at the end restores exactly the state the block started
 from, which matters twice: this package never issues a destructive statement
@@ -2456,6 +2904,14 @@ than assembled behind it, so a declaration that is only valid at its
 original size is refused at the factor that breaks it -- naming the factor,
 because a message about a row count the caller never wrote is a message that
 knows more than it says.</p>
+<p><strong>A :class:<code>~django_data_shape.projection.Projection</code> passes through
+untouched, and needs no factor of its own.</strong> It has no declared row count to
+multiply: its size is <code>count(per JOIN copying)</code>, so scaling the tables it
+reads scales it by exactly the same amount without anything being said.
+That is the determined-not-distributed property paying for itself -- a
+mirroring vocabulary with a row count in it would have needed a rule here,
+and would have had to pick between scaling the count and scaling the thing
+the count was derived from.</p>
 
 
     </div>
@@ -3005,6 +3461,12 @@ other one the reader has seen.</p>
 <p>This is the strategy that obliges the sequence reset after loading. It is
 also the only one that does: a key type with no sequence behind it has
 nothing to move.</p>
+<p>It is also the only strategy in this package that can say itself in SQL, so
+it is the only one that can fill a
+:class:<code>~django_data_shape.projection.Projection</code> -- see
+:class:<code>~django_data_shape.keys.sql_keys.SqlKeys</code>. That is not an accident
+of implementation effort: <code>row + 1</code> is arithmetic every database has, and
+a keyed hash is not.</p>
 
 
 
@@ -3026,6 +3488,30 @@ nothing to move.</p>
 
 
 
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="django_data_shape.keys.sequential_keys.SequentialKeys.key_sql" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">key_sql</span>
+
+
+<a href="#django_data_shape.keys.sequential_keys.SequentialKeys.key_sql" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">key_sql</span><span class="p">(</span><span class="n">stream</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">row</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span>
+</span></code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>The same <code>row + 1</code>, for a row index the database computes.</p>
+<p>Written as the Python expression rather than as <code>row_number()</code>
+directly, so the two halves of this strategy stay visibly the same rule.
+The caller decides what a row index <em>is</em> in SQL; this only says what the
+key is, given one.</p>
+
+
+    </div>
+
+</div>
 
 
 
@@ -3117,6 +3603,78 @@ primary key once got loaded with the strings "1", "2" and "3".</p>
 sample at construction rather than trusted: a key that varies between calls
 would break reproducibility, and it would break it silently, in the one
 column every foreign key points at.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h2 id="django_data_shape.keys.sql_keys.SqlKeys" class="doc doc-heading">
+            <span class="doc doc-object-name doc-class-name">SqlKeys</span>
+
+
+<a href="#django_data_shape.keys.sql_keys.SqlKeys" class="headerlink" title="Permanent link">&para;</a></h2>
+
+
+    <div class="doc doc-contents first">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="typing.Protocol">Protocol</span></code></p>
+
+
+
+        <p>A :class:<code>~django_data_shape.keys.key_strategy.KeyStrategy</code> with a SQL twin.</p>
+<p>Every table in a shape has a declared row count, so its keys can be
+enumerated in Python and streamed into <code>COPY</code>. A
+:class:<code>~django_data_shape.projection.Projection</code> has no declared row count
+-- its cardinality is determined by the join it copies along -- so there is
+no range of row indices to enumerate, and the rows never pass through Python
+at all. The keys have to be assigned by the statement that inserts them.</p>
+<p>That is the whole reason this protocol exists, and it is deliberately an
+extension of the key strategy rather than a second way to decide keys. A
+projected table's keys come from the same place as every other table's: the
+strategy on the declaration. The only extra requirement is that the strategy
+can express the same rule as an expression the database evaluates.</p>
+<p><code>key_sql</code> mirrors
+:meth:<code>~django_data_shape.keys.key_strategy.KeyStrategy.key_for</code> argument
+for argument. <code>stream</code> is the same per-table value derived from the seed.
+<code>row</code> is a SQL expression that evaluates to the same zero-based row index
+<code>key_for</code> receives, so an implementation writes the same arithmetic it
+would write in Python -- <code>SequentialKeys</code> returns <code>(row) + 1</code> for
+exactly the reason its Python half returns <code>row + 1</code>.</p>
+<p>A strategy that does not implement this is not broken and is not
+second-class; it simply cannot fill a projected table, and it is refused by
+name when one is declared over it. Approximating instead -- a different hash
+in SQL from the one Python computes -- would give one strategy two meanings
+depending on which statement filled the table, which is the quiet divergence
+this package exists to prevent.</p>
 
 
 

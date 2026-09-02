@@ -345,6 +345,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../projections/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Projections
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../keys/" class="md-nav__link">
         
   
@@ -919,13 +946,17 @@ and a capture wrapped around <code>world(factor)</code> counts them with the blo
 </span><span id="__span-7-4"><a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>            <span class="k">with</span> <span class="n">django_assert_num_queries</span><span class="p">(</span><span class="mi">3</span><span class="p">):</span>  <span class="c1"># inside, not outside</span>
 </span><span id="__span-7-5"><a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>                <span class="n">dashboard</span><span class="p">()</span>
 </span></code></pre></div>
-<p>On PostgreSQL the hazard is mild and fixed -- twelve statements for a two-table
-shape, because <code>COPY</code> does not pass through Django's <code>execute_wrapper</code> and only
+<p>On PostgreSQL the hazard is mild and fixed -- fourteen statements for a two-table
+shape, at every factor, because <code>COPY</code> does not pass through Django's
+<code>execute_wrapper</code> and only
 the emptiness check, the parent key read, the sequence reset, the <code>ANALYZE</code> and
 the savepoints do. Off PostgreSQL it is neither mild nor fixed: the inserts are
 ordinary statements, one per thousand rows, so the count a capture sees <strong>grows
 with the factor</strong>, and a growth assertion measuring from outside the block would
 read the loader's curve as its subject's.</p>
+<p>Both halves are pinned by tests in this package's own suite rather than left as
+prose. The number above was already wrong once, and the consumer it matters to
+cannot check it without taking the dependency the protocol exists to avoid.</p>
 <h3 id="varying-one-dimension">Varying one dimension<a class="headerlink" href="#varying-one-dimension" title="Permanent link">&para;</a></h3>
 <p><code>scaled_shape</code> multiplies every table, so a single factor moves the parents and
 the children together. That is on purpose -- a child-only factor changes the
@@ -1001,10 +1032,23 @@ it whatever reads best -- <code>n</code> above. That is deliberate: a structural
 matches parameter names too, so without it the protocol would have accepted only
 implementations that happened to spell the argument <code>factor</code>, which is a rule
 about this package's naming rather than about the shape of the call.</p>
-<p>The value yielded is how many rows the world holds. It is a diagnostic: the
-growth curve's x-axis is the factor, which the caller passed in and already
-knows. That is also why it is a plain number rather than a <code>BuildResult</code> -- a
-seam a stranger cannot implement is not a seam.</p>
+<p>Restated without importing <code>ScaleProtocol</code>, for a consumer who would rather spell
+the shape than depend on it, it is exactly:</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="n">Callable</span><span class="p">[[</span><span class="nb">int</span><span class="p">],</span> <span class="n">AbstractContextManager</span><span class="p">[</span><span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span><span class="p">]]</span>
+</span></code></pre></div>
+<p>The value yielded is how many rows the world holds, <strong>or <code>None</code></strong>. It is a
+diagnostic: the growth curve's x-axis is the factor, which the caller passed in
+and already knows. That is also why it is a plain number rather than a
+<code>BuildResult</code> -- a seam a stranger cannot implement is not a seam -- and why
+<code>None</code> is allowed, because the shortest honest implementation of this protocol
+builds rows and has no count to hand back:</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="nd">@contextlib</span><span class="o">.</span><span class="n">contextmanager</span>
+</span><span id="__span-12-2"><a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="k">def</span><span class="w"> </span><span class="nf">world</span><span class="p">(</span><span class="n">n</span><span class="p">):</span>
+</span><span id="__span-12-3"><a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>    <span class="n">build_my_fixtures</span><span class="p">(</span><span class="mi">100</span> <span class="o">*</span> <span class="n">n</span><span class="p">)</span>
+</span><span id="__span-12-4"><a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a>    <span class="k">yield</span>
+</span></code></pre></div>
+<p>A caller reading the value has to tolerate <code>None</code>. An implementation that can
+count cheaply should still yield the number.</p>
 <p>For a shape with more than one table that number is the <strong>sum across tables</strong>,
 which is a total rather than an axis: a world of 100 companies and 1,000 orders
 yields 1,100, and nothing in the protocol says which of the two grew. The factor
@@ -1027,10 +1071,10 @@ something.</p>
 insert is about 1.6 ms per thousand rows against 8 ms to generate them, so at the
 scales a growth assertion runs at the load is not what you are paying for.</p>
 <p><code>shape_fixture</code> skips, with the refusal as the stated reason:</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>SKIPPED [1] test_orders.py:14: Building a shape for the test session needs
-</span><span id="__span-11-2"><a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>PostgreSQL; connection 'default' is sqlite. Generation and cardinality are
-</span><span id="__span-11-3"><a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>backend-neutral, but COPY loading and planner statistics are not, and a shaped
-</span><span id="__span-11-4"><a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a>database whose plans mean nothing is worse than no shaped database at all.
+<div class="language-text highlight"><pre><span></span><code><span id="__span-13-1"><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>SKIPPED [1] test_orders.py:14: Building a shape for the test session needs
+</span><span id="__span-13-2"><a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a>PostgreSQL; connection 'default' is sqlite. Generation and cardinality are
+</span><span id="__span-13-3"><a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a>backend-neutral, but COPY loading and planner statistics are not, and a shaped
+</span><span id="__span-13-4"><a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a>database whose plans mean nothing is worse than no shaped database at all.
 </span></code></pre></div>
 <p>That is the fixture whose job is to be big and to be believed by a planner, and
 that world cannot exist here. A skip is the honest degradation: a test that never
@@ -1038,16 +1082,16 @@ ran says so, while a test that ran against a database nobody shaped passes and
 means nothing. If you are writing your own fixture over a shaped database --
 anything that asserts on a <em>plan</em> -- <code>skip_unless_postgres</code> is the same behaviour
 to reach for:</p>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">pytest</span>
-</span><span id="__span-12-2"><a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">django.db</span><span class="w"> </span><span class="kn">import</span> <span class="n">connections</span>
-</span><span id="__span-12-3"><a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>
-</span><span id="__span-12-4"><a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="kn">from</span><span class="w"> </span><span class="nn">django_data_shape.fixtures</span><span class="w"> </span><span class="kn">import</span> <span class="n">skip_unless_postgres</span>
-</span><span id="__span-12-5"><a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a>
-</span><span id="__span-12-6"><a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a>
-</span><span id="__span-12-7"><a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a><span class="nd">@pytest</span><span class="o">.</span><span class="n">fixture</span>
-</span><span id="__span-12-8"><a id="__codelineno-12-8" name="__codelineno-12-8" href="#__codelineno-12-8"></a><span class="k">def</span><span class="w"> </span><span class="nf">my_own_world</span><span class="p">(</span><span class="n">db</span><span class="p">):</span>
-</span><span id="__span-12-9"><a id="__codelineno-12-9" name="__codelineno-12-9" href="#__codelineno-12-9"></a>    <span class="n">skip_unless_postgres</span><span class="p">(</span><span class="n">connections</span><span class="p">[</span><span class="s2">"default"</span><span class="p">],</span> <span class="s2">"Measuring a plan"</span><span class="p">)</span>
-</span><span id="__span-12-10"><a id="__codelineno-12-10" name="__codelineno-12-10" href="#__codelineno-12-10"></a>    <span class="o">...</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-14-1"><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">pytest</span>
+</span><span id="__span-14-2"><a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">django.db</span><span class="w"> </span><span class="kn">import</span> <span class="n">connections</span>
+</span><span id="__span-14-3"><a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a>
+</span><span id="__span-14-4"><a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a><span class="kn">from</span><span class="w"> </span><span class="nn">django_data_shape.fixtures</span><span class="w"> </span><span class="kn">import</span> <span class="n">skip_unless_postgres</span>
+</span><span id="__span-14-5"><a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a>
+</span><span id="__span-14-6"><a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a>
+</span><span id="__span-14-7"><a id="__codelineno-14-7" name="__codelineno-14-7" href="#__codelineno-14-7"></a><span class="nd">@pytest</span><span class="o">.</span><span class="n">fixture</span>
+</span><span id="__span-14-8"><a id="__codelineno-14-8" name="__codelineno-14-8" href="#__codelineno-14-8"></a><span class="k">def</span><span class="w"> </span><span class="nf">my_own_world</span><span class="p">(</span><span class="n">db</span><span class="p">):</span>
+</span><span id="__span-14-9"><a id="__codelineno-14-9" name="__codelineno-14-9" href="#__codelineno-14-9"></a>    <span class="n">skip_unless_postgres</span><span class="p">(</span><span class="n">connections</span><span class="p">[</span><span class="s2">"default"</span><span class="p">],</span> <span class="s2">"Measuring a plan"</span><span class="p">)</span>
+</span><span id="__span-14-10"><a id="__codelineno-14-10" name="__codelineno-14-10" href="#__codelineno-14-10"></a>    <span class="o">...</span>
 </span></code></pre></div>
 
 

@@ -1,0 +1,987 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="A realistically shaped test database from Django models: declare cardinality, skew and fan-out, load by COPY, and make the query planner believe it.">
+      
+      
+      
+        <link rel="canonical" href="https://artui.github.io/django-data-shape/projections/">
+      
+      
+        <link rel="prev" href="../derivations/">
+      
+      
+        <link rel="next" href="../keys/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Projections - django-data-shape</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/_mkdocstrings.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#projections" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="django-data-shape" class="md-header__button md-logo" aria-label="django-data-shape" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            django-data-shape
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Projections
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/Artui/django-data-shape" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    Artui/django-data-shape
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="django-data-shape" class="md-nav__button md-logo" aria-label="django-data-shape" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    django-data-shape
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/Artui/django-data-shape" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    Artui/django-data-shape
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../relations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Relations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../derivations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Derivations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Projections
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Projections
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#why-a-projection-rather-than-a-way-of-saying-mirror-this" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why a projection rather than a way of saying "mirror this"
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-cardinality-is-determined-not-declared" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The cardinality is determined, not declared
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-gets-derived" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What gets derived
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#where-the-rows-land-and-why-there-is-no-placement" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Where the rows land, and why there is no placement=
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#keys" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Keys
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-escape-hatch" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The escape hatch
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#load-order" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Load order
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#refusals" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Refusals
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-is-still-postgres-only" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What is still Postgres-only
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../keys/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Keys
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../pytest/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    From pytest
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#why-a-projection-rather-than-a-way-of-saying-mirror-this" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why a projection rather than a way of saying "mirror this"
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-cardinality-is-determined-not-declared" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The cardinality is determined, not declared
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-gets-derived" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What gets derived
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#where-the-rows-land-and-why-there-is-no-placement" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Where the rows land, and why there is no placement=
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#keys" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Keys
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-escape-hatch" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The escape hatch
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#load-order" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Load order
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#refusals" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Refusals
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-is-still-postgres-only" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What is still Postgres-only
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+    <a href="https://github.com/Artui/django-data-shape/edit/main/docs/projections.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
+    </a>
+  
+  
+
+
+<h1 id="projections">Projections<a class="headerlink" href="#projections" title="Permanent link">&para;</a></h1>
+<p>Some tables are not distributed at all. They are <strong>copied</strong>.</p>
+<p>An <code>Event</code> is created from a <code>Template</code>, and its <code>EventSession</code> rows mirror that
+template's <code>TemplateSession</code> rows one for one. How many sessions an event has is
+not a shape anybody chose: it is <code>count(TemplateSession WHERE template =
+event.template)</code>. A <code>Projection</code> declares that.</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">django_data_shape</span><span class="w"> </span><span class="kn">import</span> <span class="n">Constant</span><span class="p">,</span> <span class="n">FanOut</span><span class="p">,</span> <span class="n">Projection</span><span class="p">,</span> <span class="n">Shape</span><span class="p">,</span> <span class="n">Table</span><span class="p">,</span> <span class="n">Uniform</span><span class="p">,</span> <span class="n">Zipf</span><span class="p">,</span> <span class="n">build</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="n">build</span><span class="p">(</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>    <span class="n">Shape</span><span class="p">(</span>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>        <span class="n">Table</span><span class="p">(</span><span class="n">Template</span><span class="p">,</span> <span class="n">rows</span><span class="o">=</span><span class="mi">500</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="n">Constant</span><span class="p">(</span><span class="s2">"t"</span><span class="p">)),</span>
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>        <span class="n">Table</span><span class="p">(</span>
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>            <span class="n">TemplateSession</span><span class="p">,</span>
+</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>            <span class="n">rows</span><span class="o">=</span><span class="mi">4_000</span><span class="p">,</span>
+</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>            <span class="n">template</span><span class="o">=</span><span class="n">FanOut</span><span class="p">(</span><span class="n">Zipf</span><span class="p">(</span><span class="mf">1.1</span><span class="p">)),</span>
+</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>            <span class="n">title</span><span class="o">=</span><span class="n">Constant</span><span class="p">(</span><span class="s2">"session"</span><span class="p">),</span>
+</span><span id="__span-0-11"><a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>            <span class="n">minutes</span><span class="o">=</span><span class="n">Uniform</span><span class="p">(</span><span class="mi">15</span><span class="p">,</span> <span class="mi">90</span><span class="p">),</span>
+</span><span id="__span-0-12"><a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>        <span class="p">),</span>
+</span><span id="__span-0-13"><a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>        <span class="n">Table</span><span class="p">(</span><span class="n">Event</span><span class="p">,</span> <span class="n">rows</span><span class="o">=</span><span class="mi">200_000</span><span class="p">,</span> <span class="n">template</span><span class="o">=</span><span class="n">FanOut</span><span class="p">(</span><span class="n">Zipf</span><span class="p">()),</span> <span class="n">name</span><span class="o">=</span><span class="n">Constant</span><span class="p">(</span><span class="s2">"e"</span><span class="p">)),</span>
+</span><span id="__span-0-14"><a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>        <span class="n">Projection</span><span class="p">(</span><span class="n">EventSession</span><span class="p">,</span> <span class="n">per</span><span class="o">=</span><span class="n">Event</span><span class="p">,</span> <span class="n">copying</span><span class="o">=</span><span class="n">TemplateSession</span><span class="p">),</span>
+</span><span id="__span-0-15"><a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>    <span class="p">)</span>
+</span><span id="__span-0-16"><a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a><span class="p">)</span>
+</span></code></pre></div>
+<p>That reads as <em>one <code>EventSession</code> per <code>Event</code>, copying <code>TemplateSession</code></em>, and it
+is the whole declaration. The join, the column list and the primary keys are all
+derived from the model graph, and the table is filled by a single
+<code>INSERT ... SELECT</code> over the tables already built.</p>
+<h2 id="why-a-projection-rather-than-a-way-of-saying-mirror-this">Why a projection rather than a way of saying "mirror this"<a class="headerlink" href="#why-a-projection-rather-than-a-way-of-saying-mirror-this" title="Permanent link">&para;</a></h2>
+<p>Three reasons, and the first is the one that decides it.</p>
+<p><strong>It is what the real system already collapses into at scale.</strong> One event built
+from a template is a service call. A million of them is one statement. A
+projection <em>is</em> that statement, so a test database is built the way the
+production table would be backfilled rather than the way one row is created — and
+that is also why this is not the per-row creation hook this package
+<a href="../derivations/">declines</a>.</p>
+<p><strong>It needs no new distribution machinery.</strong> A mirroring mode on <code>FanOut</code> would
+need an inverted fan-out, a cardinality derived from another table, and a way to
+say "as many as over there" — three new vocabulary items to express something
+that is not a distribution in the first place.</p>
+<p><strong>It reproduces a correlation Postgres cannot see.</strong> Sessions-per-event is
+correlated with the template, so every event built from a big template has many
+sessions and every event from a small one has few. A plain
+<code>FanOut(Zipf())</code> on <code>EventSession.event</code> would draw that count independently and
+hand the planner a join selectivity real data never has. Postgres has no
+cross-table statistics, so it cannot see the correlation either way — which means
+declaring it does not fix an estimate. It builds the database in which the wrong
+estimate is reproducible.</p>
+<h2 id="the-cardinality-is-determined-not-declared">The cardinality is determined, not declared<a class="headerlink" href="#the-cardinality-is-determined-not-declared" title="Permanent link">&para;</a></h2>
+<p>There is no <code>rows=</code> on a <code>Projection</code>. The row count is decided by the tables it
+copies from, and declaring it as well would be the same over-determination this
+package refuses everywhere else.</p>
+<p>The achieved count comes back in the <code>BuildResult</code>, like every other table's:</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="n">result</span> <span class="o">=</span> <span class="n">build</span><span class="p">(</span><span class="n">shape</span><span class="p">)</span>
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="n">sessions</span> <span class="o">=</span> <span class="nb">next</span><span class="p">(</span><span class="n">table</span> <span class="k">for</span> <span class="n">table</span> <span class="ow">in</span> <span class="n">result</span><span class="o">.</span><span class="n">tables</span> <span class="k">if</span> <span class="n">table</span><span class="o">.</span><span class="n">table</span> <span class="o">==</span> <span class="s2">"app_eventsession"</span><span class="p">)</span>
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="nb">print</span><span class="p">(</span><span class="n">sessions</span><span class="o">.</span><span class="n">rows</span><span class="p">)</span>
+</span></code></pre></div>
+<p>It also means a projection needs no scale factor of its own. <code>scaled_shape</code>
+passes it through untouched, and it grows because the tables it reads did.</p>
+<h2 id="what-gets-derived">What gets derived<a class="headerlink" href="#what-gets-derived" title="Permanent link">&para;</a></h2>
+<p><strong>The join.</strong> <code>per</code> and <code>copying</code> are joined through a model they both reach in
+one step — here both have a foreign key to <code>Template</code>. <code>per</code>'s own primary key
+counts as a step of length zero, so a source that points straight at <code>per</code> is the
+same case. Exactly one such link has to exist; zero and several are both refused
+by name.</p>
+<p><strong>The columns</strong>, in this order, for every column but the primary key:</p>
+<table>
+<thead>
+<tr>
+<th>The column</th>
+<th>Gets</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>the foreign key to <code>per</code></td>
+<td>that row's key</td>
+</tr>
+<tr>
+<td>a foreign key to <code>copying</code></td>
+<td>the copied row's key</td>
+</tr>
+<tr>
+<td>a column named the same as one on <code>copying</code></td>
+<td>that column's value</td>
+</tr>
+<tr>
+<td>a column with a plain <code>default=</code></td>
+<td>that default, as a bound parameter</td>
+</tr>
+<tr>
+<td>a nullable column, or one with <code>db_default</code></td>
+<td>nothing — it is left out</td>
+</tr>
+<tr>
+<td>anything else</td>
+<td>a refusal naming the column</td>
+</tr>
+</tbody>
+</table>
+<p>The copy is by name, so the two columns have to hold compatible types; the
+database says so if they do not.</p>
+<p>A <code>default=</code> is written rather than left out because a Django default is applied
+by <code>save()</code> and is not DDL — the same reason <code>Table</code> fills one in. A <strong>callable</strong>
+default is refused, and a projection has a second reason on top of <code>Table</code>'s:
+the rows are made by one statement and never pass through Python, so there is no
+per-row moment at which the callable could be called.</p>
+<h2 id="where-the-rows-land-and-why-there-is-no-placement">Where the rows land, and why there is no <code>placement=</code><a class="headerlink" href="#where-the-rows-land-and-why-there-is-no-placement" title="Permanent link">&para;</a></h2>
+<p>The statement orders by <code>per</code>'s key and then the copied row's. That is
+deterministic — two builds of one shape have to agree — and it is also the honest
+physical layout.</p>
+<p><code>FanOut</code> has to choose between <code>arrival</code> and <code>grouped</code> because a parent's
+children really do arrive over time, so emitting them contiguously is a lie. A
+copied collection is different: one event's sessions are written in one
+transaction, and the events themselves arrive in key order. Grouped <strong>is</strong>
+arrival order here, so there is nothing to choose.</p>
+<h2 id="keys">Keys<a class="headerlink" href="#keys" title="Permanent link">&para;</a></h2>
+<p>A projected table's keys come from the same place as any other table's: the key
+strategy on the declaration. The only extra requirement is that the strategy can
+say itself in SQL, because a projection has no declared row count to enumerate in
+Python and the rows never pass through it.</p>
+<p><code>SequentialKeys</code> — the strategy inferred for an integer primary key — can:
+<code>row + 1</code>, over a row index the database computes with <code>row_number()</code>. <code>UuidKeys</code>
+and <code>KeyFunction</code> cannot, and are refused by name at declaration time. That is a
+refusal rather than an approximation on purpose: computing a different hash in
+SQL from the one Python computes would give one strategy two meanings depending
+on which statement filled the table.</p>
+<p>A UUID-keyed table can still be projected — with <code>sql=</code>, producing the keys in
+the statement.</p>
+<h2 id="the-escape-hatch">The escape hatch<a class="headerlink" href="#the-escape-hatch" title="Permanent link">&para;</a></h2>
+<p>For anything shaped oddly — a filter, an aggregate, a three-way join, a window —
+supply the <code>SELECT</code> yourself and name the columns it produces.</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="n">Projection</span><span class="p">(</span>
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>    <span class="n">EventSession</span><span class="p">,</span>
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>    <span class="n">columns</span><span class="o">=</span><span class="p">(</span><span class="s2">"id"</span><span class="p">,</span> <span class="s2">"event"</span><span class="p">,</span> <span class="s2">"title"</span><span class="p">,</span> <span class="s2">"minutes"</span><span class="p">,</span> <span class="s2">"channel"</span><span class="p">),</span>
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>    <span class="n">sql</span><span class="o">=</span><span class="p">(</span>
+</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>        <span class="s2">"SELECT row_number() OVER (ORDER BY e.id, t.id), e.id, t.title, t.minutes, </span><span class="si">%s</span><span class="s2"> "</span>
+</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>        <span class="s2">"FROM app_event e "</span>
+</span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>        <span class="s2">"JOIN app_templatesession t ON t.template_id = e.template_id "</span>
+</span><span id="__span-2-8"><a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>        <span class="s2">"WHERE t.title &lt;&gt; </span><span class="si">%s</span><span class="s2">"</span>
+</span><span id="__span-2-9"><a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>    <span class="p">),</span>
+</span><span id="__span-2-10"><a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>    <span class="n">params</span><span class="o">=</span><span class="p">(</span><span class="s2">"web"</span><span class="p">,</span> <span class="s2">"hidden"</span><span class="p">),</span>
+</span><span id="__span-2-11"><a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="p">)</span>
+</span></code></pre></div>
+<p>The columns are <strong>field names</strong>, checked against the model, so a typo is refused
+here rather than by the database. The primary key has to be among them: this
+package owns the keys, and a statement it did not write has to say what they are
+rather than leave them to a sequence whose current value is not part of any
+declaration.</p>
+<p>Nothing else about the select is inspected — that is what an escape hatch is —
+but the build still gives it the emptiness check, the sequence reset, the
+<code>ANALYZE</code> and the transaction.</p>
+<h2 id="load-order">Load order<a class="headerlink" href="#load-order" title="Permanent link">&para;</a></h2>
+<p>A projection is ordered like everything else: after the tables it reads, before
+anything that reads it. So the order the declarations are written in does not
+matter, and <strong>a projected table may itself be a fan-out parent</strong>.</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="n">Shape</span><span class="p">(</span>
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>    <span class="n">Table</span><span class="p">(</span><span class="n">Attendance</span><span class="p">,</span> <span class="n">rows</span><span class="o">=</span><span class="mi">1_000_000</span><span class="p">,</span> <span class="n">session</span><span class="o">=</span><span class="n">FanOut</span><span class="p">(</span><span class="n">Zipf</span><span class="p">()),</span> <span class="n">name</span><span class="o">=</span><span class="n">Constant</span><span class="p">(</span><span class="s2">"a"</span><span class="p">)),</span>
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>    <span class="n">Projection</span><span class="p">(</span><span class="n">EventSession</span><span class="p">,</span> <span class="n">per</span><span class="o">=</span><span class="n">Event</span><span class="p">,</span> <span class="n">copying</span><span class="o">=</span><span class="n">TemplateSession</span><span class="p">),</span>
+</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>    <span class="o">...</span><span class="p">,</span>
+</span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="p">)</span>
+</span></code></pre></div>
+<p>A raw <code>sql=</code> projection is the exception: nothing here parses SQL, so it names
+nothing it reads and is ordered after every table and every derived projection.</p>
+<p>Two declarations that read each other are refused by name, the same way two
+tables fanning out over each other are.</p>
+<h2 id="refusals">Refusals<a class="headerlink" href="#refusals" title="Permanent link">&para;</a></h2>
+<p>A projection that inserts <strong>no rows</strong> fails the build. An empty projected table
+is not a smaller world — it is a declared table left out of the database, and
+every test reading it then passes or fails for a reason unrelated to the code.
+The usual causes are an input that is empty, and a join that matches nothing.</p>
+<p>The rest are refused at declaration time, before a connection is opened: an
+ambiguous join, a model with no edge to <code>per</code> or more than one, a column nothing
+can fill, a callable default, and a key strategy with no SQL form.</p>
+<h2 id="what-is-still-postgres-only">What is still Postgres-only<a class="headerlink" href="#what-is-still-postgres-only" title="Permanent link">&para;</a></h2>
+<p>Nothing about a projection, and everything about what it is <em>for</em>. The statement
+is ordinary SQL and runs anywhere, so <code>build(..., require_statistics=False)</code>
+fills a projected table on SQLite exactly as it fills any other. What SQLite does
+not get is the <code>ANALYZE</code> — and therefore a plan worth reading. The line is the
+same one this package draws everywhere: generation and cardinality are
+backend-neutral, planner realism is not.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.instant", "navigation.tracking", "navigation.sections", "navigation.top", "search.highlight", "search.suggest", "content.code.copy", "content.code.annotate", "content.action.edit", "toc.follow"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>
