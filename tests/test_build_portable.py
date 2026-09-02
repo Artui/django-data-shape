@@ -9,26 +9,36 @@ instead of needing a second database.
 from __future__ import annotations
 
 import datetime
+import decimal
+import operator
 
 import pytest
 from django.db import connections
 
 from django_data_shape import (
+    After,
+    Aligned,
     Constant,
+    DerivationQueriedDatabase,
+    Derived,
     FanOut,
+    Given,
+    Sequential,
     Shape,
     Skew,
     Table,
+    Uniform,
     UnsupportedBackend,
     Zipf,
     build,
 )
-from tests.testapp.models import Company, Order, Session
+from tests.testapp.models import Account, Company, Order, Session, Ticket
 
 pytestmark = pytest.mark.django_db(databases=["default", "not_postgres"])
 
 _AWARE = datetime.datetime(2020, 1, 1, tzinfo=datetime.timezone.utc)
 _ALIAS = "not_postgres"
+_TIGHT = datetime.timedelta(minutes=1)
 
 
 def _orders(rows: int = 50) -> Shape:
@@ -123,3 +133,84 @@ def test_a_load_larger_than_one_chunk_lands_completely() -> None:
     result = build(_orders(rows=2500), using=_ALIAS, require_statistics=False)
 
     assert result.rows == 2500 == Order.objects.using(_ALIAS).count()
+
+
+def _accounts_and_tickets(rows: int = 100) -> Shape:
+    return Shape(
+        Table(
+            Account,
+            rows=10,
+            signed_up_at=Sequential(_AWARE, datetime.timedelta(days=7)),
+            plan=Skew({"free": 0.5, "enterprise": 0.5}),
+        ),
+        Table(
+            Ticket,
+            rows=rows,
+            fields={
+                "account": FanOut(Zipf(1.2)),
+                # A one-minute window on purpose. Any mishandling of the
+                # parent's own value is a timezone-sized error, and a window
+                # measured in days swallows one: the assertion below would hold
+                # for a value six hours out of place, which is exactly what a
+                # raw cursor produces here.
+                "opened_at": After("account.signed_up_at", within=_TIGHT),
+                "severity": Given(
+                    "account.plan",
+                    {"free": Skew({"low": 1}), "enterprise": Skew({"high": 1})},
+                ),
+                "quantity": Aligned("size", Uniform(1, 100, places=0)),
+                "unit_price": Aligned("size", Uniform(1, 500, places=2)),
+                "total": Derived("quantity", "unit_price", compute=operator.mul),
+            },
+        ),
+        seed=9,
+    )
+
+
+def test_a_parent_column_arrives_as_a_python_value_off_postgres() -> None:
+    build(_accounts_and_tickets(), using=_ALIAS, require_statistics=False)
+
+    tickets = Ticket.objects.using(_ALIAS).select_related("account").all()
+
+    # SQLite has no date type, so a DateTimeField read through a raw cursor
+    # comes back as a string and After would be adding a timedelta to it. The
+    # parent's values go through the ORM for exactly this reason, and this is
+    # the assertion that says so rather than the comment.
+    assert tickets
+    assert all(
+        ticket.account.signed_up_at <= ticket.opened_at < ticket.account.signed_up_at + _TIGHT
+        for ticket in tickets
+    )
+
+
+def test_the_guard_covers_the_portable_route_too() -> None:
+    def _query(quantity: object, unit_price: object) -> object:
+        return decimal.Decimal(Account.objects.using(_ALIAS).count())
+
+    shape = Shape(
+        Table(
+            Account,
+            rows=10,
+            signed_up_at=Sequential(_AWARE, datetime.timedelta(days=7)),
+            plan=Skew({"free": 1}),
+        ),
+        Table(
+            Ticket,
+            rows=100,
+            fields={
+                "account": FanOut(Zipf(1.2)),
+                "opened_at": Constant(_AWARE),
+                "severity": Constant("low"),
+                "quantity": Constant(1),
+                "unit_price": Constant("1.00"),
+                "total": Derived("quantity", "unit_price", compute=_query),
+            },
+        ),
+        seed=9,
+    )
+
+    # The two routes install the guard differently -- one for the whole COPY
+    # loop, one per generated chunk -- so a wiring that only held on PostgreSQL
+    # would leave the rule true where it is easy and false where it is not.
+    with pytest.raises(DerivationQueriedDatabase, match="may not call the database"):
+        build(shape, using=_ALIAS, require_statistics=False)

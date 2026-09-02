@@ -9,6 +9,8 @@ from typing import Any, cast
 from django.db.models import Field, Model
 from django.db.models.fields import NOT_PROVIDED
 
+from django_data_shape.derivations.derivation import Derivation
+from django_data_shape.derivations.scope import Scope
 from django_data_shape.distributions.bounded import Bounded
 from django_data_shape.distributions.constant import Constant
 from django_data_shape.distributions.distribution import Distribution
@@ -16,6 +18,7 @@ from django_data_shape.fan_out import FanOut
 from django_data_shape.infer_key_strategy import infer_key_strategy
 from django_data_shape.invalid_shape import InvalidShape
 from django_data_shape.keys.key_strategy import KeyStrategy
+from django_data_shape.order_derivations import order_derivations
 
 
 class Table:
@@ -39,14 +42,14 @@ class Table:
         self,
         model: type[Model],
         rows: int,
-        fields: Mapping[str, Distribution | FanOut] | None = None,
+        fields: Mapping[str, Distribution | FanOut | Derivation] | None = None,
         keys: KeyStrategy | None = None,
-        **field_distributions: Distribution | FanOut,
+        **field_distributions: Distribution | FanOut | Derivation,
     ) -> None:
         if rows < 0:
             raise InvalidShape(f"{model.__name__} cannot have {rows} rows.")
 
-        declared: dict[str, Distribution | FanOut] = dict(fields or {})
+        declared: dict[str, Distribution | FanOut | Derivation] = dict(fields or {})
         overlap = sorted(set(declared) & set(field_distributions))
         if overlap:
             raise InvalidShape(
@@ -59,6 +62,7 @@ class Table:
         self._rows = rows
         self._fields = declared
         self._keys = keys
+        self._computation_order: tuple[str, ...] = ()
         self._validate()
 
     # Read-only, because every rule in this class is enforced once, in
@@ -84,7 +88,7 @@ class Table:
         return cast("KeyStrategy", self._keys)
 
     @property
-    def fields(self) -> Mapping[str, Distribution | FanOut]:
+    def fields(self) -> Mapping[str, Distribution | FanOut | Derivation]:
         """The declared distributions, including defaults filled in from the model."""
         return MappingProxyType(self._fields)
 
@@ -115,6 +119,33 @@ class Table:
             for name in sorted(self.fields)
             if cast("Field[Any, Any]", meta.get_field(name)).is_relation
         )
+
+    def computation_order(self) -> tuple[str, ...]:
+        """The declared derivations, dependencies first.
+
+        A second order over the same columns, and deliberately not the one
+        ``columns()`` returns. That one is sorted by name to keep the ``COPY``
+        statement stable; this one is a topological sort of what depends on
+        what. Computed once, when the declaration was validated, because a cycle
+        among derivations is a refusal and refusals belong at declaration time.
+        """
+        return self._computation_order
+
+    def parent_fields(self) -> Mapping[str, tuple[str, ...]]:
+        """Which of a parent's columns this table's derivations read, per relation.
+
+        The build turns this into columns on the query that already reads the
+        parent's keys, so a child reaches its parent's values through the
+        fan-out it already declared rather than through a lookup per row.
+        """
+        wanted: dict[str, set[str]] = {}
+        for declared in self.fields.values():
+            if not isinstance(declared, Derivation) or declared.scope is not Scope.PARENT:
+                continue
+            for source in declared.sources:
+                relation, _, field_name = source.partition(".")
+                wanted.setdefault(relation, set()).add(field_name)
+        return {relation: tuple(sorted(names)) for relation, names in wanted.items()}
 
     def _validate(self) -> None:
         meta = self.model._meta
@@ -170,7 +201,7 @@ class Table:
         if mismatched:
             raise InvalidShape(
                 f"{self.model.__name__}.{', '.join(mismatched)} is a relation, so it needs a "
-                "FanOut rather than a value distribution. A value distribution would emit keys "
+                "FanOut rather than a value distribution or a derivation. Either would emit keys "
                 "drawn from nothing, pointing at rows that may not exist."
             )
         self_referential = sorted(
@@ -199,6 +230,74 @@ class Table:
 
         self._resolve_defaults(known)
         self._check_satisfiable(known)
+        # After the defaults, not before: a derivation may legitimately read a
+        # column the model defaulted rather than the caller declared, and before
+        # this point that column is not in ``fields`` to be found.
+        self._check_derivations(known)
+        self._computation_order = order_derivations(self.model.__name__, self._fields)
+
+    def _check_derivations(self, known: dict[str, Field[Any, Any]]) -> None:
+        """Refuse a derivation whose sources are not there to be read.
+
+        Every source name is resolvable here, at declaration time, and none of
+        it needs a connection: a row source is a column of this table, a parent
+        source is a column of a model reachable through a declared ``FanOut``,
+        and a rank source is a name the declaration invented and so cannot be
+        wrong. A source that cannot be resolved would otherwise surface as a
+        ``KeyError`` from inside the generator, naming neither the column that
+        asked nor the one it wanted.
+        """
+        for name, declared in sorted(self._fields.items()):
+            if not isinstance(declared, Derivation):
+                continue
+            if declared.scope is Scope.ROW:
+                self._check_row_sources(name, declared)
+            elif declared.scope is Scope.PARENT:
+                self._check_parent_sources(name, declared, known)
+
+    def _check_row_sources(self, name: str, declared: Derivation) -> None:
+        unknown = sorted(source for source in declared.sources if source not in self._fields)
+        if unknown:
+            raise InvalidShape(
+                f"{self.model.__name__}.{name} is derived from {', '.join(unknown)}, which "
+                f"{'are' if len(unknown) > 1 else 'is'} not declared on this table. A row-scoped "
+                "source is another column of the same row, so it has to be a column this shape "
+                f"fills. Its columns are: {', '.join(sorted(self._fields))}."
+            )
+
+    def _check_parent_sources(
+        self, name: str, declared: Derivation, known: dict[str, Field[Any, Any]]
+    ) -> None:
+        for source in declared.sources:
+            relation, dot, field_name = source.partition(".")
+            if not dot:
+                raise InvalidShape(
+                    f"{self.model.__name__}.{name} reads {source!r} from a parent, so it has to "
+                    "name the relation and the field: 'relation.field'."
+                )
+            fan_out = self._fields.get(relation)
+            if not isinstance(fan_out, FanOut):
+                raise InvalidShape(
+                    f"{self.model.__name__}.{name} reads {source!r} from a parent, but "
+                    f"{relation} is not a fan-out declared on this table. A parent is reached "
+                    "through the fan-out that already decides which parent owns the row, so the "
+                    "relation has to be declared before anything can be read across it."
+                )
+            if fan_out.null:
+                raise InvalidShape(
+                    f"{self.model.__name__}.{name} reads {source!r} from a parent, but "
+                    f"{relation} has null={fan_out.null!r}, so some of these rows have no parent "
+                    "to read from. Drop the null share, or fill this column from a distribution "
+                    "instead."
+                )
+            parent = cast("type[Model]", known[relation].related_model)
+            available = {field.name for field in parent._meta.concrete_fields}
+            if field_name not in available:
+                raise InvalidShape(
+                    f"{self.model.__name__}.{name} reads {source!r}, but {parent.__name__} has no "
+                    f"field named {field_name}. Its concrete fields are: "
+                    f"{', '.join(sorted(available))}."
+                )
 
     def _check_satisfiable(self, known: dict[str, Field[Any, Any]]) -> None:
         """Refuse a declaration the database provably cannot hold.

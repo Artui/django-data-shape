@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
+from contextlib import AbstractContextManager
+from functools import partial
 from itertools import islice
 from typing import Any, cast
 
@@ -15,6 +17,7 @@ from django_data_shape.fan_out import FanOut
 from django_data_shape.fan_out_plan import FanOutPlan
 from django_data_shape.generate_rows import generate_rows
 from django_data_shape.order_tables import order_tables
+from django_data_shape.refuse_queries import refuse_queries
 from django_data_shape.require_postgres import require_postgres
 from django_data_shape.resolve_fan_out import resolve_fan_out
 from django_data_shape.shape import Shape
@@ -84,6 +87,7 @@ def build(
 
 def _resolve(connection: Any, table: Table, seed: int) -> dict[str, FanOutPlan]:
     """Partition each declared relation over the parent keys that exist."""
+    parent_fields = table.parent_fields()
     plans: dict[str, FanOutPlan] = {}
     for name, field in table.relations():
         plans[name] = resolve_fan_out(
@@ -94,6 +98,7 @@ def _resolve(connection: Any, table: Table, seed: int) -> dict[str, FanOutPlan]:
             table.db_table,
             name,
             connection,
+            parent_fields.get(name, ()),
         )
     return plans
 
@@ -159,13 +164,27 @@ def _load(connection: Any, table: Table, seed: int, plans: dict[str, FanOutPlan]
         for row in generate_rows(table, seed, plans)
     )
 
+    # The guard is built here rather than inside each route because it belongs
+    # to generation, and generation is what both routes share. This package may
+    # call the caller's code -- a derivation, a distribution, a key strategy --
+    # and that code may not call the database; the wrapper is what turns that
+    # sentence from a convention into a refusal.
+    # A factory rather than one context manager: Django's execute_wrapper is a
+    # generator-based context manager, so it is good for exactly one entry, and
+    # the portable route below enters one per chunk.
+    guard = partial(refuse_queries, connection, table.model.__name__, table.computation_order())
+
     if connection.vendor == "postgresql":
-        return _copy(connection, table.db_table, columns, rows)
-    return _insert(connection, table.db_table, columns, rows)
+        return _copy(connection, table.db_table, columns, rows, guard)
+    return _insert(connection, table.db_table, columns, rows, guard)
 
 
 def _copy(
-    connection: Any, db_table: str, columns: list[str], rows: Iterator[tuple[Any, ...]]
+    connection: Any,
+    db_table: str,
+    columns: list[str],
+    rows: Iterator[tuple[Any, ...]],
+    guard: Callable[[], AbstractContextManager[None]],
 ) -> int:
     """``COPY FROM STDIN``, which is the reason this package can be worth using.
 
@@ -173,6 +192,11 @@ def _copy(
     magnitude too slow at the row counts that make a plan meaningful. ``COPY``
     is also why the generator yields tuples rather than model instances: there
     is no instance to build, and no ``save`` to run.
+
+    The whole streaming loop sits inside the guard, and it can because
+    ``cursor.copy()`` is reached through Django's cursor wrapper by attribute
+    rather than through ``execute``. Nothing this package does in here is a
+    wrapped statement, so anything that is came from the caller.
     """
     statement = f"COPY {connection.ops.quote_name(db_table)} ({', '.join(columns)}) FROM STDIN"
     with connection.cursor() as cursor:
@@ -181,14 +205,18 @@ def _copy(
         # catch django.db.IntegrityError, and -- worse -- an enclosing atomic
         # block never learns it needs a rollback, so the next query inside it
         # fails with "current transaction is aborted" instead of a Django error.
-        with connection.wrap_database_errors, cursor.copy(statement) as copy:
+        with connection.wrap_database_errors, cursor.copy(statement) as copy, guard():
             for row in rows:
                 copy.write_row(row)
         return int(cursor.rowcount)
 
 
 def _insert(
-    connection: Any, db_table: str, columns: list[str], rows: Iterator[tuple[Any, ...]]
+    connection: Any,
+    db_table: str,
+    columns: list[str],
+    rows: Iterator[tuple[Any, ...]],
+    guard: Callable[[], AbstractContextManager[None]],
 ) -> int:
     """The portable route, for a backend that has no ``COPY``.
 
@@ -203,6 +231,10 @@ def _insert(
     materialises what it is given: streaming into ``COPY`` is the property this
     package is built on, and a portable path that quietly held a million tuples
     in memory would be a different bargain from the one above.
+
+    The chunk is generated inside the guard and written outside it, which is the
+    one place the two routes differ: here the load *is* a wrapped statement, so
+    a guard spanning both would refuse this package's own insert.
     """
     placeholders = ", ".join(["%s"] * len(columns))
     statement = (
@@ -211,7 +243,11 @@ def _insert(
     )
     loaded = 0
     with connection.cursor() as cursor:
-        while chunk := list(islice(rows, _INSERT_CHUNK)):
+        while True:
+            with guard():
+                chunk = list(islice(rows, _INSERT_CHUNK))
+            if not chunk:
+                break
             cursor.executemany(statement, chunk)
             loaded += len(chunk)
     return loaded

@@ -20,6 +20,7 @@ def resolve_fan_out(
     table: str,
     field: str,
     connection: Any,
+    parent_fields: tuple[str, ...] = (),
 ) -> FanOutPlan:
     """Read the parent's real keys and partition ``rows`` children across them.
 
@@ -32,15 +33,15 @@ def resolve_fan_out(
 
     Reading them is also what makes referential integrity hold by construction
     rather than by validation: every key emitted came out of the parent table.
+
+    ``parent_fields`` names the parent columns a derivation on the child reads.
+    They come back beside the keys, in the same order, so a child reaches its
+    parent's values through the partition rather than through a query of its
+    own. **The same correction applies to them as to the keys**: they are read
+    out of the parent table rather than recomputed from the parent's
+    declaration, so a parent this package never built works identically.
     """
-    pk_column = parent._meta.pk.column
-    quote = connection.ops.quote_name
-    with connection.cursor() as cursor:
-        cursor.execute(
-            f"SELECT {quote(pk_column)} FROM {quote(parent._meta.db_table)} "
-            f"ORDER BY {quote(pk_column)}"
-        )
-        keys = [row[0] for row in cursor.fetchall()]
+    keys, parent_values = _read_parents(parent, parent_fields, connection)
 
     if not keys and rows:
         raise InvalidShape(
@@ -63,6 +64,58 @@ def resolve_fan_out(
         null_stream=field_stream(seed, table, f"{field}:null"),
         null_share=fan_out.null,
         interleave=fan_out.placement == "arrival",
+        parent_values=parent_values,
+    )
+
+
+def _read_parents(
+    parent: type[Model], parent_fields: tuple[str, ...], connection: Any
+) -> tuple[list[int], dict[str, list[object]]]:
+    """The parent's keys, and any of its columns a child derives from.
+
+    Two routes, and the split is not laziness. The keys alone come back through
+    one hand-written statement, which is what lets every branch of the partition
+    be covered by a stub connection -- the same reasoning as the backend gate,
+    where logic reachable only through a real database is logic the coverage
+    gate cannot see.
+
+    Values cannot take that route, because **a raw column is not a Python
+    value**: a cursor bypasses the field's own ``from_db_value``, and a key is
+    the one column where that never shows. Measured rather than assumed --
+    SQLite hands a raw ``DateTimeField`` back **naive** where the ORM hands back
+    an aware datetime, so ``After`` would compute an offset from a value six
+    hours from the one the application reads, under a warning nobody sees in a
+    passing run; and a ``JSONField`` comes back as text rather than as the dict
+    it is. Any field with a converter of its own is the same case, on every
+    backend. The ORM route hands a derivation the value the application would
+    have read.
+    """
+    if not parent_fields:
+        pk_column = parent._meta.pk.column
+        quote = connection.ops.quote_name
+        with connection.cursor() as cursor:
+            cursor.execute(
+                f"SELECT {quote(pk_column)} FROM {quote(parent._meta.db_table)} "
+                f"ORDER BY {quote(pk_column)}"
+            )
+            return [row[0] for row in cursor.fetchall()], {}
+
+    # _base_manager rather than _default_manager: a project's default manager
+    # may filter, and a fan-out that silently skipped the parents somebody's
+    # manager hides would point children at a subset while reporting the whole.
+    # It is the manager Django itself uses to follow a relation, for the same
+    # reason.
+    records = list(
+        parent._base_manager.using(connection.alias)
+        .order_by("pk")
+        .values_list("pk", *parent_fields)
+    )
+    return (
+        [record[0] for record in records],
+        {
+            name: [record[index + 1] for record in records]
+            for index, name in enumerate(parent_fields)
+        },
     )
 
 
