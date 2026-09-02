@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`check_constraints`, `apply_statistics_targets` and `require_clone_strategy`
+  are exported.** All three were documented on the reference page and reachable
+  only by their full module path. Because each shares a name with the module it
+  lives in, `from django_data_shape import check_constraints` did not fail -- it
+  bound the *module*, and the error arrived later at the call site as "module
+  object is not callable". Documenting a symbol is a claim that it can be
+  imported, so the claim is now true rather than the entries removed.
 - **The inversion a skew exists for is reachable from outside.**
   `fan_out_sizes(shape, Order, "company")` returns a `ChildrenPerParent` -- an
   ordinary read-only mapping from parent key to child count, plus `ranked()` for
@@ -56,6 +63,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   be: this package cannot see the other test, and the only mechanism that could
   -- intercepting writes to a model some shape owns -- is a per-row hook, which is
   the one thing this library refuses to have at all.
+
+### Fixed
+- **`ShapeNotEmpty` appears in the reference.** It is raised by `build` against a
+  table that already holds rows, and was the one public exception the page never
+  listed.
+- **The reference page and `__all__` are checked against each other.** The page is
+  hand-maintained and drift in it is invisible in both directions: mkdocstrings
+  resolves a full dotted path without consulting `__all__`, so an entry naming an
+  unexported symbol still builds, and a missing entry breaks nothing at all. A
+  test now fails on either, and on the specific case where the name at the package
+  root is a module that shadows the symbol.
 
 ## [0.8.0] — 2026-09-02
 
