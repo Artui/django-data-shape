@@ -71,6 +71,7 @@ markdown_extensions:
 nav:
   - Home: index.md
   - Relations: relations.md
+  - Derivations: derivations.md
   - Keys: keys.md
   - From pytest: pytest.md
   - API reference: reference.md

@@ -26,6 +26,20 @@
 
 ::: django_data_shape.scaled_shape.scaled_shape
 
+## Derivations
+
+::: django_data_shape.derivations.derivation.Derivation
+
+::: django_data_shape.derivations.scope.Scope
+
+::: django_data_shape.derivations.derived.Derived
+
+::: django_data_shape.derivations.after.After
+
+::: django_data_shape.derivations.given.Given
+
+::: django_data_shape.derivations.aligned.Aligned
+
 ## Keys
 
 ::: django_data_shape.keys.key_strategy.KeyStrategy
@@ -57,3 +71,5 @@
 ::: django_data_shape.invalid_shape.InvalidShape
 
 ::: django_data_shape.unsupported_backend.UnsupportedBackend
+
+::: django_data_shape.derivation_queried_database.DerivationQueriedDatabase

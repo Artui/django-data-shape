@@ -193,3 +193,61 @@ class Catalogue(models.Model):
     """
 
     name = models.CharField(max_length=50)
+
+
+class Account(models.Model):
+    """A parent whose own columns a child derives from.
+
+    Its own model rather than a couple of columns bolted onto ``Company``,
+    because ``signed_up_at`` and ``plan`` would have to be nullable there not to
+    break every existing declaration -- and a nullable parent column is exactly
+    the case a derivation reading across the edge must not be tested against.
+    """
+
+    signed_up_at = models.DateTimeField()
+    plan = models.CharField(max_length=20)
+
+
+class Ticket(models.Model):
+    """A child carrying all four faces of the derivation mechanism at once.
+
+    One model rather than four, because the point being tested is that they are
+    one mechanism: ``total`` reads two columns of its own row, one of which is
+    itself derived, so a declaration whose computation order followed the column
+    order would compute it from an empty slot.
+    """
+
+    account = models.ForeignKey(Account, on_delete=models.CASCADE, related_name="tickets")
+    opened_at = models.DateTimeField()
+    severity = models.CharField(max_length=20)
+    quantity = models.IntegerField()
+    unit_price = models.DecimalField(max_digits=10, decimal_places=2)
+    total = models.DecimalField(max_digits=12, decimal_places=2)
+
+
+class ActiveVendorManager(models.Manager):
+    """A default manager that hides rows, which is an ordinary thing to write."""
+
+    def get_queryset(self) -> models.QuerySet:
+        return super().get_queryset().filter(retired=False)
+
+
+class Vendor(models.Model):
+    """A parent whose default manager hides some of its own rows.
+
+    Here because a fan-out reads every parent and a derivation reads their
+    columns, and those two reads must agree about which parents exist. A default
+    manager is the ordinary way a project makes them disagree.
+    """
+
+    name = models.CharField(max_length=50)
+    retired = models.BooleanField(default=False)
+
+    objects = ActiveVendorManager()
+
+
+class Supply(models.Model):
+    """A child of a partly-hidden parent, carrying one of its columns."""
+
+    vendor = models.ForeignKey(Vendor, on_delete=models.CASCADE)
+    vendor_name = models.CharField(max_length=50)

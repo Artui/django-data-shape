@@ -7,6 +7,69 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **The derivation mechanism**: one scope-parameterised thing rather than four
+  bespoke ones. `Derived`, `After`, `Given` and `Aligned` all ask the same
+  question -- compute this from something already known -- and differ only in
+  **where the inputs are read from**: this row, the parent row, or a shared rank.
+  `Derived` is the mechanism and takes `scope=` directly, so a correlation
+  nobody shipped a face for is still declarable; the other three are shorthand
+  over it and contain no resolution logic at all. Built separately, "custom
+  creation logic" and "correlate across a relation" become two vocabularies
+  overlapping on the half a consumer asks for first.
+- `Derived("quantity", "unit_price", compute=operator.mul)` computes a column
+  from other columns of the same row. `compute` receives the resolved sources
+  positionally and nothing else -- not the row index, not a draw, because a
+  function of either of those is already a distribution and would be a
+  planner-visible declaration the planner-facing half could not see.
+- `After("account.signed_up_at", within=timedelta(days=365))` puts a child's
+  column a spread gap past its parent's. It works in whatever unit the column
+  uses, and the documentation says plainly that the result is not monotonic with
+  the row, so it has a low `pg_stats.correlation` where `Sequential` has a high
+  one.
+- `Given("account.plan", {...}, default=...)` chooses a distribution by the
+  parent's value. An unlisted value with no default is refused during the load,
+  naming the column and the value -- one of very few refusals here that cannot
+  happen at declaration time, because the parent's values live in the parent
+  table rather than in the declaration.
+- `Aligned("size", Uniform(...))` reads a distribution at a rank shared with
+  every column naming that rank, with `reverse=True` for a column related the
+  other way. Independent marginals give a database that is realistic per column
+  and unrealistic per entity: no single row is extreme in two ways at once, and
+  that row is the one that breaks production. The coupling is exact and has no
+  strength parameter, because a partial coupling is a copula.
+- **A derivation reaches its parent through the fan-out that already exists.** A
+  parent-scoped source is read out of the parent table, in the same query that
+  reads the parent's keys, so it costs one query per relation per build rather
+  than one per row -- which a partition can do and a per-child draw could not.
+  The values are **queried, not recomputed from a declaration**, so a parent
+  built with the ORM behaves exactly like one built here; that is the same
+  correction the keys took, applied to the columns beside them.
+- **Column order is not computation order.** `Table.columns()` stays sorted by
+  name because it is the `COPY` column list; derivations get a topological order
+  of their own, and a cycle among them is refused at declaration time by name.
+  `Table.computation_order()` reports it.
+- **Generation runs under a query guard, and it is a real check.** This package
+  may call your code, and your code may not call the database: a query issued
+  while rows are being generated raises `DerivationQueriedDatabase`, naming the
+  table, its derivations and the statement. That is what keeps a derivation from
+  becoming the per-row creation hook this package exists to replace -- a hook
+  whose body may query is a hook whose body will, and a package whose default
+  path is not `COPY` has no reason to exist. The guard sees the connection being
+  built; the rule holds beyond that and only its enforcement stops there.
+
+### Changed
+- A parent's columns are read through the ORM rather than a raw cursor when a
+  derivation asks for them, because a raw cursor bypasses the field's own
+  `from_db_value` and a key is the one column where that never shows. Measured:
+  SQLite hands a raw `DateTimeField` back naive where the ORM hands back an
+  aware datetime, so `After` would compute its offset from a value six hours
+  from the one the application reads; a `JSONField` comes back as text rather
+  than a dict. Keys alone still take the hand-written statement, which is what
+  keeps every branch of the partition coverable without a connection.
+- A relation declared with something other than a `FanOut` now says "a value
+  distribution or a derivation" rather than naming only the first.
+
 ## [0.4.0] — 2026-09-02
 
 ### Added

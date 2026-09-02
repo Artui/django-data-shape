@@ -89,6 +89,41 @@ The parents can be rows this package built or rows your own code did -- their
 real keys are read, not assumed, so the ORM can own the small tables while this
 owns the large ones.
 
+## Derivations
+
+A distribution says what a column looks like **across** rows. A derivation says
+what one column is **given** the others -- and the four faces are one mechanism,
+differing only in where the inputs are read from.
+
+```python
+from django_data_shape import After, Aligned, Derived, FanOut, Given, Table, Zipf
+
+Table(
+    Ticket,
+    rows=2_000_000,
+    account=FanOut(Zipf(1.2)),
+    # the parent row: this ticket's own account, read across the fan-out
+    opened_at=After("account.signed_up_at", within=timedelta(days=365)),
+    severity=Given("account.plan", {"free": mostly_low, "enterprise": mostly_high}),
+    # a shared rank: the big tickets are big in both columns at once
+    quantity=Aligned("size", Uniform(1, 100, places=0)),
+    unit_price=Aligned("size", Uniform(1, 500, places=2)),
+    # this row
+    total=Derived("quantity", "unit_price", compute=operator.mul),
+)
+```
+
+`Derived` is the mechanism and takes `scope=` directly, so a correlation nobody
+shipped a face for is still declarable. Column order is the `COPY` column list
+and says nothing about dependencies, so derivations get a computation order of
+their own and a cycle among them is refused by name.
+
+**This package may call your code, and your code may not call the database.**
+Generation runs under a wrapper on the connection being built, so a query raises
+rather than quietly costing a round trip per row. A per-row creation hook is the
+thing this package replaces, and a hook whose body may query is a hook whose body
+will.
+
 ## From pytest
 
 ```python
@@ -139,12 +174,15 @@ naming the field. In particular:
 - **A callable model default** such as `default=uuid4` must be declared as a
   distribution: `uuid4` varies per row and `dict` does not, and nothing on the
   field distinguishes them.
+- **A derivation that queries the database.** The generation pass is guarded, so
+  the rule is a refusal rather than advice. Read what you need before the build
+  and close over it.
 
 ## Status
 
-Early. Single tables, the model graph and the pytest surface. Derived fields,
-collections copied along a join, per-group invariants and template-database reuse
-come next.
+Early. Single tables, the model graph, the pytest surface and the derivation
+mechanism. Collections copied along a join, per-group invariants and
+template-database reuse come next.
 
 Full documentation: <https://artui.github.io/django-data-shape/>
 

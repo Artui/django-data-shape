@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import datetime
+import operator
 from typing import Any, cast
 
 import django
@@ -9,10 +11,14 @@ import pytest
 from django.db import models
 
 from django_data_shape import (
+    After,
+    Aligned,
     Bounded,
     Constant,
+    Derived,
     Distribution,
     FanOut,
+    Given,
     InvalidShape,
     KeyFunction,
     Sequential,
@@ -34,6 +40,7 @@ from tests.testapp.models import (
     SlugPk,
     Subscriber,
     Tenant,
+    Ticket,
 )
 
 
@@ -287,3 +294,116 @@ def test_a_composite_primary_key_is_refused_as_arity_not_type() -> None:
         Table(Composite, rows=3, left_id=Constant(1), right_id=Constant(2))
 
     assert "arity, not type" in str(raised.value)
+
+
+def _ticket(**overrides: object) -> Table:
+    fields: dict[str, object] = {
+        "account": FanOut(Zipf(1.2)),
+        "opened_at": After("account.signed_up_at", within=datetime.timedelta(days=30)),
+        "severity": Given("account.plan", {"free": Constant("low")}, default=Constant("high")),
+        "quantity": Aligned("size", Uniform(1, 100, places=0)),
+        "unit_price": Aligned("size", Uniform(1, 500, places=2)),
+        "total": Derived("quantity", "unit_price", compute=operator.mul),
+    }
+    fields.update(overrides)
+    return Table(Ticket, rows=10, fields=cast("Any", fields))
+
+
+def test_all_four_faces_are_declarable_on_one_table() -> None:
+    table = _ticket()
+
+    # The point of the mechanism, asserted as one declaration rather than four:
+    # within-row, across-the-parent twice, and a shared rank, all resolved by
+    # the same validation and the same ordering.
+    assert [name for name, _ in table.columns()] == [
+        "account",
+        "opened_at",
+        "quantity",
+        "severity",
+        "total",
+        "unit_price",
+    ]
+
+
+def test_computation_order_is_not_column_order() -> None:
+    order = _ticket().computation_order()
+
+    # Both are total orders over the same names and they disagree, which is the
+    # whole reason there are two: sorted by name, total precedes unit_price.
+    assert order.index("unit_price") < order.index("total")
+    assert order.index("quantity") < order.index("total")
+
+
+def test_a_row_source_that_is_not_a_declared_column_is_refused() -> None:
+    with pytest.raises(InvalidShape, match="derived from margin, which is not declared"):
+        _ticket(total=Derived("margin", compute=str))
+
+
+def test_several_missing_row_sources_are_named_together() -> None:
+    with pytest.raises(InvalidShape, match="derived from margin, tax, which are not declared"):
+        _ticket(total=Derived("tax", "margin", compute=str))
+
+
+def test_a_parent_source_has_to_name_the_relation_and_the_field() -> None:
+    with pytest.raises(InvalidShape, match="'relation.field'"):
+        _ticket(opened_at=Derived("signed_up_at", compute=str, scope="parent"))
+
+
+def test_a_parent_source_over_an_undeclared_relation_is_refused() -> None:
+    with pytest.raises(InvalidShape, match="customer is not a fan-out"):
+        _ticket(opened_at=Derived("customer.signed_up_at", compute=str, scope="parent"))
+
+
+def test_a_parent_source_over_a_nullable_fan_out_is_refused() -> None:
+    # A child with no parent has no value to be after, and substituting one
+    # would be the approximation this package refuses everywhere else. Caught
+    # here rather than met as a None inside the arithmetic.
+    with pytest.raises(InvalidShape, match="have no parent to read from"):
+        _ticket(account=FanOut(Zipf(1.2), null=0.2))
+
+
+def test_a_parent_field_the_parent_does_not_have_is_refused_and_the_real_ones_listed() -> None:
+    with pytest.raises(InvalidShape, match="Account has no field named signup") as raised:
+        _ticket(opened_at=After("account.signup", within=datetime.timedelta(days=1)))
+
+    assert "plan, signed_up_at" in str(raised.value)
+
+
+def test_a_derivation_on_a_relation_column_is_refused_like_a_distribution() -> None:
+    with pytest.raises(InvalidShape, match="needs a FanOut"):
+        _ticket(account=Derived("quantity", compute=str))
+
+
+def test_a_cycle_among_derivations_is_refused_at_declaration_time() -> None:
+    with pytest.raises(InvalidShape, match="in a cycle"):
+        _ticket(
+            total=Derived("quantity", compute=str),
+            quantity=Derived("total", compute=str),
+        )
+
+
+def test_a_derivation_may_read_a_column_the_model_defaulted() -> None:
+    # channel is never declared -- Table fills it in from the model's own
+    # default -- and a derivation reading it has to be checked after that has
+    # happened, or the source it names is not there to be found.
+    table = Table(
+        Order,
+        rows=3,
+        status=Constant("complete"),
+        total=Constant(1),
+        created_at=Sequential(0, 1),
+        note=Derived("channel", compute=str),
+    )
+
+    assert table.computation_order() == ("note",)
+
+
+def test_the_parent_columns_a_table_reads_are_reported_per_relation() -> None:
+    # What the build turns into extra columns on the query that already reads
+    # the parent's keys, which is how a child reaches across the edge without a
+    # lookup of its own.
+    assert _ticket().parent_fields() == {"account": ("plan", "signed_up_at")}
+
+
+def test_a_table_with_no_parent_derivations_reads_nothing_extra() -> None:
+    assert Table(Session, rows=5, company=FanOut(Zipf()), label=Constant("s")).parent_fields() == {}
