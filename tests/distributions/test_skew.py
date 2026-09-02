@@ -69,3 +69,11 @@ def test_a_nan_or_infinite_weight_is_refused() -> None:
 
 def test_it_reports_how_many_values_it_can_produce() -> None:
     assert Skew({"a": 1, "b": 2, "c": 3}).distinct_values() == 3
+
+
+def test_it_says_each_values_share_of_the_rows() -> None:
+    # Normalised, not the raw weights: counts are a legitimate way to write a
+    # skew, and the question this answers is how many rows will hold a value.
+    skew = Skew({"ACTIVE": 1, "COMPLETE": 3})
+
+    assert skew.shares() == {"ACTIVE": 0.25, "COMPLETE": 0.75}

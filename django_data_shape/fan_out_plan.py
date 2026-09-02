@@ -65,6 +65,42 @@ class FanOutPlan:
         """
         return self._parent_values[field][self._slot(row)]
 
+    def group_position(self, row: int) -> tuple[int, int]:
+        """Where this child sits inside its parent's group, and how big the group is.
+
+        The fourth thing the partition representation buys, and the one that
+        decides whether a per-group business rule is a feature or a constraint
+        solver. A rule like "the last project of each company is the active one"
+        needs to know a group; emitting rows interleaved is what keeps physical
+        placement honest. Those conflict for any design that has to *see* a
+        group -- and they do not conflict here, because parent ``j`` owns the
+        contiguous slots ``[starts[j], starts[j + 1])``, so a row's position in
+        its group and the size of that group are both O(1) arithmetic on the row
+        index and the seed.
+
+        **Position is in assignment order, not emission order**, and those are
+        deliberately different under ``placement="arrival"``: the same split
+        between one order and another that this design keeps meeting. Nothing
+        buffers, nothing is held, and the answer does not depend on how many
+        rows were generated first.
+
+        The size is never zero for a row that reaches here. A childless parent
+        owns an empty range, which ``_slot`` steps past by construction, so no
+        row is ever attributed to one.
+        """
+        slot = (row * self._stride) % self._rows
+        index = bisect.bisect_right(self._starts, slot) - 1
+        start = self._starts[index]
+        # ``bisect_right`` returned the *last* parent whose range starts at or
+        # below this slot, so the next start is strictly greater -- there is no
+        # empty range to step over here, which is why the end is read directly
+        # rather than searched for. Read directly rather than through the
+        # ``[*starts, rows]`` list ``sizes()`` builds, too: this runs once per
+        # row per column, and materialising a list of every parent inside it
+        # would make one declaration quadratic in the parent count.
+        end = self._starts[index + 1] if index + 1 < len(self._starts) else self._rows
+        return slot - start, end - start
+
     def _slot(self, row: int) -> int:
         """Which parent owns this child row, as an index into ``keys``."""
         slot = (row * self._stride) % self._rows

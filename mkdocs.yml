@@ -73,6 +73,7 @@ nav:
   - Relations: relations.md
   - Derivations: derivations.md
   - Projections: projections.md
+  - Invariants: invariants.md
   - Keys: keys.md
   - Statistics and reuse: statistics.md
   - From pytest: pytest.md

@@ -145,6 +145,51 @@ hatch. There is no `rows=`: the count comes from the join, and comes back in the
 from a template is a service call, a million is one statement -- and it
 reproduces a correlation a `FanOut` on the child would destroy.
 
+## Invariants
+
+A company has many projects, at most one of which may be `ACTIVE`. With 50,000
+companies and 2,000,000 projects that is **exactly 50,000 active rows -- 2.5%**,
+derived from the fan-out rather than chosen. Declare `Skew({"ACTIVE": 0.1, ...})`
+beside the fan-out and you have asked for 200,000 of them in a schema that
+permits 50,000.
+
+```python
+Shape(
+    Table(Company, rows=50_000, name=Constant("acme")),
+    Table(
+        Project,
+        rows=2_000_000,
+        company=FanOut(Zipf(1.2)),
+        created_at=Sequential(start, timedelta(minutes=1)),
+        status=PerParent("company", last="ACTIVE", rest="COMPLETE"),
+    ),
+    invariants=[
+        Invariant("no company has two active projects", sql=ONE_ACTIVE_PER_COMPANY),
+    ],
+)
+```
+
+Three nets. `PerParent` **generates it right** -- the last row of each group is
+the special one, computed from the fan-out partition in O(1) so rows still stream
+into `COPY` interleaved. Declared `invariants` **check it** as SQL after the
+load, failing and rolling back the build, which is the only net that covers rules
+the database does not state. And the schema itself refuses, because the rows go
+into the real migrated tables.
+
+Because that last message is a unique index failing at row 700,000, the
+arithmetic is also done statically off `Model._meta.constraints` when the shape
+is declared:
+
+```
+one_active_project_per_company permits at most 50000 rows with status='ACTIVE',
+one per (company); Project.status is filled by Skew({'ACTIVE': 0.1, ...}), which
+asks for 200000 of them.
+```
+
+A constraint must be satisfiable by construction within one group, or it is
+declared as an invariant and checked, not generated. Scheduling is NP-hard and is
+refused.
+
 ## Statistics, and building once
 
 `ANALYZE` runs at the end of every build, because rows the planner cannot see are
@@ -242,8 +287,8 @@ naming the field. In particular:
 ## Status
 
 Early. Single tables, the model graph, the pytest surface, the derivation
-mechanism, projections, statistics targets and template-database reuse.
-Per-group invariants and many-to-many edges come next.
+mechanism, projections, statistics targets, template-database reuse and business
+invariants. Many-to-many edges come next.
 
 Full documentation: <https://artui.github.io/django-data-shape/>
 

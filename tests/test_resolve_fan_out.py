@@ -139,3 +139,53 @@ def test_a_non_numeric_size_is_refused_and_names_the_field() -> None:
         _resolve(list(range(1, 11)), rows=100, fan_out=FanOut(Constant("many")))
 
     assert "testapp_session.company" in str(raised.value)
+
+
+def test_a_rows_position_in_its_group_and_the_groups_size_are_arithmetic() -> None:
+    # The property the whole per-group primitive rests on: nothing is buffered,
+    # nothing is sorted, and the answer for one row does not depend on any
+    # other. Under grouped placement the slots are the row indices, so the
+    # partition is readable straight off the sizes.
+    plan = _resolve([10, 20, 30], rows=6, fan_out=FanOut(Constant(1), placement="grouped"))
+
+    assert plan.sizes() == [2, 2, 2]
+    assert [plan.group_position(row) for row in range(6)] == [
+        (0, 2),
+        (1, 2),
+        (0, 2),
+        (1, 2),
+        (0, 2),
+        (1, 2),
+    ]
+
+
+def test_every_group_is_covered_exactly_once_under_arrival_placement() -> None:
+    # The half that matters, because arrival is the honest default: the rows of
+    # one group are scattered through the table on purpose, and every position
+    # of every group still gets exactly one row.
+    keys = list(range(100, 120))
+    plan = _resolve(keys, rows=500)
+    sizes = plan.sizes()
+
+    seen: dict[int, set[int]] = {}
+    for row in range(500):
+        position, size = plan.group_position(row)
+        parent = plan.key_for(row)
+        assert parent is not None
+        assert size == sizes[keys.index(parent)]
+        assert position not in seen.setdefault(parent, set())
+        seen[parent].add(position)
+
+    for parent, positions in seen.items():
+        assert positions == set(range(sizes[keys.index(parent)]))
+
+
+def test_a_childless_parent_is_never_the_group_a_row_is_attributed_to() -> None:
+    # Empty ranges share a start with the next parent, and bisect_right steps
+    # past every one of them -- so a size of zero is unreachable rather than
+    # special-cased, and no row can be handed a group it is the only member of
+    # by accident.
+    plan = _resolve(list(range(100, 140)), rows=200, fan_out=FanOut(Zipf(1.4), childless=0.5))
+
+    assert 0 in plan.sizes()
+    assert all(plan.group_position(row)[1] > 0 for row in range(200))

@@ -127,6 +127,12 @@ def _source(
     if scope is Scope.PARENT:
         relation, _, field_name = source.partition(".")
         return partial(_from_parent, plans[relation], field_name)
+    if scope is Scope.GROUP:
+        # The plan again, and a third question asked of the same partition:
+        # which parent (PARENT), which of its columns (PARENT), and now where in
+        # its range this row sits. All three are O(1) because the fan-out is a
+        # partition rather than a per-child draw.
+        return partial(_from_group, plans[source])
     # Scope.RANK. A rank is a name the declaration invented, not a column, so
     # its stream is namespaced away from the field streams -- otherwise a rank
     # called "total" would silently be the "total" column's own draw.
@@ -159,6 +165,10 @@ def _from_row(slot: int, row: int, values: list[object]) -> object:
 
 def _from_parent(plan: FanOutPlan, field: str, row: int, values: list[object]) -> object:
     return plan.parent_value(field, row)
+
+
+def _from_group(plan: FanOutPlan, row: int, values: list[object]) -> object:
+    return plan.group_position(row)
 
 
 def _from_rank(stream: int, row: int, values: list[object]) -> object:

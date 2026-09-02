@@ -7,6 +7,87 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`PerParent`: one row of every group is different, and the rest are not.**
+  `status=PerParent("company", last="ACTIVE", rest="COMPLETE")` covers one active
+  project, one default address, one current period, one primary contact and
+  N winners per contest -- and the count of special rows is **derived from the
+  fan-out rather than declared**. Fifty thousand companies and two million
+  projects means exactly fifty thousand `ACTIVE` rows, 2.5%, and nobody chose
+  that number. `Skew({"ACTIVE": 0.1, ...})` beside the same fan-out asks for two
+  hundred thousand of them: the same rule this package states everywhere else --
+  a distribution over a fixed count, never a multiplier -- except that here one
+  distribution is derived from another rather than declared beside it.
+- **Assignment order is not emission order, and the partition is what reconciles
+  them.** Saying "the last project" needs a group; keeping physical placement
+  honest needs a parent's children emitted interleaved. Because a `FanOut` is a
+  partition of the child key range rather than a draw per child, a row's position
+  within its group and the size of that group are O(1) arithmetic on the row
+  index and the seed. Nothing is buffered, nothing is sorted, and the rows still
+  stream one at a time into `COPY`.
+- **`order_by` is a claim that is checked, not a sort that is performed**, and it
+  is refused where it cannot be true: the column has to climb with the row index
+  (the new `Ascending` protocol, which `Sequential` answers from its step's
+  sign) and the fan-out has to be `placement="grouped"`. `order_by` and
+  `placement="arrival"` are **mutually exclusive by meaning** -- arrival
+  interleaves a group's rows on purpose, so the last row of a group is not the
+  newest one. Dropping it costs nothing a planner can see: PostgreSQL keeps no
+  statistic about which row of a group holds which value.
+- **A static pre-check against `Model._meta.constraints`, run when the `Shape`
+  is declared.** It refuses with the arithmetic -- "`one_active_project_per_company`
+  permits at most 50000 rows with `status='ACTIVE'`, one per (company);
+  `Project.status` is filled by `Skew(...)`, which asks for 200000 of them" --
+  rather than leaving a unique index to fail at row 700,000 of a load that has
+  already run for a minute. `_meta.total_unique_constraints` is the helper that
+  sounds right and is the wrong one: it deliberately excludes conditional
+  constraints, so it skips exactly this case.
+- The pre-check lives on the **shape** rather than the table, because that is
+  where both numbers are: a table knows its own row count and only a shape knows
+  how many companies there are. It also does the multi-column pigeonhole a single
+  `Table` declines -- two million rows needing distinct `(company, label)` pairs
+  against fifty thousand companies and three labels -- and it says in its own
+  docstring what it cannot decide: a condition that is not a single equality, a
+  constraint over expressions, a group no fan-out partitions, a distribution that
+  cannot enumerate itself, and a fan-out with a null share, because PostgreSQL
+  counts each NULL in a unique index as distinct.
+- **`Invariant` and `check_invariants`: rules checked as SQL after the load.**
+  Either a `Q` describing the rows that are **wrong** -- run through
+  `_base_manager`, so a filtering default manager cannot hide them -- or a whole
+  statement whose every returned row is a violation. This is the only net that
+  covers rules the database does not enforce, which is most of them.
+- **A violated invariant fails the build**, raising `InvariantViolated` from
+  inside the transaction that loaded the rows, so nothing lands and the database
+  is left as it was found. The alternative is a database full of impossible data
+  for every later assertion to be evaluated against, passing or failing for
+  reasons unrelated to the code. The message names the rule and quotes the rows,
+  because a build failure is read out of a terminal rather than stepped through.
+- **An invariant changes no row and is still part of `shape_digest`.** The
+  check runs during the build, and a cache hit is exactly what skips the build --
+  so a rule that made no difference to the key would be a rule that silently
+  stopped running the second time, which is worse than no rule because it is a
+  rule everybody believes.
+- `Categorical`, the fourth opt-in protocol: a distribution that names its values
+  and their shares. It is what turns a partial `UniqueConstraint` from an error
+  message at row 700,000 into arithmetic at declaration time, and what lets
+  `PerParent` accept a `Skew` for `rest` only after proving it cannot also emit
+  the special value. Deliberately not merged into `Bounded`: counting how many
+  values a distribution has is a cheaper claim than enumerating them, and joining
+  them would have made the cheap one cost the expensive one.
+- `Ascending`, the fifth: whether a distribution's values rise with the row
+  index. A bool rather than a marker, because `Sequential` with a negative step
+  falls -- and a declaration asking for the newest row of each group while
+  filling the column backwards would silently get the oldest.
+- `Scope.GROUP`, so `PerParent` is a face of the existing derivation mechanism
+  rather than a second one beside it. Its sources name a declared `FanOut` and
+  resolve to a `(position, size)` pair.
+- An `Invariants` documentation page, and the worked example in the README.
+
+### Changed
+- `Shape` takes `invariants=`, and validates the declared tables against their
+  models' constraints before returning. A shape that could not be loaded now
+  raises at the point it is written.
+
+
 ## [0.7.0] — 2026-09-02
 
 - **Statistics targets, declared per column.** `Table(..., statistics={"status":

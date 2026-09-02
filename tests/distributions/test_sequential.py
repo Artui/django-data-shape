@@ -32,3 +32,18 @@ def test_the_draw_is_ignored() -> None:
 
 def test_it_reads_back_as_what_was_declared() -> None:
     assert repr(Sequential(0, 1)) == "Sequential(0, 1)"
+
+
+def test_it_says_whether_it_climbs_with_the_row() -> None:
+    assert Sequential(0, 1).is_ascending() is True
+    assert Sequential(0, -1).is_ascending() is False
+
+
+def test_it_says_so_in_the_columns_own_units() -> None:
+    # A date column steps by a timedelta, and zero has to come from the step
+    # itself rather than from a literal that assumes which kind it is.
+    forwards = Sequential(datetime.datetime(2020, 1, 1), datetime.timedelta(days=1))
+    backwards = Sequential(datetime.datetime(2020, 1, 1), datetime.timedelta(days=-1))
+
+    assert forwards.is_ascending() is True
+    assert backwards.is_ascending() is False

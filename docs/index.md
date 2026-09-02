@@ -130,6 +130,16 @@ cross-table correlation Postgres cannot see. `Projection` fills such a table wit
 one `INSERT ... SELECT` derived from the model graph, which is what a creation
 service collapses into at scale. See [Projections](projections.md).
 
+## Invariants
+
+A company has many projects, at most one of which may be `ACTIVE`. That is a
+partial `UniqueConstraint`, and with 50,000 companies and 2,000,000 projects it
+means exactly 50,000 active rows -- a share *derived from* the fan-out rather
+than declared beside it. `PerParent` generates it, declared `invariants` check it
+as SQL after the load, and a static pre-check off `Model._meta.constraints`
+refuses the contradiction with the arithmetic before a row exists. See
+[Invariants](invariants.md).
+
 ## From pytest
 
 A session-scoped fixture builds a shape once for a whole run, and a scale
@@ -141,5 +151,5 @@ planner. See [From pytest](pytest.md).
 
 ## Not in this release
 
-Per-group invariants, many-to-many edges, and reusing a built database as a
-template.
+Many-to-many edges, and emitting a declaration from a database or a factory that
+already exists.

@@ -27,6 +27,16 @@ class Sequential:
     def value(self, row: int, draw: float) -> object:
         return self._start + row * self._step
 
+    def is_ascending(self) -> bool:
+        """Whether the step moves values up rather than down. See ``Ascending``.
+
+        ``self._step * 0`` rather than a literal zero, for the reason
+        :class:`~django_data_shape.derivations.after.After` computes its own: a
+        date column steps by a ``timedelta`` and a numeric one by a number, and
+        this is the only spelling of zero that does not have to ask which.
+        """
+        return bool(self._step > self._step * 0)
+
     def canonical(self) -> object:
         """The start and the step. See ``Canonical``."""
         return (self._start, self._step)

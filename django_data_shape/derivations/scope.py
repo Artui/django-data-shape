@@ -37,8 +37,23 @@ class Scope(Enum):
         same rows. Ranks are per table and per row, because a rank shared across
         tables would be aligning entities that have nothing to do with each
         other.
+
+    ``GROUP``
+        Sources name a declared ``FanOut``, and each resolves to a pair: this
+        row's position inside its parent's group of children, and how many
+        children that group has. It is what makes a per-group business rule --
+        one active project per company -- satisfiable while rows are still
+        emitted interleaved, because the fan-out is a **partition** of the child
+        range, so both numbers are arithmetic on the row index rather than
+        anything that needs a group held in memory.
+
+        The pair is a plain ``(position, size)`` tuple rather than a type of its
+        own, because it is a resolved source rather than a declaration: nothing
+        outside the resolver and the derivation reading it ever sees one, and a
+        class here would be a public name for an argument.
     """
 
     ROW = "row"
     PARENT = "parent"
     RANK = "rank"
+    GROUP = "group"

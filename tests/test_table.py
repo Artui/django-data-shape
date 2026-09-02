@@ -21,6 +21,7 @@ from django_data_shape import (
     Given,
     InvalidShape,
     KeyFunction,
+    PerParent,
     Sequential,
     SequentialKeys,
     Skew,
@@ -459,3 +460,93 @@ def test_a_table_that_asks_for_nothing_says_so_rather_than_guessing() -> None:
     # left out keeps whatever target the schema gives it, and this package does
     # not decide that on the caller's behalf.
     assert Table(Company, rows=3, name=Constant("acme")).statistics == {}
+
+
+_PROJECT_START = datetime.datetime(2020, 1, 1, tzinfo=datetime.timezone.utc)
+
+
+def _project(**overrides: Any) -> Table:
+    fields: dict[str, Any] = {
+        "company": FanOut(Zipf(1.2), placement="grouped"),
+        "created_at": Sequential(_PROJECT_START, datetime.timedelta(minutes=1)),
+        "status": PerParent("company", last="ACTIVE", rest="COMPLETE"),
+    }
+    fields.update(overrides)
+    return Table(Project, rows=20, fields=fields)
+
+
+def test_a_group_scoped_column_is_accepted_over_a_declared_fan_out() -> None:
+    table = _project()
+
+    assert table.computation_order() == ("status",)
+
+
+def test_a_group_with_no_fan_out_to_partition_it_is_refused() -> None:
+    # A parent source with no fan-out has nothing to read; a group source with
+    # no fan-out has no partition, and it is the partition that makes a
+    # per-group rule computable at all.
+    with pytest.raises(InvalidShape, match="not a fan-out declared on this table"):
+        _project(status=PerParent("created_at", last="ACTIVE", rest="COMPLETE"))
+
+
+def test_a_group_over_a_fan_out_with_a_null_share_is_refused() -> None:
+    # PostgreSQL counts each NULL as its own group in a unique index, so those
+    # rows would sit outside the very rule the declaration exists to keep.
+    with pytest.raises(InvalidShape, match="belong to no group at all"):
+        Table(
+            Project,
+            rows=20,
+            company=FanOut(Zipf(), null=0.1),
+            created_at=Sequential(_PROJECT_START, datetime.timedelta(minutes=1)),
+            status=PerParent("company", last="ACTIVE", rest="COMPLETE"),
+        )
+
+
+def test_ordering_a_group_by_a_column_this_shape_does_not_fill_is_refused() -> None:
+    with pytest.raises(InvalidShape, match="which this shape does not fill"):
+        _project(
+            status=PerParent("company", last="ACTIVE", rest="COMPLETE", order_by="finished_at")
+        )
+
+
+def test_ordering_a_group_by_a_column_that_does_not_climb_is_refused() -> None:
+    with pytest.raises(InvalidShape, match="does not climb with the row index"):
+        _project(
+            created_at=Skew({_PROJECT_START: 1.0}),
+            status=PerParent("company", last="ACTIVE", rest="COMPLETE", order_by="created_at"),
+        )
+
+
+def test_ordering_a_group_by_a_column_filled_backwards_is_refused() -> None:
+    # Sequential implements the protocol and still answers no, which is the
+    # reason the protocol is a question rather than a marker: a declaration
+    # asking for the newest row of each group while filling the column
+    # backwards would silently get the oldest.
+    with pytest.raises(InvalidShape, match="does not climb with the row index"):
+        _project(
+            created_at=Sequential(_PROJECT_START, datetime.timedelta(minutes=-1)),
+            status=PerParent("company", last="ACTIVE", rest="COMPLETE", order_by="created_at"),
+        )
+
+
+def test_ordering_a_group_under_arrival_placement_is_refused() -> None:
+    # The incompatibility that is a meaning rather than a missing feature.
+    # Arrival interleaves a parent's children through the table on purpose, so
+    # their row indices are scattered and the last row of a group is not the
+    # greatest created_at. The message has to name both ways out.
+    with pytest.raises(InvalidShape, match="placement='arrival'") as raised:
+        _project(
+            company=FanOut(Zipf(1.2)),
+            status=PerParent("company", last="ACTIVE", rest="COMPLETE", order_by="created_at"),
+        )
+
+    assert "placement='grouped'" in str(raised.value)
+    assert "drop order_by" in str(raised.value)
+
+
+def test_ordering_a_group_under_grouped_placement_is_accepted() -> None:
+    table = _project(
+        status=PerParent("company", last="ACTIVE", rest="COMPLETE", order_by="created_at")
+    )
+
+    assert table.computation_order() == ("status",)
