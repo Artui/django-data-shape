@@ -399,6 +399,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#invariants" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Invariants
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#from-pytest" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -497,6 +508,33 @@
     
   
     Projections
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="invariants/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Invariants
   
 
     
@@ -721,6 +759,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#invariants" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Invariants
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#from-pytest" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -883,6 +932,14 @@ template has exactly the sessions that template has, so its child count is
 cross-table correlation Postgres cannot see. <code>Projection</code> fills such a table with
 one <code>INSERT ... SELECT</code> derived from the model graph, which is what a creation
 service collapses into at scale. See <a href="projections/">Projections</a>.</p>
+<h2 id="invariants">Invariants<a class="headerlink" href="#invariants" title="Permanent link">&para;</a></h2>
+<p>A company has many projects, at most one of which may be <code>ACTIVE</code>. That is a
+partial <code>UniqueConstraint</code>, and with 50,000 companies and 2,000,000 projects it
+means exactly 50,000 active rows -- a share <em>derived from</em> the fan-out rather
+than declared beside it. <code>PerParent</code> generates it, declared <code>invariants</code> check it
+as SQL after the load, and a static pre-check off <code>Model._meta.constraints</code>
+refuses the contradiction with the arithmetic before a row exists. See
+<a href="invariants/">Invariants</a>.</p>
 <h2 id="from-pytest">From pytest<a class="headerlink" href="#from-pytest" title="Permanent link">&para;</a></h2>
 <p>A session-scoped fixture builds a shape once for a whole run, and a scale
 harness makes the same world at several sizes so a query count can be asserted
@@ -891,8 +948,8 @@ query count is an ORM property; the session world skips with a stated reason
 where a shaped database cannot exist, because its job is to be believed by a
 planner. See <a href="pytest/">From pytest</a>.</p>
 <h2 id="not-in-this-release">Not in this release<a class="headerlink" href="#not-in-this-release" title="Permanent link">&para;</a></h2>
-<p>Per-group invariants, many-to-many edges, and reusing a built database as a
-template.</p>
+<p>Many-to-many edges, and emitting a declaration from a database or a factory that
+already exists.</p>
 
 
 

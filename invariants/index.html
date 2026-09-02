@@ -1,0 +1,1177 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="A realistically shaped test database from Django models: declare cardinality, skew and fan-out, load by COPY, and make the query planner believe it.">
+      
+      
+      
+        <link rel="canonical" href="https://artui.github.io/django-data-shape/invariants/">
+      
+      
+        <link rel="prev" href="../projections/">
+      
+      
+        <link rel="next" href="../keys/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Invariants - django-data-shape</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/_mkdocstrings.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#invariants" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="django-data-shape" class="md-header__button md-logo" aria-label="django-data-shape" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            django-data-shape
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Invariants
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/Artui/django-data-shape" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    Artui/django-data-shape
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="django-data-shape" class="md-nav__button md-logo" aria-label="django-data-shape" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    django-data-shape
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/Artui/django-data-shape" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    Artui/django-data-shape
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../relations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Relations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../derivations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Derivations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../projections/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Projections
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Invariants
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Invariants
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#it-is-not-a-nuisance-to-work-around" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        It is not a nuisance to work around
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#three-nets-decreasing-coverage-and-increasing-certainty" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Three nets, decreasing coverage and increasing certainty
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#perparent-generating-it-right" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PerParent -- generating it right
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="PerParent -- generating it right">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#assignment-order-is-not-emission-order" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Assignment order is not emission order
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#order_by-is-a-claim-that-is-checked-not-a-sort" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        order_by is a claim that is checked, not a sort
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-pre-check" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The pre-check
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="The pre-check">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#what-it-decides" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What it decides
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-it-cannot-decide-and-leaves-to-the-other-two-nets" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What it cannot decide, and leaves to the other two nets
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#declaring-an-invariant" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Declaring an invariant
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Declaring an invariant">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#a-violation-is-a-build-failure" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A violation is a build failure
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#where-this-stops" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Where this stops
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../keys/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Keys
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../statistics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Statistics and reuse
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../pytest/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    From pytest
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#it-is-not-a-nuisance-to-work-around" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        It is not a nuisance to work around
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#three-nets-decreasing-coverage-and-increasing-certainty" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Three nets, decreasing coverage and increasing certainty
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#perparent-generating-it-right" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PerParent -- generating it right
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="PerParent -- generating it right">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#assignment-order-is-not-emission-order" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Assignment order is not emission order
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#order_by-is-a-claim-that-is-checked-not-a-sort" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        order_by is a claim that is checked, not a sort
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-pre-check" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The pre-check
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="The pre-check">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#what-it-decides" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What it decides
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-it-cannot-decide-and-leaves-to-the-other-two-nets" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What it cannot decide, and leaves to the other two nets
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#declaring-an-invariant" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Declaring an invariant
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Declaring an invariant">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#a-violation-is-a-build-failure" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A violation is a build failure
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#where-this-stops" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Where this stops
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+    <a href="https://github.com/Artui/django-data-shape/edit/main/docs/invariants.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
+    </a>
+  
+  
+
+
+<h1 id="invariants">Invariants<a class="headerlink" href="#invariants" title="Permanent link">&para;</a></h1>
+<p>A company has many projects, at most one of which may be <code>ACTIVE</code>. In Django
+that is a partial <code>UniqueConstraint</code>, and it is the shape of a very large class
+of real schemas.</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">django_data_shape</span><span class="w"> </span><span class="kn">import</span> <span class="n">FanOut</span><span class="p">,</span> <span class="n">Invariant</span><span class="p">,</span> <span class="n">PerParent</span><span class="p">,</span> <span class="n">Sequential</span><span class="p">,</span> <span class="n">Shape</span><span class="p">,</span> <span class="n">Table</span><span class="p">,</span> <span class="n">Zipf</span><span class="p">,</span> <span class="n">build</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="n">shape</span> <span class="o">=</span> <span class="n">Shape</span><span class="p">(</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>    <span class="n">Table</span><span class="p">(</span><span class="n">Company</span><span class="p">,</span> <span class="n">rows</span><span class="o">=</span><span class="mi">50_000</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="n">names</span><span class="p">),</span>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>    <span class="n">Table</span><span class="p">(</span>
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>        <span class="n">Project</span><span class="p">,</span>
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>        <span class="n">rows</span><span class="o">=</span><span class="mi">2_000_000</span><span class="p">,</span>
+</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>        <span class="n">company</span><span class="o">=</span><span class="n">FanOut</span><span class="p">(</span><span class="n">Zipf</span><span class="p">(</span><span class="mf">1.2</span><span class="p">)),</span>
+</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>        <span class="n">created_at</span><span class="o">=</span><span class="n">Sequential</span><span class="p">(</span><span class="n">start</span><span class="p">,</span> <span class="n">timedelta</span><span class="p">(</span><span class="n">minutes</span><span class="o">=</span><span class="mi">1</span><span class="p">)),</span>
+</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>        <span class="n">status</span><span class="o">=</span><span class="n">PerParent</span><span class="p">(</span><span class="s2">"company"</span><span class="p">,</span> <span class="n">last</span><span class="o">=</span><span class="s2">"ACTIVE"</span><span class="p">,</span> <span class="n">rest</span><span class="o">=</span><span class="s2">"COMPLETE"</span><span class="p">),</span>
+</span><span id="__span-0-11"><a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>    <span class="p">),</span>
+</span><span id="__span-0-12"><a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>    <span class="n">invariants</span><span class="o">=</span><span class="p">[</span>
+</span><span id="__span-0-13"><a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>        <span class="n">Invariant</span><span class="p">(</span>
+</span><span id="__span-0-14"><a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>            <span class="s2">"no company has two active projects"</span><span class="p">,</span>
+</span><span id="__span-0-15"><a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>            <span class="n">sql</span><span class="o">=</span><span class="s2">"""</span>
+</span><span id="__span-0-16"><a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a><span class="s2">                SELECT company_id FROM app_project WHERE status = 'ACTIVE'</span>
+</span><span id="__span-0-17"><a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a><span class="s2">                GROUP BY company_id HAVING count(*) &gt; 1</span>
+</span><span id="__span-0-18"><a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a><span class="s2">            """</span><span class="p">,</span>
+</span><span id="__span-0-19"><a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a>        <span class="p">),</span>
+</span><span id="__span-0-20"><a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a>    <span class="p">],</span>
+</span><span id="__span-0-21"><a id="__codelineno-0-21" name="__codelineno-0-21" href="#__codelineno-0-21"></a><span class="p">)</span>
+</span><span id="__span-0-22"><a id="__codelineno-0-22" name="__codelineno-0-22" href="#__codelineno-0-22"></a>
+</span><span id="__span-0-23"><a id="__codelineno-0-23" name="__codelineno-0-23" href="#__codelineno-0-23"></a><span class="n">build</span><span class="p">(</span><span class="n">shape</span><span class="p">)</span>
+</span></code></pre></div>
+<h2 id="it-is-not-a-nuisance-to-work-around">It is not a nuisance to work around<a class="headerlink" href="#it-is-not-a-nuisance-to-work-around" title="Permanent link">&para;</a></h2>
+<p>With fifty thousand companies and two million projects, <code>status='ACTIVE'</code>
+matches <strong>exactly fifty thousand rows: 2.5%</strong> -- and that number is <em>derived
+from the fan-out</em>, not chosen. So <code>status</code> skew and fan-out are the same
+declaration seen twice.</p>
+<p>Declare <code>Skew({"ACTIVE": 0.1, ...})</code> beside that fan-out and you have asked for
+two hundred thousand active projects in a schema that permits fifty thousand.
+The data will not load; and if somebody dropped the constraint to make it load,
+it would carry the wrong selectivity for the one query the schema exists to
+serve.</p>
+<p>It is the same rule this package states everywhere else -- <strong>a distribution is
+declared over a fixed count, never as a multiplier</strong> -- except that here one
+distribution is <em>derived from</em> another rather than declared beside it.</p>
+<h2 id="three-nets-decreasing-coverage-and-increasing-certainty">Three nets, decreasing coverage and increasing certainty<a class="headerlink" href="#three-nets-decreasing-coverage-and-increasing-certainty" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Net</th>
+<th>What it covers</th>
+<th>When it fires</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1. Generate it right</td>
+<td>one rule, exactly</td>
+<td>never fails: the rows come out satisfying it</td>
+</tr>
+<tr>
+<td>2. Check it</td>
+<td>any rule you can write as a query</td>
+<td>after the load, failing the build</td>
+</tr>
+<tr>
+<td>3. The database refuses</td>
+<td>only what the schema states</td>
+<td>during the load</td>
+</tr>
+</tbody>
+</table>
+<p>Net 3 is free -- rows go into the real migrated schema -- and it has a terrible
+error message. So the arithmetic is also done statically, at declaration time,
+before a row is generated: see <a href="#the-pre-check">the pre-check</a> below.</p>
+<h2 id="perparent-generating-it-right"><code>PerParent</code> -- generating it right<a class="headerlink" href="#perparent-generating-it-right" title="Permanent link">&para;</a></h2>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="n">status</span> <span class="o">=</span> <span class="n">PerParent</span><span class="p">(</span><span class="s2">"company"</span><span class="p">,</span> <span class="n">last</span><span class="o">=</span><span class="s2">"ACTIVE"</span><span class="p">,</span> <span class="n">rest</span><span class="o">=</span><span class="s2">"COMPLETE"</span><span class="p">)</span>
+</span></code></pre></div>
+<p>One primitive covers most of the class: one active project, one default
+address, one current subscription period, one primary contact, N winners per
+contest.</p>
+<ul>
+<li><code>last=</code> puts the value on the final rows of every group, <code>first=</code> on the
+  opening ones. Exactly one of the two.</li>
+<li><code>rest=</code> is what every other row of the group gets. A plain value, or a
+  <code>Skew</code> or <code>Constant</code> -- a distribution that can say which values it produces,
+  and therefore prove it does not produce the special one.</li>
+<li><code>count=</code> is how many rows of each group are special. It is what
+  N-winners-per-contest is for; a unique constraint is the case it is not.</li>
+<li>A group smaller than <code>count</code> has every row special. That is arithmetic, not a
+  clamp: two entries cannot produce three winners.</li>
+<li>A <strong>childless</strong> parent contributes nothing, which is why the achieved count is
+  one per <em>non-empty</em> group.</li>
+</ul>
+<h3 id="assignment-order-is-not-emission-order">Assignment order is not emission order<a class="headerlink" href="#assignment-order-is-not-emission-order" title="Permanent link">&para;</a></h3>
+<p>To say "the last project is <code>ACTIVE</code>" you have to know a group. To keep
+<a href="../relations/">physical placement</a> honest you have to emit a parent's children
+interleaved. Those conflict for any design that has to <em>see</em> a group.</p>
+<p>They do not conflict here, because a <code>FanOut</code> is a <strong>partition of the child key
+range</strong> rather than a draw per child. Parent <code>j</code> owns child slots
+<code>[start_j, end_j)</code>, so a row's position within its group and the size of that
+group are both O(1) arithmetic on the row index and the seed. Nothing is
+buffered, nothing is sorted, and the rows still stream one at a time into
+<code>COPY</code>.</p>
+<p>That is the fifth time this package has met the same split between one order and
+another -- placement, derivations, fan-out partitioning, projection ordering,
+and now this.</p>
+<h3 id="order_by-is-a-claim-that-is-checked-not-a-sort"><code>order_by</code> is a claim that is checked, not a sort<a class="headerlink" href="#order_by-is-a-claim-that-is-checked-not-a-sort" title="Permanent link">&para;</a></h3>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="n">status</span> <span class="o">=</span> <span class="n">PerParent</span><span class="p">(</span><span class="s2">"company"</span><span class="p">,</span> <span class="n">order_by</span><span class="o">=</span><span class="s2">"created_at"</span><span class="p">,</span> <span class="n">last</span><span class="o">=</span><span class="s2">"ACTIVE"</span><span class="p">,</span> <span class="n">rest</span><span class="o">=</span><span class="s2">"COMPLETE"</span><span class="p">)</span>
+</span></code></pre></div>
+<p><code>order_by</code> claims that the last row of a group <em>under that column's ordering</em> is
+the last row of the group <em>as the fan-out partitioned it</em>. Two conditions make
+the claim true, and both are checked when the table is declared:</p>
+<ul>
+<li>the column climbs with the row index -- it implements <code>Ascending</code> and says so,
+  which <code>Sequential</code> does when its step is positive; and</li>
+<li>the fan-out is <code>placement="grouped"</code>.</li>
+</ul>
+<p><strong><code>order_by</code> and <code>placement="arrival"</code> are mutually exclusive, and that is a
+meaning rather than a missing feature.</strong> Arrival interleaves a parent's children
+through the table on purpose; their row indices are then scattered, so the last
+row of a group is an ordinary one of them rather than the newest. The refusal
+names both ways out.</p>
+<p>Dropping <code>order_by</code> costs nothing the planner can see. PostgreSQL keeps no
+statistic about which row of a group holds which value, so the selectivity, the
+plan and the cost are identical either way. What <code>order_by</code> buys is that the
+active project is the <em>newest</em> one, which is realism for the application.</p>
+<h2 id="the-pre-check">The pre-check<a class="headerlink" href="#the-pre-check" title="Permanent link">&para;</a></h2>
+<p>The models' own constraints are read from <code>Model._meta.constraints</code> when the
+<code>Shape</code> is declared, and a contradiction is refused with the arithmetic in it:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>one_active_project_per_company permits at most 50000 rows with status='ACTIVE',
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>one per (company); Project.status is filled by Skew({'ACTIVE': 0.1, ...}), which
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>asks for 200000 of them. A rule about a group cannot be kept by a draw made per
+</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>row, at any weight [...]
+</span></code></pre></div>
+<p>It runs on the <strong>shape</strong> rather than on the table, because that is where both
+numbers live: a table knows how many rows it declares, and only a shape knows
+how many companies there are.</p>
+<div class="admonition warning">
+<p class="admonition-title"><code>_meta.total_unique_constraints</code> is the helper that sounds right</p>
+<p>It deliberately excludes conditional constraints -- it exists to answer
+whether a relation is one-to-one, and a constraint that only sometimes
+applies cannot answer that. So the one helper whose name fits skips exactly
+this case. <code>_meta.constraints</code> is read directly.</p>
+</div>
+<h3 id="what-it-decides">What it decides<a class="headerlink" href="#what-it-decides" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>An unconditional <code>UniqueConstraint</code> is pigeonhole</strong>, and provable: two
+  million rows needing distinct <code>(company, label)</code> pairs cannot be built from
+  fifty thousand companies and three labels, whatever the seed. This is the
+  multi-column analysis a single <code>Table</code> declines to attempt.</li>
+<li><strong>A conditional <code>UniqueConstraint</code> is categorical.</strong> A per-row draw cannot
+  keep a per-group rule <em>at any weight</em> -- 2.5% is as broken as 10%, just later
+  in the load -- so the refusal does not depend on the arithmetic, only the
+  message does.</li>
+<li>A <code>PerParent</code> over one of the constraint's own fields, with <code>count=1</code> and the
+  constrained value, is accepted. Grouped by something else, or with <code>count</code>
+  above one, or with a <code>rest</code> that writes the value too, it is refused by name.</li>
+<li>A declaration that provably never writes the value -- a <code>Constant</code> of
+  something else, a <code>Skew</code> that does not list it -- is accepted.</li>
+</ul>
+<h3 id="what-it-cannot-decide-and-leaves-to-the-other-two-nets">What it cannot decide, and leaves to the other two nets<a class="headerlink" href="#what-it-cannot-decide-and-leaves-to-the-other-two-nets" title="Permanent link">&para;</a></h3>
+<ul>
+<li>A condition that is not a single equality: <code>Q(status__in=[...])</code>, a negation,
+  two clauses joined. Reading one would mean this package deciding what an
+  arbitrary predicate matches.</li>
+<li>A constraint written over <code>expressions</code> rather than <code>fields</code>.</li>
+<li>A conditional constraint whose grouping columns include no declared <code>FanOut</code>,
+  because there is no partition here to satisfy it with and a refusal would name
+  no remedy.</li>
+<li>A column filled by a distribution that cannot enumerate itself, and a fan-out
+  over a parent this shape does not build.</li>
+<li>A fan-out with a <code>null</code> share, because PostgreSQL counts each NULL in a unique
+  index as distinct and those rows are exempt from the constraint entirely.</li>
+</ul>
+<p>In every one of those the declaration is allowed through, and net 2 and net 3
+are what catch it.</p>
+<p>Whether to refuse is decidable without the parent's row count; only the
+numbers in the message need it. A project that builds its fifty companies with
+the ORM and asks this package only for the projects still gets the refusal, and
+gets it phrased per group rather than in rows.</p>
+<h2 id="declaring-an-invariant">Declaring an invariant<a class="headerlink" href="#declaring-an-invariant" title="Permanent link">&para;</a></h2>
+<p>Net 2 is the only one that covers rules the database does not enforce, which is
+most of them: a denormalised total, a tenant id that must match its parent's, an
+interval chain with no gaps, a status history whose transitions are legal.</p>
+<p>Two ways to write one, and they are mutually exclusive:</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="n">Invariant</span><span class="p">(</span>
+</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>    <span class="s2">"no project predates its company"</span><span class="p">,</span>
+</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>    <span class="n">Project</span><span class="p">,</span>
+</span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>    <span class="n">violated_by</span><span class="o">=</span><span class="n">Q</span><span class="p">(</span><span class="n">created_at__lt</span><span class="o">=</span><span class="n">F</span><span class="p">(</span><span class="s2">"company__founded_at"</span><span class="p">)),</span>
+</span><span id="__span-4-5"><a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="p">)</span>
+</span><span id="__span-4-6"><a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>
+</span><span id="__span-4-7"><a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="n">Invariant</span><span class="p">(</span>
+</span><span id="__span-4-8"><a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a>    <span class="s2">"debits equal credits"</span><span class="p">,</span>
+</span><span id="__span-4-9"><a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a>    <span class="n">sql</span><span class="o">=</span><span class="s2">"""</span>
+</span><span id="__span-4-10"><a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a><span class="s2">    SELECT transaction_id FROM app_entry</span>
+</span><span id="__span-4-11"><a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a><span class="s2">    GROUP BY transaction_id HAVING sum(amount) &lt;&gt; 0</span>
+</span><span id="__span-4-12"><a id="__codelineno-4-12" name="__codelineno-4-12" href="#__codelineno-4-12"></a><span class="s2">"""</span><span class="p">,</span>
+</span><span id="__span-4-13"><a id="__codelineno-4-13" name="__codelineno-4-13" href="#__codelineno-4-13"></a><span class="p">)</span>
+</span></code></pre></div>
+<ul>
+<li><code>violated_by</code> is a <code>Q</code> describing the rows that are <strong>wrong</strong>, not the rows
+  that are right -- because the wrong rows are what a failure has to report. It
+  runs through <code>_base_manager</code>, so a default manager that filters cannot hide
+  the rows the rule exists to catch.</li>
+<li><code>sql</code> is a full statement rather than a predicate, because the interesting
+  rules are aggregates. <strong>Every row it returns is a violation</strong>, and a statement
+  returning nothing passes. It may read any table, including ones this shape
+  does not build.</li>
+</ul>
+<h3 id="a-violation-is-a-build-failure">A violation is a build failure<a class="headerlink" href="#a-violation-is-a-build-failure" title="Permanent link">&para;</a></h3>
+<p>The checks run at the end of <code>build()</code>, <strong>inside the transaction that loaded the
+rows</strong>, so a violation rolls the whole build back and the database is left as it
+was found. An invariant that failed the <em>test</em> instead would leave a database
+full of impossible data for every later assertion to be evaluated against, and
+those assertions would pass or fail for reasons unrelated to the code.</p>
+<p>The message names the rule, quotes the rows that broke it, and is written to be
+read out of a terminal rather than stepped through in a debugger. The first
+failure stops the run: a generator that broke one rule has usually broken the
+ones downstream of it, and a report listing five consequences of one cause hides
+the cause.</p>
+<p><code>check_invariants</code> is exported as well as called, so the same rules can be run
+against a database this package did not just build -- a template clone, a
+restored dump, or the state a suite has worked itself into.</p>
+<div class="admonition note">
+<p class="admonition-title">An invariant changes no row and still changes the cache key</p>
+<p>The check runs during the build, and a cache hit is exactly what skips the
+build -- so a rule that made no difference to <code>shape_digest</code> would be a rule
+that silently stopped running the second time. That is worse than no rule,
+because it is a rule everybody believes. The cost is one rebuild of a
+database that would have been byte-identical.</p>
+</div>
+<h2 id="where-this-stops">Where this stops<a class="headerlink" href="#where-this-stops" title="Permanent link">&para;</a></h2>
+<p><strong>A constraint must be satisfiable by construction within one group, or it is
+declared as an invariant and checked, not generated.</strong></p>
+<p>"No two shifts overlap <strong>and</strong> every shift is covered <strong>and</strong> nobody exceeds
+forty hours" is scheduling. It is NP-hard, it needs a global search, and a
+global search cannot stream into <code>COPY</code>. This package will not attempt it. Write
+the rule as an <code>Invariant</code> and find out, or build that table with something whose
+job it is.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.instant", "navigation.tracking", "navigation.sections", "navigation.top", "search.highlight", "search.suggest", "content.code.copy", "content.code.annotate", "content.action.edit", "toc.follow"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>
