@@ -83,6 +83,84 @@ unrealistic.
 It thins the partition uniformly *after* it is computed, so the size distribution
 describes the pre-null spread.
 
+## Reading the fan-out back
+
+Declaring a skew is only half of it. The reason to declare one is to write an
+assertion about the head or the tail, and that needs to know *which* parent is
+the head — which, without help, means a `GROUP BY` over the child table before
+the measurement has started.
+
+`fan_out_sizes` answers it from the declaration instead:
+
+```python
+from django_data_shape import fan_out_sizes
+
+counts = fan_out_sizes(shape, Order, "company")
+
+whale, orders = counts.ranked()[0]  # the head
+quiet = counts.ranked()[-5:]  # the tail
+nobody = counts.childless()  # the parents with no children at all
+assert counts[whale] == orders  # and it is an ordinary mapping
+```
+
+It costs one `SELECT` over the **parent** table. That is the asymmetry worth
+having: fifty thousand parents against two million children, and an aggregate
+would have to read the children.
+
+This is what the partition representation is for. A fan-out is not "pick a
+parent per child" but "parent `T` owns child rows `[start, end)`", and a
+partition can be inverted where a draw cannot.
+
+### It works on a cached build
+
+`template_database` builds once and every later run *clones*, generating nothing
+at all — so anything remembered from a build would simply not be there. Nothing
+is remembered. The partition is a pure function of the declaration, the seed and
+the parent's primary keys, so it is recomputed through the same code the build
+runs. The clone holds the parents, the declaration holds the rest, and the
+template cache keys on this package's version, so a database built by a release
+that drew differently is never the one being read.
+
+The one thing recomputation needs is that the parent table still holds the
+parents the children were spread across. Where the parent is declared in the
+same shape — which every cacheable shape is, since a template is built into a
+freshly migrated database — that is checked, and a mismatch raises
+`WorldChanged` rather than returning a plausible partition of a world nobody
+built:
+
+```text
+Company holds 41 rows and this shape declares 40, so the fan-out for
+Session.company would be spread over parents the children were never spread
+across.
+```
+
+Where the parents came from the ORM instead, there is nothing to check against
+and nothing is claimed: the answer describes the parents that are there. Ask
+before the test starts making more.
+
+### The sizes are not ordered on the parent key
+
+**"The whales are the low ids" is false**, and so is the reverse. A parent's size
+is drawn from a stream keyed on its position in the parent table, so the large
+groups are scattered through the key range rather than gathered at either end.
+`ranked()` is a real reordering of the keys, not the keys read forwards or
+backwards.
+
+That is deliberate and it is not going to change. Ordering the sizes on the key
+would put a correlation between a parent's id and its number of children into
+the child table — and a correlated foreign key is planner-visible, so it would
+be this package manufacturing exactly the flattering, unreal shape it exists to
+remove. Whichever end you reach for, reach for it through `ranked()` or
+`childless()` rather than through `id=1`.
+
+### With a null share the counts are the partition
+
+`null=` thins the partition per row *after* it is computed, so under one of those
+the counts are the partition and the rows pointing at each parent are fewer —
+uniformly in expectation, not exactly. `counts.null_share` is the share it was
+thinned by, and it is `0.0` whenever these numbers are row counts. The ranking is
+unaffected either way, which is what the head and the tail are read for.
+
 ## Placement — where the children physically sit
 
 `placement` decides the order children are written in, and it is not cosmetic.

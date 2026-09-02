@@ -4,6 +4,7 @@ from django_data_shape.build import build
 from django_data_shape.build_result import BuildResult
 from django_data_shape.canonical import Canonical
 from django_data_shape.check_invariants import check_invariants
+from django_data_shape.children_per_parent import ChildrenPerParent
 from django_data_shape.clone_database import clone_database
 from django_data_shape.derivation_queried_database import DerivationQueriedDatabase
 from django_data_shape.derivations.after import After
@@ -24,6 +25,7 @@ from django_data_shape.distributions.uniform import Uniform
 from django_data_shape.distributions.zipf import Zipf
 from django_data_shape.drop_database import drop_database
 from django_data_shape.fan_out import FanOut
+from django_data_shape.fan_out_sizes import fan_out_sizes
 from django_data_shape.invalid_shape import InvalidShape
 from django_data_shape.invariant import Invariant
 from django_data_shape.invariant_violated import InvariantViolated
@@ -45,6 +47,7 @@ from django_data_shape.template_database import template_database
 from django_data_shape.unhashable_shape import UnhashableShape
 from django_data_shape.unsupported_backend import UnsupportedBackend
 from django_data_shape.version import __version__
+from django_data_shape.world_changed import WorldChanged
 
 __all__ = [
     "After",
@@ -54,6 +57,7 @@ __all__ = [
     "BuildResult",
     "Canonical",
     "Categorical",
+    "ChildrenPerParent",
     "Constant",
     "Derivation",
     "DerivationQueriedDatabase",
@@ -82,11 +86,13 @@ __all__ = [
     "Uniform",
     "UnsupportedBackend",
     "UuidKeys",
+    "WorldChanged",
     "Zipf",
     "build",
     "check_invariants",
     "clone_database",
     "drop_database",
+    "fan_out_sizes",
     "scaled_shape",
     "scaled_world",
     "shape_digest",

@@ -74,6 +74,30 @@ def test_and_the_next_test_does_not_see_what_it_wrote(catalogue: BuildResult) ->
     assert Catalogue.objects.count() == 25
 
 
+@pytest.fixture
+def one_catalogue() -> Catalogue:
+    """An ordinary per-test fixture, written by somebody who has not met this package."""
+    return Catalogue.objects.create(name="made by an ordinary fixture")
+
+
+@pytest.mark.django_db
+def test_an_ordinary_fixture_over_the_session_world_does_not_start_from_empty(
+    catalogue: BuildResult, one_catalogue: Catalogue
+) -> None:
+    # The collision that is not an error, and the one that cost a consumer three
+    # failures in files that never mention this package. The session world is
+    # committed outside every test's transaction, so it is there for tests that
+    # never asked for it -- and the natural assertion in the fixture's own test,
+    # "there is one of these", is then false by a hundred thousand.
+    #
+    # The session fixture is requested here so this test says the same thing
+    # whether it runs alone or with the suite. In a real project it is requested
+    # by another file entirely, which is exactly why the failure appears only
+    # under a full run and looks like it came from nowhere.
+    assert Catalogue.objects.count() == 26
+    assert Catalogue.objects.exclude(pk=one_catalogue.pk).count() == 25
+
+
 @pytest.mark.django_db
 def test_a_scaled_world_over_the_session_world_is_refused_by_name(catalogue: BuildResult) -> None:
     # The first thing a consumer composing both fixtures hits, and the reason the

@@ -115,6 +115,20 @@ class FanOutPlan:
         bounds = [*self._starts, self._rows]
         return [bounds[i + 1] - bounds[i] for i in range(len(self._keys))]
 
+    def parent_keys(self) -> tuple[object, ...]:
+        """The keys this partition was spread across, in the order they were read.
+
+        The other half of :meth:`sizes`, and the reason both exist as methods
+        rather than as attributes somebody reads: a size is meaningless without
+        the key it belongs to, and the two line up positionally only because
+        they came out of the same partition.
+
+        Copied rather than handed over, because this class is the one place the
+        partition is represented and a caller who could append to that list
+        could make :meth:`sizes` disagree with it.
+        """
+        return tuple(self._keys)
+
 
 def _stride(rows: int) -> int:
     """A multiplier that walks every slot exactly once, scattering as it goes.

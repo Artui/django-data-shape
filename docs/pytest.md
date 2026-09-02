@@ -106,6 +106,49 @@ models**, not by taking turns over one: the session world gets the tables a plan
 assertion needs to be big, the scale harness gets the tables a growth assertion
 counts.
 
+### And it is there for tests that never asked for it
+
+The rows are committed once, outside any test's transaction, so **every test in
+the run sees them** — not only the ones that request the fixture. An ordinary
+per-test fixture over the same model therefore does not start from an empty
+table:
+
+```python
+# somewhere else entirely, in a file that has never heard of this package
+@pytest.fixture
+def an_order(db):
+    return Order.objects.create(status="pending")
+
+
+def test_the_dashboard_lists_it(an_order):
+    assert Order.objects.count() == 1  # 100_001
+    assert dashboard()["rows"] == [an_order]  # and now it has 100_000 friends
+```
+
+Nothing is wrong at the database: both sets of rows are real and correct, and the
+failing assertion is the *other* test's belief about how empty the world is. That
+is what makes it unpleasant to trace. **It appears only when the suite runs
+together**, because running that file alone never instantiates the session
+fixture — so the test passes in isolation, fails in a full run, and does so in
+files that never mention `shape_fixture`.
+
+Three ways out, in the order they are usually right:
+
+- **give a session world models nothing else uses.** The same rule as the one
+  above, for the same reason: a session world owns its tables for the whole run;
+- scope the other test's assertions rather than counting the table —
+  `filter(...)` on something the shape does not produce, or assert against
+  `an_order.pk` rather than a count;
+- build that model per test with `scaled_world(shape, 1)` instead, which undoes
+  itself.
+
+It is documented rather than detected, and that is a limit rather than a
+preference. There is no error to raise: this package cannot see the other test,
+and the only mechanism that could — intercepting writes to a model some shape
+owns — is a per-row hook, which is the one thing this library refuses to have at
+all. Where a collision *is* an error the message says so, which is the refusal in
+the section above.
+
 ## Growth: the same world at several sizes
 
 A query count that is `O(1)` rather than `O(N)` is not something one database can
