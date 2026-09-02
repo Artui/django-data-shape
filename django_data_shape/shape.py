@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
+from django_data_shape.check_constraints import check_constraints
 from django_data_shape.invalid_shape import InvalidShape
+from django_data_shape.invariant import Invariant
 from django_data_shape.projection import Projection
 from django_data_shape.table import Table
 
@@ -31,9 +35,28 @@ class Shape:
     model as a table *and* as a projection is the same over-determination as
     declaring it twice, and it would silently mean whichever the load order
     happened to reach last.
+
+    ``invariants`` are the business rules the loaded data must satisfy, checked
+    as SQL at the end of the build and rolling it back if any of them finds a
+    row. They are declared on the shape rather than on a table because a rule
+    worth writing down often spans two -- a child's tenant matching its
+    parent's, two sums agreeing across tables -- and because they all need the
+    same thing: every table already loaded.
+
+    **The models' own constraints are read here too**, which is why the
+    shape is where the pre-check lives rather than the table. A table knows how
+    many rows it declares; only a shape knows how many companies there are, and
+    ``one_active_project_per_company permits at most 50,000`` is arithmetic that
+    needs both. See
+    :func:`~django_data_shape.check_constraints.check_constraints`.
     """
 
-    def __init__(self, *tables: Table | Projection, seed: int = 0) -> None:
+    def __init__(
+        self,
+        *tables: Table | Projection,
+        seed: int = 0,
+        invariants: Sequence[Invariant] = (),
+    ) -> None:
         if not tables:
             raise InvalidShape("A shape needs at least one table.")
         seen: dict[str, Table | Projection] = {}
@@ -45,8 +68,10 @@ class Shape:
                     "distributions; two declarations would silently mean whichever came last."
                 )
             seen[key] = table
+        check_constraints(tables)
         self._tables = tables
         self._seed = seed
+        self._invariants = tuple(invariants)
 
     # Read-only for the same reason Table's are: a shape has to stay inert,
     # hashable data, and the duplicate-table check above runs once.
@@ -57,6 +82,11 @@ class Shape:
     @property
     def seed(self) -> int:
         return self._seed
+
+    @property
+    def invariants(self) -> tuple[Invariant, ...]:
+        """The rules the loaded data is checked against, after every table is in."""
+        return self._invariants
 
     def canonical(self) -> object:
         """The seed and every declaration, keyed by table. See ``Canonical``.
@@ -73,8 +103,20 @@ class Shape:
         and several of them fall back to the order they were declared in --
         which means declaration order can reach the data, and a digest that
         sorted it would give two different databases one key.
+
+        **The invariants are in it although not one of them writes a row.**
+        A shape that reused another shape's cached template database would never
+        run them -- the check happens during the build, and the build is what a
+        cache hit skips -- so a rule that made no difference to the key would be
+        a rule that silently stopped running the second time. The cost is one
+        rebuild for a database that would have been byte-identical, which is the
+        cheap side of that trade by a distance.
         """
-        return (self.seed, {table.db_table: table for table in self.tables})
+        return (
+            self.seed,
+            {table.db_table: table for table in self.tables},
+            self._invariants,
+        )
 
     def __repr__(self) -> str:
         names = ", ".join(table.model.__name__ for table in self.tables)

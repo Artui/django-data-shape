@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import uuid
 
+import django
 from django.db import models
 
 
@@ -424,3 +425,167 @@ class TargetedSession(models.Model):
 
     event = models.ForeignKey(Event, on_delete=models.CASCADE)
     title = models.CharField(max_length=50)
+
+
+class Period(models.Model):
+    """A subscription's validity chain, whose current row has no end.
+
+    Here because ``None`` is a legitimate value for the special row of a group,
+    which is what makes "not passed" impossible to spell as ``None`` in
+    ``PerParent``. An SCD-2 chain says exactly that: the current period is the
+    one whose ``valid_to`` is unset.
+    """
+
+    company = models.ForeignKey(Company, on_delete=models.CASCADE)
+    valid_from = models.DateTimeField()
+    valid_to = models.DateTimeField(null=True)
+
+
+class Seat(models.Model):
+    """A model whose two-column uniqueness is decidable arithmetic.
+
+    ``Table`` declines multi-column uniqueness on purpose -- it cannot know how
+    many companies exist -- so this is the case that only a whole shape can
+    refuse: rows against the product of the parent count and the label count.
+    """
+
+    company = models.ForeignKey(Company, on_delete=models.CASCADE)
+    label = models.CharField(max_length=20)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["company", "label"], name="one_seat_label_per_company"),
+        ]
+
+
+class Booking(models.Model):
+    """A model carrying every conditional constraint the pre-check cannot read.
+
+    One model rather than seven, because what is being tested is a set of
+    skips: a condition that is not a single equality, one written over an
+    expression rather than fields, one grouped by a column no fan-out
+    partitions, one joining two clauses, one whose single clause is itself a
+    nested Q, one comparing rather than equating, and a check constraint, which
+    is not a unique constraint at all. A declaration naming this model has to be
+    accepted whole.
+
+    ``seats`` is what makes the comparison bite: declared as ``Constant(0)`` a
+    condition read as ``seats == 0`` would be refused, so a suffix check that
+    stopped distinguishing a lookup from an equality would show here rather than
+    passing quietly.
+    """
+
+    company = models.ForeignKey(Company, on_delete=models.CASCADE)
+    room = models.CharField(max_length=20)
+    state = models.CharField(max_length=20)
+    seats = models.IntegerField()
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["company"],
+                condition=models.Q(state__in=["HELD", "PAID"]),
+                name="booking_state_in_is_not_an_equality",
+            ),
+            models.UniqueConstraint(
+                models.functions.Lower("room"),
+                condition=models.Q(state="HELD"),
+                name="booking_over_an_expression",
+            ),
+            models.UniqueConstraint(
+                fields=["room"],
+                condition=models.Q(state="HELD"),
+                name="booking_grouped_by_a_plain_column",
+            ),
+            models.UniqueConstraint(
+                fields=["company"],
+                condition=models.Q(state="HELD") & models.Q(seats__gt=0),
+                name="booking_over_two_clauses",
+            ),
+            models.UniqueConstraint(
+                fields=["company"],
+                condition=models.Q(models.Q(state="HELD") | models.Q(state="PAID")),
+                name="booking_over_a_nested_clause",
+            ),
+            models.UniqueConstraint(
+                fields=["company"],
+                condition=models.Q(seats__gt=0),
+                name="booking_over_a_comparison",
+            ),
+            models.CheckConstraint(
+                name="booking_seats_are_not_negative",
+                # Django renamed CheckConstraint's predicate from ``check`` to
+                # ``condition`` in 5.1 and removed the old name in 6.0, and this
+                # package's floor is 4.2 -- so there is no single spelling, and
+                # the alternative to this is not declaring a check constraint at
+                # all, which would leave the "not a unique constraint" branch
+                # covered by a stub rather than by a model.
+                **(
+                    {"condition": models.Q(seats__gte=0)}
+                    if django.VERSION >= (5, 1)
+                    else {"check": models.Q(seats__gte=0)}
+                ),
+            ),
+        ]
+
+
+class Invitation(models.Model):
+    """A conditional constraint over a column this package may leave undeclared.
+
+    ``outcome`` is nullable, so a shape can legitimately say nothing about it --
+    and a constraint conditioned on a column nobody fills is a constraint with
+    nothing to weigh.
+    """
+
+    company = models.ForeignKey(Company, on_delete=models.CASCADE)
+    label = models.CharField(max_length=20)
+    outcome = models.CharField(max_length=20, null=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["company"],
+                condition=models.Q(outcome="ACCEPTED"),
+                name="one_accepted_invitation_per_company",
+            ),
+        ]
+
+
+class Contest(models.Model):
+    """A parent whose children have several winners rather than one.
+
+    No constraint at all, which is the point: ``count=`` is for the rule a
+    schema does not state, and a unique constraint is the case it is not.
+    """
+
+    name = models.CharField(max_length=50)
+
+
+class Entry(models.Model):
+    """A contest's entries, a fixed number of which win."""
+
+    contest = models.ForeignKey(Contest, on_delete=models.CASCADE)
+    placing = models.CharField(max_length=20)
+
+
+class Assignment(models.Model):
+    """A child with two parents, only one of which its constraint groups by.
+
+    The model that makes "grouped by the wrong thing" reachable: a rule kept
+    once per contest says nothing about how many leads a company ends up with,
+    and with a single foreign key the table's own check would refuse first for
+    an unrelated reason.
+    """
+
+    company = models.ForeignKey(Company, on_delete=models.CASCADE)
+    contest = models.ForeignKey(Contest, on_delete=models.CASCADE)
+    role = models.CharField(max_length=20)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["company"],
+                condition=models.Q(role="LEAD"),
+                name="one_lead_assignment_per_company",
+            ),
+        ]

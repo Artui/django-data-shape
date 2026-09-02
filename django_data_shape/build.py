@@ -14,6 +14,7 @@ from django.db.models import Model
 
 from django_data_shape.apply_statistics_targets import apply_statistics_targets
 from django_data_shape.build_result import BuildResult
+from django_data_shape.check_invariants import check_invariants
 from django_data_shape.fan_out import FanOut
 from django_data_shape.fan_out_plan import FanOutPlan
 from django_data_shape.generate_rows import generate_rows
@@ -118,6 +119,13 @@ def build(
             _reset_sequence(connection, table.model)
             _analyze(connection, table.db_table)
             results.append(TableResult(table=table.db_table, rows=loaded))
+        # The second of the three nets, and the only one that covers a rule the
+        # schema does not state. Inside the transaction and after every table,
+        # for two separate reasons: a rule may span tables, so it cannot run
+        # until the last one is in; and a violation has to roll the load back,
+        # because a database full of impossible data makes every later assertion
+        # pass or fail for a reason unrelated to the code under test.
+        check_invariants(connection, shape.invariants)
     return BuildResult(tables=tuple(results))
 
 

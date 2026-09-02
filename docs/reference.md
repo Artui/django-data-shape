@@ -14,6 +14,16 @@
 
 ::: django_data_shape.table_result.TableResult
 
+## Invariants
+
+::: django_data_shape.derivations.per_parent.PerParent
+
+::: django_data_shape.invariant.Invariant
+
+::: django_data_shape.check_invariants.check_invariants
+
+::: django_data_shape.check_constraints.check_constraints
+
 ## Statistics and reuse
 
 ::: django_data_shape.apply_statistics_targets.apply_statistics_targets
@@ -76,6 +86,10 @@
 
 ::: django_data_shape.distributions.bounded.Bounded
 
+::: django_data_shape.distributions.categorical.Categorical
+
+::: django_data_shape.distributions.ascending.Ascending
+
 ::: django_data_shape.distributions.skew.Skew
 
 ::: django_data_shape.distributions.uniform.Uniform
@@ -95,3 +109,5 @@
 ::: django_data_shape.derivation_queried_database.DerivationQueriedDatabase
 
 ::: django_data_shape.unhashable_shape.UnhashableShape
+
+::: django_data_shape.invariant_violated.InvariantViolated

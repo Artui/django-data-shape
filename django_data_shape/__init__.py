@@ -3,6 +3,7 @@
 from django_data_shape.build import build
 from django_data_shape.build_result import BuildResult
 from django_data_shape.canonical import Canonical
+from django_data_shape.check_invariants import check_invariants
 from django_data_shape.clone_database import clone_database
 from django_data_shape.derivation_queried_database import DerivationQueriedDatabase
 from django_data_shape.derivations.after import After
@@ -10,8 +11,11 @@ from django_data_shape.derivations.aligned import Aligned
 from django_data_shape.derivations.derivation import Derivation
 from django_data_shape.derivations.derived import Derived
 from django_data_shape.derivations.given import Given
+from django_data_shape.derivations.per_parent import PerParent
 from django_data_shape.derivations.scope import Scope
+from django_data_shape.distributions.ascending import Ascending
 from django_data_shape.distributions.bounded import Bounded
+from django_data_shape.distributions.categorical import Categorical
 from django_data_shape.distributions.constant import Constant
 from django_data_shape.distributions.distribution import Distribution
 from django_data_shape.distributions.sequential import Sequential
@@ -21,6 +25,8 @@ from django_data_shape.distributions.zipf import Zipf
 from django_data_shape.drop_database import drop_database
 from django_data_shape.fan_out import FanOut
 from django_data_shape.invalid_shape import InvalidShape
+from django_data_shape.invariant import Invariant
+from django_data_shape.invariant_violated import InvariantViolated
 from django_data_shape.keys.key_function import KeyFunction
 from django_data_shape.keys.key_strategy import KeyStrategy
 from django_data_shape.keys.sequential_keys import SequentialKeys
@@ -43,9 +49,11 @@ from django_data_shape.version import __version__
 __all__ = [
     "After",
     "Aligned",
+    "Ascending",
     "Bounded",
     "BuildResult",
     "Canonical",
+    "Categorical",
     "Constant",
     "Derivation",
     "DerivationQueriedDatabase",
@@ -54,30 +62,34 @@ __all__ = [
     "FanOut",
     "Given",
     "InvalidShape",
+    "Invariant",
+    "InvariantViolated",
     "KeyFunction",
     "KeyStrategy",
+    "PerParent",
     "Projection",
     "ScaleProtocol",
     "Scope",
-    "SequentialKeys",
-    "SqlKeys",
-    "UuidKeys",
     "Sequential",
+    "SequentialKeys",
     "Shape",
     "ShapeNotEmpty",
     "Skew",
+    "SqlKeys",
     "Table",
     "TableResult",
-    "Uniform",
-    "Zipf",
     "UnhashableShape",
+    "Uniform",
     "UnsupportedBackend",
-    "__version__",
+    "UuidKeys",
+    "Zipf",
     "build",
+    "check_invariants",
     "clone_database",
     "drop_database",
     "scaled_shape",
     "scaled_world",
     "shape_digest",
     "template_database",
+    "__version__",
 ]

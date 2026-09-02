@@ -26,6 +26,17 @@ class Constant:
         """One, by definition. See ``Bounded``."""
         return 1
 
+    def shares(self) -> dict[object, float]:
+        """The one value, holding all of the rows. See ``Categorical``.
+
+        Worth implementing rather than leaving undecidable, because a constant
+        is how this package fills a column the model defaults -- so a status
+        column with ``default="COMPLETE"`` and no declaration of its own arrives
+        here, and a constraint conditioned on ``ACTIVE`` is then satisfied by a
+        table that never writes one. Undecidable would refuse it.
+        """
+        return {self._value: 1.0}
+
     def canonical(self) -> object:
         """The one value, which is the whole declaration. See ``Canonical``."""
         return (self._value,)

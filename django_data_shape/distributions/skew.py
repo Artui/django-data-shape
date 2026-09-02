@@ -71,6 +71,18 @@ class Skew:
         """How many values were declared. See ``Bounded``."""
         return len(self._values)
 
+    def shares(self) -> dict[object, float]:
+        """Each declared value against its share of the rows. See ``Categorical``.
+
+        The normalised weights rather than the raw ones, because the question a
+        caller of this asks is "how many of my rows will hold this value", and
+        weights are relative by design -- counts are a legitimate way to write
+        one. Normalising here is what lets a refusal quote a row count back at a
+        declaration that only ever said ``0.1``.
+        """
+        total = sum(self._weights.values())
+        return {value: weight / total for value, weight in self._weights.items()}
+
     def canonical(self) -> object:
         """The weights, **in declaration order**. See ``Canonical``.
 

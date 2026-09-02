@@ -19,3 +19,7 @@ def test_it_reports_a_single_distinct_value() -> None:
     # What makes a unique column with more than one row decidably impossible
     # at declaration time rather than partway through a load.
     assert Constant("web").distinct_values() == 1
+
+
+def test_the_one_value_holds_all_of_the_rows() -> None:
+    assert Constant("COMPLETE").shares() == {"COMPLETE": 1.0}

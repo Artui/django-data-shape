@@ -9,7 +9,9 @@ from typing import Any, cast
 from django.db.models import Field, Model
 
 from django_data_shape.derivations.derivation import Derivation
+from django_data_shape.derivations.per_parent import PerParent
 from django_data_shape.derivations.scope import Scope
+from django_data_shape.distributions.ascending import Ascending
 from django_data_shape.distributions.bounded import Bounded
 from django_data_shape.distributions.constant import Constant
 from django_data_shape.distributions.distribution import Distribution
@@ -306,6 +308,8 @@ class Table:
                 self._check_row_sources(name, declared)
             elif declared.scope is Scope.PARENT:
                 self._check_parent_sources(name, declared, known)
+            elif declared.scope is Scope.GROUP:
+                self._check_group_sources(name, declared)
 
     def _check_row_sources(self, name: str, declared: Derivation) -> None:
         unknown = sorted(source for source in declared.sources if source not in self._fields)
@@ -350,6 +354,106 @@ class Table:
                     f"field named {field_name}. Its concrete fields are: "
                     f"{', '.join(sorted(available))}."
                 )
+
+    def _check_group_sources(self, name: str, declared: Derivation) -> None:
+        """Refuse a group-scoped column whose groups are not there to be grouped by.
+
+        A group is a parent's share of the child range, so the source has to be
+        a ``FanOut`` declared on this table -- the same requirement a parent
+        source has, and for a sharper reason: a parent source with no fan-out
+        has nothing to read, while a group source with no fan-out has no
+        *partition*, and it is the partition that makes a per-group rule
+        computable at all.
+
+        A null share is refused for a reason that is not the parent case's. A
+        child with a NULL foreign key belongs to no group, so no per-group rule
+        says anything about it -- and PostgreSQL treats each NULL as distinct in
+        a unique index, so those rows are exempt from the very constraint this
+        exists to satisfy. Generating them would leave a share of the table
+        outside the rule while the declaration read as though it covered
+        everything.
+        """
+        for source in declared.sources:
+            fan_out = self._fields.get(source)
+            if not isinstance(fan_out, FanOut):
+                raise InvalidShape(
+                    f"{self.model.__name__}.{name} is decided per group of {source!r}, but "
+                    f"{source} is not a fan-out declared on this table. A group is a parent's "
+                    "share of the child rows, so the fan-out that partitions them has to be "
+                    "declared before anything can be decided per group."
+                )
+            if fan_out.null:
+                raise InvalidShape(
+                    f"{self.model.__name__}.{name} is decided per group of {source!r}, but "
+                    f"{source} has null={fan_out.null!r}, so some of these rows belong to no "
+                    "group at all. PostgreSQL counts each NULL as its own group in a unique "
+                    "index, so those rows would sit outside the rule while the declaration read "
+                    "as though it covered them. Drop the null share."
+                )
+        if isinstance(declared, PerParent) and declared.order_by is not None:
+            self._check_group_order(name, declared)
+
+    def _check_group_order(self, name: str, declared: PerParent) -> None:
+        """Refuse an ``order_by`` this package cannot make true.
+
+        ``order_by`` claims that the last row of a group *under that column's
+        ordering* is the last row of the group *as the fan-out partitioned it*.
+        It is checked rather than performed, because performing it would mean
+        sorting a group, and holding a group is the one thing streaming into
+        ``COPY`` cannot do.
+
+        Two conditions make the claim true, and both are decidable here.
+
+        The column has to climb with the row index -- it implements
+        :class:`~django_data_shape.distributions.ascending.Ascending` and says
+        so. A column filled by
+        :class:`~django_data_shape.derivations.after.After` or by a skew has no
+        order to be last in.
+
+        And the fan-out has to be ``placement="grouped"``, which is the case
+        this package spends most of its documentation warning about. Under
+        ``grouped`` a parent's children occupy consecutive row indices, so a
+        column climbing with the index climbs within every group and the last
+        position really is the greatest value. Under ``arrival`` the children
+        are interleaved *on purpose* -- that is what makes the physical layout
+        honest -- so the group's rows are scattered through the index and the
+        last position is an ordinary one of them.
+
+        **That is a genuine incompatibility rather than a missing feature.**
+        The two declarations say opposite things about the relationship between
+        a group and the row order, and the refusal names both ways out. Nothing
+        is lost from the plan by dropping it: PostgreSQL keeps no statistic
+        about which row of a group holds which value, so the selectivity, the
+        plan and the cost are identical either way. What ``order_by`` buys is
+        that the active project is the newest one, which is realism for the
+        application rather than for the planner.
+        """
+        column = declared.order_by
+        ordering = self._fields.get(cast("str", column))
+        if ordering is None:
+            raise InvalidShape(
+                f"{self.model.__name__}.{name} orders each group by {column!r}, which this shape "
+                f"does not fill. Its columns are: {', '.join(sorted(self._fields))}."
+            )
+        if not isinstance(ordering, Ascending) or not ordering.is_ascending():
+            raise InvalidShape(
+                f"{self.model.__name__}.{name} orders each group by {column!r}, but {ordering!r} "
+                "does not climb with the row index, so there is no last row of a group for it to "
+                "mean. Fill that column with a Sequential going forwards, or drop order_by -- "
+                "the invariant holds either way, because which row of a group is special is not "
+                "something the planner can see."
+            )
+        fan_out = cast("FanOut", self._fields[declared.relation])
+        if fan_out.placement != "grouped":
+            raise InvalidShape(
+                f"{self.model.__name__}.{name} orders each group by {column!r}, but "
+                f"{declared.relation} has placement={fan_out.placement!r}, which interleaves a "
+                "parent's children through the table on purpose. Their row indices are then "
+                f"scattered, so the last row of a group is not the greatest {column}. Declare "
+                "placement='grouped' to make the claim true and accept the clustered layout, or "
+                "drop order_by -- it changes no plan, only which row of the group is the special "
+                "one."
+            )
 
     def _check_satisfiable(self, known: dict[str, Field[Any, Any]]) -> None:
         """Refuse a declaration the database provably cannot hold.
