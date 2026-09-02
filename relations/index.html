@@ -395,6 +395,56 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#reading-the-fan-out-back" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reading the fan-out back
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Reading the fan-out back">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#it-works-on-a-cached-build" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        It works on a cached build
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-sizes-are-not-ordered-on-the-parent-key" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The sizes are not ordered on the parent key
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#with-a-null-share-the-counts-are-the-partition" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        With a null share the counts are the partition
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#placement-where-the-children-physically-sit" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -695,6 +745,56 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#reading-the-fan-out-back" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reading the fan-out back
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Reading the fan-out back">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#it-works-on-a-cached-build" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        It works on a cached build
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-sizes-are-not-ordered-on-the-parent-key" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The sizes are not ordered on the parent key
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#with-a-null-share-the-counts-are-the-partition" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        With a null share the counts are the partition
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#placement-where-the-children-physically-sit" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -816,6 +916,66 @@ planner-visible — an optional foreign key that is never null is its own kind o
 unrealistic.</p>
 <p>It thins the partition uniformly <em>after</em> it is computed, so the size distribution
 describes the pre-null spread.</p>
+<h2 id="reading-the-fan-out-back">Reading the fan-out back<a class="headerlink" href="#reading-the-fan-out-back" title="Permanent link">&para;</a></h2>
+<p>Declaring a skew is only half of it. The reason to declare one is to write an
+assertion about the head or the tail, and that needs to know <em>which</em> parent is
+the head — which, without help, means a <code>GROUP BY</code> over the child table before
+the measurement has started.</p>
+<p><code>fan_out_sizes</code> answers it from the declaration instead:</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">django_data_shape</span><span class="w"> </span><span class="kn">import</span> <span class="n">fan_out_sizes</span>
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="n">counts</span> <span class="o">=</span> <span class="n">fan_out_sizes</span><span class="p">(</span><span class="n">shape</span><span class="p">,</span> <span class="n">Order</span><span class="p">,</span> <span class="s2">"company"</span><span class="p">)</span>
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>
+</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="n">whale</span><span class="p">,</span> <span class="n">orders</span> <span class="o">=</span> <span class="n">counts</span><span class="o">.</span><span class="n">ranked</span><span class="p">()[</span><span class="mi">0</span><span class="p">]</span>  <span class="c1"># the head</span>
+</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="n">quiet</span> <span class="o">=</span> <span class="n">counts</span><span class="o">.</span><span class="n">ranked</span><span class="p">()[</span><span class="o">-</span><span class="mi">5</span><span class="p">:]</span>  <span class="c1"># the tail</span>
+</span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="n">nobody</span> <span class="o">=</span> <span class="n">counts</span><span class="o">.</span><span class="n">childless</span><span class="p">()</span>  <span class="c1"># the parents with no children at all</span>
+</span><span id="__span-2-8"><a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="k">assert</span> <span class="n">counts</span><span class="p">[</span><span class="n">whale</span><span class="p">]</span> <span class="o">==</span> <span class="n">orders</span>  <span class="c1"># and it is an ordinary mapping</span>
+</span></code></pre></div>
+<p>It costs one <code>SELECT</code> over the <strong>parent</strong> table. That is the asymmetry worth
+having: fifty thousand parents against two million children, and an aggregate
+would have to read the children.</p>
+<p>This is what the partition representation is for. A fan-out is not "pick a
+parent per child" but "parent <code>T</code> owns child rows <code>[start, end)</code>", and a
+partition can be inverted where a draw cannot.</p>
+<h3 id="it-works-on-a-cached-build">It works on a cached build<a class="headerlink" href="#it-works-on-a-cached-build" title="Permanent link">&para;</a></h3>
+<p><code>template_database</code> builds once and every later run <em>clones</em>, generating nothing
+at all — so anything remembered from a build would simply not be there. Nothing
+is remembered. The partition is a pure function of the declaration, the seed and
+the parent's primary keys, so it is recomputed through the same code the build
+runs. The clone holds the parents, the declaration holds the rest, and the
+template cache keys on this package's version, so a database built by a release
+that drew differently is never the one being read.</p>
+<p>The one thing recomputation needs is that the parent table still holds the
+parents the children were spread across. Where the parent is declared in the
+same shape — which every cacheable shape is, since a template is built into a
+freshly migrated database — that is checked, and a mismatch raises
+<code>WorldChanged</code> rather than returning a plausible partition of a world nobody
+built:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>Company holds 41 rows and this shape declares 40, so the fan-out for
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>Session.company would be spread over parents the children were never spread
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>across.
+</span></code></pre></div>
+<p>Where the parents came from the ORM instead, there is nothing to check against
+and nothing is claimed: the answer describes the parents that are there. Ask
+before the test starts making more.</p>
+<h3 id="the-sizes-are-not-ordered-on-the-parent-key">The sizes are not ordered on the parent key<a class="headerlink" href="#the-sizes-are-not-ordered-on-the-parent-key" title="Permanent link">&para;</a></h3>
+<p><strong>"The whales are the low ids" is false</strong>, and so is the reverse. A parent's size
+is drawn from a stream keyed on its position in the parent table, so the large
+groups are scattered through the key range rather than gathered at either end.
+<code>ranked()</code> is a real reordering of the keys, not the keys read forwards or
+backwards.</p>
+<p>That is deliberate and it is not going to change. Ordering the sizes on the key
+would put a correlation between a parent's id and its number of children into
+the child table — and a correlated foreign key is planner-visible, so it would
+be this package manufacturing exactly the flattering, unreal shape it exists to
+remove. Whichever end you reach for, reach for it through <code>ranked()</code> or
+<code>childless()</code> rather than through <code>id=1</code>.</p>
+<h3 id="with-a-null-share-the-counts-are-the-partition">With a null share the counts are the partition<a class="headerlink" href="#with-a-null-share-the-counts-are-the-partition" title="Permanent link">&para;</a></h3>
+<p><code>null=</code> thins the partition per row <em>after</em> it is computed, so under one of those
+the counts are the partition and the rows pointing at each parent are fewer —
+uniformly in expectation, not exactly. <code>counts.null_share</code> is the share it was
+thinned by, and it is <code>0.0</code> whenever these numbers are row counts. The ranking is
+unaffected either way, which is what the head and the tail are read for.</p>
 <h2 id="placement-where-the-children-physically-sit">Placement — where the children physically sit<a class="headerlink" href="#placement-where-the-children-physically-sit" title="Permanent link">&para;</a></h2>
 <p><code>placement</code> decides the order children are written in, and it is not cosmetic.</p>
 <table>
