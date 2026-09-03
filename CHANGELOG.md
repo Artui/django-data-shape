@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`Projection(..., through=Model)` says which model a derived join runs on.**
+  An abstract base carrying `created_by`/`updated_by` to `User` -- a pattern most
+  Django schemas have -- makes **any two models in the schema joinable**, so the
+  derivation had candidates everywhere and could settle nothing: not for one
+  pair but for every pair, which put the derived form out of reach for a whole
+  application and left `sql=` as the only route to this feature's own motivating
+  example. The refusal now names `through=` first, and names a model that can
+  actually resolve the join rather than the first one alphabetically -- an audit
+  model is reached by two edges from each side, so it is a real candidate and
+  never a usable answer. Where every candidate is reached more than once,
+  `through=` cannot narrow anything and the refusal says so instead of
+  suggesting it.
+
+### Fixed
+- **A rounded `Uniform` can size a fan-out.**
+  `FanOut(Uniform(1, 10, places=0))` was refused with "needs numeric fan-out
+  sizes, but produced `Decimal('3')`" -- which reads as a contradiction, and was
+  one keyword away from `FanOut(Uniform(1, 10))`, the spelling this package's own
+  docstring recommends and two of its refusals suggest. `places=0` is the natural
+  way to say that a fan-out size is a count. The guard was
+  `isinstance(weight, (int, float))` while the next line already did
+  `float(weight)`, so it was stricter than the arithmetic it protected. It is now
+  the numeric tower plus `Decimal`, which `numbers.Real` deliberately excludes,
+  and `Fraction` and numpy scalars come along with it. `bool` stays refused. The
+  message also names a remedy now, which it was alone in not doing.
+- **`columns=` accepts the column an `INSERT` actually lists.** The refusal that
+  sends a reader there says "the select's columns are what the insert lists", and
+  what an insert lists for a foreign key is `event_id` -- which was then refused
+  as "no field named event_id". That is a contradiction rather than a correction,
+  and the surrounding documentation reinforced the wrong reading. Both spellings
+  are accepted and resolve to the same column, the messages say so, and the same
+  dict is read for `statistics=` so the two cannot disagree about what a column
+  is called.
+
+
 ## [0.13.0] — 2026-09-03
 
 ### Added

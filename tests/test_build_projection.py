@@ -27,6 +27,11 @@ from tests.testapp.models import (
     AuditedSession,
     Event,
     EventSession,
+    Plan,
+    PlanRun,
+    PlanStage,
+    Portfolio,
+    RunStage,
     Template,
     TemplateSession,
     UuidSession,
@@ -468,3 +473,53 @@ def test_a_uuid_keyed_table_can_be_projected_once_its_keys_have_a_sql_form() -> 
     # asserting on the sort and not on the keys.
     stream = field_stream(shape.seed, UuidSession._meta.db_table, ":key")
     assert set(keys) == {Md5Keys().key_for(row, stream) for row in range(len(keys))}
+
+
+def test_a_join_named_with_through_builds_the_collection_it_names() -> None:
+    """The schema shape that had no derived form at all, built end to end.
+
+    An abstract base putting ``created_by``/``updated_by`` on every model makes
+    any two of them joinable, so the derivation had six candidates here and
+    refused -- for this pair and, on such a schema, for every pair. That left
+    raw SQL as the only route to the feature's own motivating example.
+
+    Accepting the declaration is not the claim; copying the right collection is.
+    Each run's stages have to be its **plan's** stages, which is what asserting
+    against `Plan` rather than against a row count checks.
+    """
+    shape = Shape(
+        Projection(RunStage, per=PlanRun, copying=PlanStage, through=Plan),
+        Table(Portfolio, rows=2, name=Constant("f")),
+        Table(Plan, rows=4, name=Constant("p")),
+        Table(
+            PlanStage,
+            rows=20,
+            plan=FanOut(Uniform(1, 4)),
+            portfolio=FanOut(Uniform(1, 2)),
+            title=Sequential("s", "x"),
+        ),
+        Table(
+            PlanRun,
+            rows=10,
+            plan=FanOut(Uniform(1, 3)),
+            portfolio=FanOut(Uniform(1, 2)),
+            name=Constant("r"),
+        ),
+        seed=3,
+    )
+
+    build_shape(shape)
+
+    stages_per_plan = {
+        plan_id: PlanStage.objects.filter(plan_id=plan_id).count()
+        for plan_id in Plan.objects.values_list("id", flat=True)
+    }
+    runs = list(PlanRun.objects.all())
+    assert runs
+    for run in runs:
+        copied = RunStage.objects.filter(run=run)
+        # Its plan's stages, not the portfolio's and not the auditor's.
+        assert copied.count() == stages_per_plan[run.plan_id]
+        assert set(copied.values_list("title", flat=True)) == set(
+            PlanStage.objects.filter(plan_id=run.plan_id).values_list("title", flat=True)
+        )

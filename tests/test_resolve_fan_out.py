@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections import Counter
 from contextlib import contextmanager
+from fractions import Fraction
 from typing import Any
 
 import pytest
@@ -241,3 +242,45 @@ def test_the_refusal_names_every_missing_key_and_not_only_the_first() -> None:
     # and finding that out one round trip at a time is the slow way.
     with pytest.raises(InvalidShape, match=r"98, 99"):
         _resolve([], rows=2, fan_out=FanOut(Constant(1), parents=[98, 99]))
+
+
+def test_a_rounded_uniform_can_size_a_partition() -> None:
+    # Uniform(1, 10) is the spelling FanOut's own docstring recommends and the
+    # one two refusals suggest, and places=0 is the natural way to say that a
+    # fan-out size is a count -- so the failing form was one keyword away from
+    # the form the package tells you to write.
+    #
+    # The guard was isinstance(weight, (int, float)) while the very next line
+    # already did float(weight), so it was stricter than the arithmetic it
+    # protects. Decimal is numbers.Number but deliberately *not* numbers.Real,
+    # so widening to Real alone would not have reached it.
+    plan = _resolve(list(range(10)), rows=100, fan_out=FanOut(Uniform(1, 10, places=0)))
+
+    assert sum(plan.sizes()) == 100
+
+
+def test_a_fraction_can_size_one_too() -> None:
+    # The same widening, and the reason it is to a protocol rather than to a
+    # list of two more types: a caller's own weights may be Fractions or numpy
+    # scalars, and none of them is a declaration mistake.
+    plan = _resolve(list(range(4)), rows=40, fan_out=FanOut(Constant(Fraction(3, 2))))
+
+    assert sum(plan.sizes()) == 40
+
+
+def test_a_size_that_is_not_a_number_is_still_refused_and_now_names_the_remedy() -> None:
+    with pytest.raises(InvalidShape) as raised:
+        _resolve(list(range(4)), rows=40, fan_out=FanOut(Constant("three")))
+
+    message = str(raised.value)
+    assert "'three'" in message
+    # The one refusal in the package that named no remedy.
+    assert "a count" in message
+
+
+def test_a_boolean_size_is_refused_rather_than_counted_as_one() -> None:
+    # bool is an int and is numbers.Real, so widening has to keep excluding it:
+    # a distribution handing back True has almost certainly been written for a
+    # different column.
+    with pytest.raises(InvalidShape, match="True"):
+        _resolve(list(range(4)), rows=40, fan_out=FanOut(Constant(True)))

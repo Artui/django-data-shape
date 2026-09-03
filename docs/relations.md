@@ -35,6 +35,11 @@ over 193,000 heap blocks.
 That defect cannot be reproduced against a fixture with even fan-out. Declaring
 the distribution is what makes it reproducible.
 
+The weights are **numbers**, and they are normalised, so their scale does not
+matter: `Zipf()` for a realistic heavy tail, `Uniform(1, 10)` for something
+flatter, `Uniform(1, 10, places=0)` if you would rather say a count is a whole
+number. `int`, `float`, `Decimal` and `Fraction` all work.
+
 ## The parents do not have to be ours
 
 `FanOut` reads the parent table's **real keys**. It does not assume the dense
