@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`Distinct` is the sixth opt-in distribution protocol, and it says a column
+  writes a different value in every row.** It is the exact dual of `Bounded`:
+  that one says how few values a distribution can produce, this one says it
+  never repeats. It exists because a pair is distinct as soon as either half is,
+  so a column that answers `True` keeps a multi-column `UniqueConstraint` on its
+  own with nothing arranged around it -- which is what separates the declaration
+  that builds from the one that is a lottery. `Sequential` implements it for any
+  non-zero step, in either direction: this is injectivity and not order, so it
+  is a claim of its own rather than a second reading of `Ascending`.
 - **`Projection(..., reads=(Model, ...))` says what a statement of your own
   selects from.** Nothing here parses SQL, so a raw `sql=` projection was a
   black box that could only be run last -- and last stopped being right the
@@ -64,6 +73,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   collision is a matter of the seed. The refusal names the constraint, both
   fan-outs, and the form that does build a deduplicated edge table today: a
   `Projection` with `columns=` and your own `sql=`.
+- **A fan-out beside a drawn column under one uniqueness is refused too, and
+  for the same reason a second fan-out is.** `Table(Seat, rows=100,
+  company=FanOut(Zipf()), label=Skew({"a": 1, "b": 1}))` over fifty companies
+  has capacity exactly one hundred, passed every check, and died inside `COPY`
+  at row 17 -- at a different row for the next seed. The proof does not need the
+  second column to be a partition: a `Distribution` is by contract a pure
+  function of the row index and of a draw derived from the field name and that
+  same index, so it cannot see which parent the fan-out gave its row, nothing
+  enumerates the pairs *inside a group*, and a group of three rows collides over
+  two labels whatever the table's total capacity says. No arithmetic decides it
+  either, because the quantity that would is the largest group the fan-out
+  produces and that is not known until the partition is resolved at build time.
+  The pigeonhole check still answers first where it applies, so a shape that
+  does not fit at all keeps its arithmetic; a shape that fits and cannot be
+  arranged now gets a refusal naming the fan-out, the drawn columns, and the
+  form that does keep such a constraint -- `Derived(relation, compute=...,
+  scope="group")`, which receives this row's position among its parent's
+  children. A column that is `Distinct` is exempt, because then there is nothing
+  to arrange.
 - **A forgotten foreign key is told how to declare one, rather than told that
   relations are unsupported.** The message said "relations are not supported
   yet, so this shape cannot be built. Declaring fan-out as a distribution is the

@@ -9,7 +9,7 @@ wrong reason.
 from __future__ import annotations
 
 import datetime
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from django.db import IntegrityError, connection
@@ -17,6 +17,7 @@ from django.db.models import Q
 
 from django_data_shape import (
     Constant,
+    Derived,
     FanOut,
     Invariant,
     InvariantViolated,
@@ -30,7 +31,16 @@ from django_data_shape import (
     shape_digest,
 )
 from django_data_shape import build as build_shape
-from tests.testapp.models import Booking, Company, Contest, Entry, Period, Project, Vendor
+from tests.testapp.models import (
+    Booking,
+    Company,
+    Contest,
+    Entry,
+    Period,
+    Project,
+    Seat,
+    Vendor,
+)
 
 pytestmark = [
     pytest.mark.django_db(transaction=True),
@@ -42,6 +52,13 @@ pytestmark = [
 
 _START = datetime.datetime(2020, 1, 1, tzinfo=datetime.timezone.utc)
 _MINUTE = datetime.timedelta(minutes=1)
+_LETTERS = "abcdefghijklmnopqrstuvwxyz"
+
+
+def _letter_for_position(group: object) -> str:
+    """One letter per position inside a parent's group of children."""
+    position, _size = cast("tuple[int, int]", group)
+    return _LETTERS[position % len(_LETTERS)]
 
 
 def _companies(rows: int = 50) -> Table:
@@ -236,6 +253,43 @@ def test_the_database_is_the_net_the_pre_check_cannot_be() -> None:
 
     with pytest.raises(IntegrityError):
         build_shape(shape)
+
+
+def test_a_column_distinct_in_every_row_really_does_keep_a_two_column_uniqueness() -> None:
+    # The exemption, loaded rather than argued. ``one_seat_label_per_company``
+    # is a real unique index here, and this is the declaration the refusal lets
+    # through: a pair is distinct as soon as either half is, so nothing has to
+    # be arranged per group at all.
+    build_shape(
+        Shape(
+            _companies(50),
+            Table(Seat, rows=100, company=FanOut(Zipf()), label=Sequential(0, 1)),
+        )
+    )
+
+    assert Seat.objects.count() == 100
+
+
+def test_the_remedy_the_refusal_names_is_one_that_builds() -> None:
+    # The same table, the same constraint, and the form the message points at:
+    # a Scope.GROUP derivation receives this row's position among its parent's
+    # children, so it can hand back a value per position where a draw beside the
+    # fan-out can only hope. Asserted against the database rather than taken on
+    # trust -- a refusal naming a remedy that does not build would be worse than
+    # one naming none.
+    build_shape(
+        Shape(
+            _companies(50),
+            Table(
+                Seat,
+                rows=100,
+                company=FanOut(Zipf()),
+                label=Derived("company", compute=_letter_for_position, scope="group"),
+            ),
+        )
+    )
+
+    assert Seat.objects.count() == 100
 
 
 def test_an_invariant_that_finds_nothing_lets_the_build_finish() -> None:

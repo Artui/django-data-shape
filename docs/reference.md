@@ -94,6 +94,8 @@
 
 ::: django_data_shape.distributions.ascending.Ascending
 
+::: django_data_shape.distributions.distinct.Distinct
+
 ::: django_data_shape.distributions.skew.Skew
 
 ::: django_data_shape.distributions.uniform.Uniform

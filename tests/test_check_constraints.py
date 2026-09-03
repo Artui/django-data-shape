@@ -10,12 +10,13 @@ arithmetic in it.
 from __future__ import annotations
 
 import datetime
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
 from django_data_shape import (
     Constant,
+    Derived,
     FanOut,
     InvalidShape,
     PerParent,
@@ -45,6 +46,20 @@ from tests.testapp.models import (
 )
 
 _START = datetime.datetime(2020, 1, 1, tzinfo=datetime.timezone.utc)
+
+_LETTERS = "abcdefghijklmnopqrstuvwxyz"
+
+
+def _letter_for_position(group: object) -> str:
+    """One letter per position inside a parent's group of children.
+
+    The shape of a ``Scope.GROUP`` derivation that *does* keep a two-column
+    uniqueness, which is why the refusal names this form: the source resolves to
+    ``(position, size)``, so a value can be chosen per position rather than
+    drawn beside the fan-out.
+    """
+    position, _size = cast("tuple[int, int]", group)
+    return _LETTERS[position % len(_LETTERS)]
 
 
 def _companies(rows: int = 50) -> Table:
@@ -211,36 +226,95 @@ def test_a_two_column_uniqueness_short_of_combinations_is_refused() -> None:
     assert "can produce 100" in message
 
 
-def test_the_same_uniqueness_with_room_for_every_row_is_accepted() -> None:
-    Shape(
-        _companies(50),
-        Table(Seat, rows=100, company=FanOut(Zipf()), label=Skew({"a": 1, "b": 1})),
-    )
+def test_the_same_uniqueness_with_room_for_every_row_is_still_refused() -> None:
+    # Room, and nothing to arrange it. Fifty companies and two labels hold
+    # exactly a hundred pairs, so every arithmetic check passes -- and the load
+    # died inside COPY at row 17, because a group of three rows draws from two
+    # labels whatever the table's total capacity says.
+    with pytest.raises(InvalidShape, match="one_seat_label_per_company") as raised:
+        Shape(
+            _companies(50),
+            Table(Seat, rows=100, company=FanOut(Zipf()), label=Skew({"a": 1, "b": 1})),
+        )
+
+    message = str(raised.value)
+    assert "Seat.company is a fan-out beside Seat.label=Skew({'a': 1, 'b': 1})" in message
+    assert "The 100 combinations do fit the 100 rows" in message
+    # And it names the one primitive that can be arranged around a group,
+    # rather than leaving a reader to discover it.
+    assert "Derived('company', compute=..., scope='group')" in message
 
 
 def test_a_null_share_makes_the_capacity_unknown_rather_than_smaller() -> None:
     # PostgreSQL counts each NULL in a unique index as distinct, so those rows
     # are exempt from the constraint entirely -- a capacity computed as though
-    # they were not would refuse a shape that builds.
-    Shape(
-        _companies(50),
-        Table(
-            Seat,
-            rows=2000,
-            company=FanOut(Zipf(), null=0.1),
-            label=Skew({"a": 1, "b": 1}),
-        ),
-    )
+    # they were not would name a number that is not true of this shape. The
+    # rows that do have a parent are still unarranged, so the refusal stands
+    # and it is the one that carries no arithmetic.
+    with pytest.raises(InvalidShape, match="There may be room for every row") as raised:
+        Shape(
+            _companies(50),
+            Table(
+                Seat,
+                rows=2000,
+                company=FanOut(Zipf(), null=0.1),
+                label=Skew({"a": 1, "b": 1}),
+            ),
+        )
+
+    assert "do fit" not in str(raised.value)
 
 
 def test_a_column_no_distribution_bounds_makes_the_capacity_unknown() -> None:
+    # Nothing can ask a Uniform how many values it emits, so the pigeonhole has
+    # no number to compare -- and unbounded is not the same as distinct. Two of
+    # one company's rows landing on the same integer is a coin flip, and the
+    # measured one comes up heads about half the time.
+    with pytest.raises(InvalidShape, match="There may be room for every row"):
+        Shape(
+            _companies(50),
+            Table(
+                Seat,
+                rows=2000,
+                company=FanOut(Zipf()),
+                label=Uniform(0, 1_000_000, places=0),
+            ),
+        )
+
+
+def test_a_column_distinct_in_every_row_keeps_the_constraint_on_its_own() -> None:
+    # The exemption, and the only one that needs no coordination: a pair is
+    # distinct as soon as either half is. Sequential says so through Distinct,
+    # and this declaration loads -- see test_build_invariants.
+    Shape(
+        _companies(50),
+        Table(Seat, rows=100, company=FanOut(Zipf()), label=Sequential(0, 1)),
+    )
+
+
+def test_a_sequential_that_does_not_move_is_not_distinct() -> None:
+    # A zero step writes one value in every row, which is a Constant spelled
+    # the long way -- so the protocol has to answer for the parameters and not
+    # for the class, and the refusal has to come back.
+    with pytest.raises(InvalidShape, match="one_seat_label_per_company"):
+        Shape(
+            _companies(50),
+            Table(Seat, rows=100, company=FanOut(Zipf()), label=Sequential(0, 0)),
+        )
+
+
+def test_a_column_derived_from_the_group_is_left_to_the_other_two_nets() -> None:
+    # The exemption that is the point rather than a gap. A derivation reads
+    # something other than its own row index, so it is the one kind of
+    # declaration that can be arranged around a group -- and whether a
+    # particular compute= is arranged around it is not readable here.
     Shape(
         _companies(50),
         Table(
             Seat,
-            rows=2000,
+            rows=100,
             company=FanOut(Zipf()),
-            label=Uniform(0, 1_000_000, places=0),
+            label=Derived("company", compute=_letter_for_position, scope="group"),
         ),
     )
 
@@ -329,14 +403,19 @@ def test_two_fan_outs_under_one_uniqueness_are_refused_by_name() -> None:
     assert "Projection(Membership, columns=(...), sql=...)" in message
 
 
-def test_a_single_fan_out_under_a_uniqueness_is_a_different_question() -> None:
-    # One fan-out and one bounded column is what the pigeonhole arithmetic is
-    # for, and it is left to it: this refusal is about two partitions of the
-    # same rows, computed without either seeing the other.
-    Shape(
-        _companies(50),
-        Table(Seat, rows=100, company=FanOut(Zipf()), label=Skew({"a": 1, "b": 1})),
-    )
+def test_a_single_fan_out_under_a_uniqueness_says_which_columns_it_means() -> None:
+    # One fan-out and one drawn column is the same defect one column over, and
+    # it gets its own message rather than the two-fan-out one: the obstruction
+    # is the same and the remedy is not.
+    with pytest.raises(InvalidShape, match="one_seat_label_per_company") as raised:
+        Shape(
+            _companies(50),
+            Table(Seat, rows=100, company=FanOut(Zipf()), label=Skew({"a": 1, "b": 1})),
+        )
+
+    message = str(raised.value)
+    assert "are fan-outs" not in message
+    assert "Projection(Seat" not in message
 
 
 def test_the_pigeonhole_arithmetic_is_still_what_answers_first() -> None:

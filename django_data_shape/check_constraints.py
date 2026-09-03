@@ -6,9 +6,11 @@ from typing import Any, cast
 
 from django.db.models import Model, Q, UniqueConstraint
 
+from django_data_shape.derivations.derivation import Derivation
 from django_data_shape.derivations.per_parent import PerParent
 from django_data_shape.distributions.bounded import Bounded
 from django_data_shape.distributions.categorical import Categorical
+from django_data_shape.distributions.distinct import Distinct
 from django_data_shape.fan_out import FanOut
 from django_data_shape.invalid_shape import InvalidShape
 from django_data_shape.projection import Projection
@@ -95,8 +97,15 @@ def _check_one(table: Table, constraint: UniqueConstraint, rows_of: dict[type[Mo
     fields = tuple(constraint.fields)
     capacity = _capacity(table, fields, rows_of)
     if constraint.condition is None:
+        # Order is the whole of what keeps the arithmetic reachable. All three
+        # can apply to one declaration, and the pigeonhole is the most useful of
+        # them: "this shape does not fit at all" is a different instruction from
+        # "it fits and nothing arranges it". Moving either arrangement check
+        # above it would answer the wrong question first and, under a 100%
+        # branch gate with no pragma, would take the 0.8.0 message down with it.
         _check_unconditional(table, constraint.name, fields, capacity)
         _check_independent_fan_outs(table, constraint.name, fields)
+        _check_a_fan_out_beside_a_draw(table, constraint.name, fields, capacity)
         return
     decoded = _equality(constraint.condition)
     if decoded is None:
@@ -165,6 +174,90 @@ def _check_independent_fan_outs(table: Table, name: str, fields: tuple[str, ...]
         f"edge table is filled by a statement rather than by two draws: Projection({where}, "
         "columns=(...), sql=...) selects the pairs already distinct, which is the form that "
         "keeps this constraint today."
+    )
+
+
+def _check_a_fan_out_beside_a_draw(
+    table: Table, name: str, fields: tuple[str, ...], capacity: int | None
+) -> None:
+    """One fan-out and one drawn column: the same defect, one column over.
+
+    ``Seat(company, label)`` unique on the pair, with ``company=FanOut(Zipf())``
+    and ``label=Skew({"a": 1, "b": 1})`` over fifty companies. At two thousand
+    rows the pigeonhole above refuses it and quotes the arithmetic. At a hundred
+    rows the capacity is exactly a hundred, every check passes, and the load
+    dies inside ``COPY`` on the unique index -- at row 17 for one seed and
+    somewhere else for the next.
+
+    **The proof is the same one
+    :func:`_check_independent_fan_outs` makes, and it does not depend on the
+    second column being a partition.** A
+    :class:`~django_data_shape.distributions.distribution.Distribution` is by
+    contract a pure function of the row index and of a draw derived from the
+    field name and that same index -- that is what lets rows be emitted in an
+    order different from the one they were assigned in, and it is stated on the
+    protocol rather than assumed here. So a drawn column cannot see which parent
+    the fan-out gave its row any more than a second fan-out could, nothing
+    enumerates the pairs *within a group*, and two rows sharing one is a matter
+    of the seed. Room is not the question here either: a group of seven rows
+    over two labels collides whatever the table's total capacity says.
+
+    **No arithmetic decides it**, which is why this is a refusal rather than a
+    wider capacity calculation. The quantity that would decide it is the largest
+    group the fan-out produces, and that is not known until the partition is
+    resolved against the parent's real keys at build time -- by which point the
+    declaration has already been accepted, cached and passed around.
+
+    ``Distinct`` is the exemption, and the only one that needs no coordination:
+    a pair is distinct as soon as either half is, so a
+    :class:`~django_data_shape.distributions.sequential.Sequential` beside a
+    fan-out keeps the constraint in every row and is accepted.
+
+    **What this does not decide.** A column filled by a
+    :class:`~django_data_shape.derivations.derivation.Derivation` is left alone,
+    and that is the point of the exemption rather than a gap in it: a derivation
+    reads something other than its own row index, so it is the one kind of
+    declaration that *can* be arranged around a group --
+    ``Derived("company", compute=..., scope="group")`` receives this row's
+    position inside its parent's children and can hand back a value per
+    position. Whether a particular ``compute`` actually does is not readable
+    here, and refusing on a callable this package cannot read would be the
+    refusal that is wrong. A column the shape leaves undeclared is skipped for
+    the reason PostgreSQL skips it: it is nullable and holds NULL, and each NULL
+    in a unique index is its own group.
+    """
+    fanned = [column for column in fields if isinstance(table.fields.get(column), FanOut)]
+    others = [column for column in fields if column not in fanned]
+    declared = [table.fields.get(column) for column in others]
+    # One condition rather than three, because it is one question: is this the
+    # shape of declaration this refusal is about? Two fan-outs are the check
+    # above and answer with a different remedy, none at all is a constraint no
+    # partition groups, and a derivation or an undeclared column is the
+    # exemption the docstring gives.
+    if len(fanned) != 1 or not declared or not all(_is_drawn_per_row(one) for one in declared):
+        return
+    if any(isinstance(one, Distinct) and one.is_distinct_per_row() for one in declared):
+        return
+    where = table.model.__name__
+    drawn = ", ".join(f"{where}.{column}={table.fields[column]!r}" for column in others)
+    room = (
+        f"The {capacity} combinations do fit the {table.rows} rows"
+        if capacity is not None
+        else "There may be room for every row"
+    )
+    raise InvalidShape(
+        f"{name} needs every ({', '.join(fields)}) combination distinct, and {where}."
+        f"{fanned[0]} is a fan-out beside {drawn}. A fan-out is a partition of this table's rows "
+        "over one parent's keys, computed from the row index alone, and a distribution is drawn "
+        "from that same index and nothing else -- so neither column can see what the other put "
+        "in the row, and nothing enumerates the combinations inside a group. Whether two of one "
+        f"parent's rows draw the same value is a matter of the seed. {room}, which is why the "
+        "pigeonhole arithmetic lets this through, and the load then fails inside COPY at a row "
+        "number that moves when the seed does. A value that varies with the group is derived "
+        f"from it rather than drawn beside it: Derived({fanned[0]!r}, compute=..., scope='group') "
+        "receives this row's position among its parent's children and how many there are. A "
+        "column that is distinct in every row keeps the constraint on its own, and says so with "
+        "Distinct -- Sequential does."
     )
 
 
@@ -272,6 +365,28 @@ def _produces(declared: object, value: object) -> bool | None:
     if isinstance(declared, Categorical):
         return any(candidate == value for candidate in declared.shares())
     return None if _is_declaration(declared) else bool(declared == value)
+
+
+def _is_drawn_per_row(declared: object) -> bool:
+    """Whether this column's value is decided by the row index and nothing else.
+
+    True for a :class:`~django_data_shape.distributions.distribution.Distribution`
+    and false for everything else, and it is the distinction the refusal above
+    rests on rather than a convenience. A distribution's contract is that it is a
+    pure function of the row index and of a draw derived from the field name and
+    that same index; a
+    :class:`~django_data_shape.derivations.derivation.Derivation` is the one kind
+    of declaration that reads something else, which is exactly what makes it the
+    only thing able to arrange values around a group.
+
+    ``isinstance`` against ``Distribution`` is not available -- it is a plain
+    ``Protocol``, and making it runtime-checkable would test for a ``value``
+    attribute on the instance, which is the check that gets an ``Enum`` member
+    wrong. So the same structural test :func:`_is_declaration` makes is used, and
+    a derivation is subtracted from it: both carry ``value``, and only a
+    derivation carries ``scope`` and ``sources`` beside it.
+    """
+    return _is_declaration(declared) and not isinstance(declared, Derivation)
 
 
 def _is_declaration(declared: object) -> bool:
