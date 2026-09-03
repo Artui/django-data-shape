@@ -14,6 +14,7 @@ from django_data_shape.derivations.scope import Scope
 from django_data_shape.distributions.ascending import Ascending
 from django_data_shape.distributions.bounded import Bounded
 from django_data_shape.distributions.constant import Constant
+from django_data_shape.distributions.distinct import Distinct
 from django_data_shape.distributions.distribution import Distribution
 from django_data_shape.fan_out import FanOut
 from django_data_shape.infer_key_strategy import infer_key_strategy
@@ -475,22 +476,64 @@ class Table:
         a table. The same reasoning covers a ``Skew`` offering fewer values than
         there are rows.
 
-        Only single-column uniqueness is checked. Multi-column constraints are
-        satisfiable through combinations across independently declared columns,
-        which is a real analysis rather than a comparison, and guessing at it
-        would refuse declarations that are perfectly buildable.
+        **Room is not the question, and that is the second refusal here.**
+        Having more values than rows makes the declaration *possible*, never
+        certain: a distribution draws per row rather than dealing a permutation,
+        so two rows taking the same value is a matter of the seed. Measured on
+        this very model -- five rows over fifty values, ten times the room,
+        loaded seventeen runs in twenty; ten rows over a hundred, the same
+        ratio, loaded ten. A shape that usually works is precisely the case
+        these refusals exist for, because the run it fails is somebody else's.
+
+        The two are ordered, and the order is the useful part: the arithmetic
+        answers first where it can, because "this cannot fit" is a different
+        instruction from "it fits and nothing arranges it".
+
+        Only single-column uniqueness is checked here. Multi-column constraints
+        need the whole shape -- how many parents a fan-out has to spread over is
+        not knowable from one table -- so they are
+        :func:`~django_data_shape.check_constraints.check_constraints`'s, and it
+        makes the same two refusals with the same reasoning.
+
+        **A ``FanOut`` on a unique column is deliberately not decided here**, and
+        it is the one gap left open. Whether a partition gives any parent two
+        rows depends on the parent's row count, which a table does not know; the
+        shape-level check has ``rows_of`` and answers it there.
         """
         for name, distribution in self.fields.items():
             field = known[name]
-            if not field.unique or not isinstance(distribution, Bounded):
+            if not field.unique:
                 continue
-            available = distribution.distinct_values()
-            if available < self.rows:
-                raise InvalidShape(
-                    f"{self.model.__name__}.{name} is unique and needs {self.rows} distinct "
-                    f"values, but {distribution!r} can only produce {available}. The database "
-                    "would refuse this partway through the load."
-                )
+            if isinstance(distribution, Bounded):
+                available = distribution.distinct_values()
+                if available < self.rows:
+                    raise InvalidShape(
+                        f"{self.model.__name__}.{name} is unique and needs {self.rows} distinct "
+                        f"values, but {distribution!r} can only produce {available}. The database "
+                        "would refuse this partway through the load."
+                    )
+            # One row has no second row to collide with, whatever fills it --
+            # and a Constant on a unique column of one row is an ordinary thing
+            # to write.
+            if self.rows < 2:
+                continue
+            # A partition is not a draw, and a derivation reads something other
+            # than its own row index. Both are left to the checks that can see
+            # what they depend on.
+            if isinstance(distribution, (FanOut, Derivation)):
+                continue
+            if isinstance(distribution, Distinct) and distribution.is_distinct_per_row():
+                continue
+            raise InvalidShape(
+                f"{self.model.__name__}.{name} is unique and {distribution!r} draws a value per "
+                "row rather than producing a different one every time, so whether two rows take "
+                "the same value is a matter of the seed. Room is not what decides it: ten rows "
+                "over a hundred values is ten times the room and loads in ten runs out of twenty. "
+                "A column that is distinct in every row keeps the constraint on its own and says "
+                "so with Distinct, which Sequential implements for any non-zero step. A column "
+                "whose values have to be a particular set is filled by a Projection with "
+                "columns= and sql= instead."
+            )
 
     def _resolve_defaults(self, known: dict[str, Field[Any, Any]]) -> None:
         """Decide what happens to every field the caller did not declare.

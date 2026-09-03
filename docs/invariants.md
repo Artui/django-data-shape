@@ -152,6 +152,22 @@ how many companies there are.
   million rows needing distinct `(company, label)` pairs cannot be built from
   fifty thousand companies and three labels, whatever the seed. This is the
   multi-column analysis a single `Table` declines to attempt.
+- **Enough room is never a way to fill it, and that holds with no fan-out
+  anywhere.** Every mechanism this package has for filling a column computes it
+  from the row index alone, so nothing enumerates a tuple and nothing keeps a
+  single unique column distinct. Measured: fifty rows over three hundred
+  combinations loaded **0 times in 20**; the same fifty rows over **ten
+  thousand** combinations -- two hundred times the room -- still failed two. A
+  single `unique=True` column drawn from fifty values for five rows loaded 17,
+  and from a hundred values for ten rows, 10. Room moves the odds and never
+  settles them, because a draw is not a permutation. All of these are refused at
+  declaration time, and the exemption in every case is `Distinct`.
+- **A `FanOut` on a `unique=True` column is refused**, because a partition
+  exists to give some parent more than one row and a one-to-one permits none.
+  It never loads -- 0 in 20 -- and it used to fall between the two checks:
+  `unique=True` writes no entry in `_meta.constraints`, and a single table
+  cannot see how many parents there are. The exemption is the same proof the
+  others carry: flat sizes, no `childless` share, and rows no more than parents.
 - **Enough room is not a way to fill it.** An unconditional constraint over
   **two fan-outs** — the through table of a many-to-many — passes the pigeonhole
   comfortably, because the product of two parent counts dwarfs the row count,

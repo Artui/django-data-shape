@@ -733,3 +733,53 @@ class Escalation(models.Model):
                 name="one_live_escalation_per_company",
             ),
         ]
+
+
+class Coupon(models.Model):
+    """A composite uniqueness with **no relation in it at all**.
+
+    The instance the fan-out refusals do not reach. Two columns drawn per row
+    and nothing partitioning either of them, so nothing enumerates the pairs and
+    whether two rows collide is a matter of the seed -- the same defect the
+    fan-out cases have, with the fan-out removed rather than added.
+    """
+
+    batch = models.CharField(max_length=20)
+    code = models.CharField(max_length=20)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["batch", "code"], name="one_code_per_batch"),
+        ]
+
+
+class Voucher(models.Model):
+    """A composite uniqueness one of whose columns may be left undeclared.
+
+    Nullable, so a shape saying nothing about it loads every row NULL -- and
+    PostgreSQL counts each NULL in a unique index as its own value, so no two
+    rows collide however the other column is drawn. The refusal must not reach
+    this one.
+    """
+
+    batch = models.CharField(max_length=20)
+    code = models.CharField(max_length=20, null=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["batch", "code"], name="one_voucher_code_per_batch"),
+        ]
+
+
+class Ticketed(models.Model):
+    """A unique column a derivation fills, beside a one-to-one relation.
+
+    Both are declarations the single-column uniqueness check steps over rather
+    than refuses, and for different reasons: a derivation reads something other
+    than its own row index, and a fan-out is a partition whose collisions depend
+    on the parent's row count, which one table cannot see.
+    """
+
+    reference = models.CharField(max_length=100, unique=True)
+    prefix = models.CharField(max_length=10)
+    company = models.OneToOneField(Company, null=True, on_delete=models.SET_NULL)

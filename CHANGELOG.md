@@ -8,6 +8,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **"There is room" is never "there is a way", and the fan-out was never what
+  was special.** Three more declarations that the arithmetic passed and the load
+  then failed on, seed-dependently. All three are the one sentence the fan-out
+  refusals already made: every mechanism this package has for filling a column
+  computes it from the row index alone, so nothing enumerates a tuple and
+  nothing keeps a column distinct. The exemption in every case is the `Distinct`
+  protocol, unchanged.
+  - **A single `unique=True` column filled by a draw** was refused only when the
+    distribution offered fewer values than there were rows. Capacity is the
+    wrong instrument: five rows over fifty values is ten times the room and
+    loaded seventeen runs in twenty, ten rows over a hundred loaded ten. A shape
+    that usually works is the case these refusals are for, because the run it
+    fails is somebody else's. One row is exempt, having nothing to collide with.
+  - **A composite uniqueness with no fan-out at all** was unchecked, because
+    both existing refusals looked for a partition first. Fifty rows over three
+    hundred combinations, six times the room, loaded **zero** runs in twenty --
+    and over ten thousand combinations, **two hundred times** the room, still
+    failed two.
+  - **A `FanOut` on a `unique=True` column**, which fell between the two checks:
+    `unique=True` writes a unique *index* and no entry in `_meta.constraints`,
+    so the shape-level loop never saw it, while a single table steps over a
+    fan-out because deciding it needs the parent's row count. A skewed partition
+    exists to give some parent several children and a one-to-one permits none,
+    so it never loads -- zero in twenty. The message names the shape that does:
+    flat sizes over at least as many parents as rows.
 - **A partial `UniqueConstraint` whose condition names a set is checked, not
   skipped.** `Q(status__in=["DRAFT", "IN_REVIEW", "APPROVED"])` was read as a
   predicate this package should not interpret, so the constraint was passed over

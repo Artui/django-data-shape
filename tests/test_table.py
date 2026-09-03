@@ -46,6 +46,7 @@ from tests.testapp.models import (
     Subscriber,
     Tenant,
     Ticket,
+    Ticketed,
 )
 
 
@@ -267,6 +268,74 @@ def test_a_nullable_relation_may_be_omitted_and_loads_null() -> None:
     # column loads entirely NULL, which is stated in the documentation because a
     # join key with null_frac 1.0 is not a neutral thing to hand a planner.
     assert "referrer" not in Table(Referred, rows=1, label=Constant("x")).fields
+
+
+def test_a_draw_on_a_unique_column_is_refused_however_much_room_it_has() -> None:
+    # The instance behind "there is room is never there is a way", at its
+    # smallest: one column, one constraint, no relation anywhere. Fifty values
+    # for five rows is ten times the room and still collides three runs in
+    # twenty; ten rows over a hundred values -- the same ratio -- collides ten.
+    # A draw is not a permutation, and no amount of capacity makes it one.
+    with pytest.raises(InvalidShape) as raised:
+        Table(Subscriber, rows=5, email=Skew({f"a{i}@x.com": 1 for i in range(50)}))
+
+    message = str(raised.value)
+    assert "Subscriber.email is unique" in message
+    assert "draws a value per row" in message
+    assert "Sequential" in message
+
+
+def test_a_unique_column_short_of_values_keeps_the_arithmetic_message() -> None:
+    # Two refusals can both apply, and the one that quotes the arithmetic is
+    # more useful: "it cannot fit" is a different instruction from "it fits and
+    # nothing arranges it". The capacity check answers first, deliberately.
+    with pytest.raises(InvalidShape) as raised:
+        Table(Subscriber, rows=50, email=Skew({"a@x.com": 1, "b@x.com": 1}))
+
+    assert "can only produce 2" in str(raised.value)
+
+
+def test_a_distinct_declaration_keeps_a_unique_column_on_its_own() -> None:
+    # The exemption, and it is a proof rather than a probability: Sequential
+    # with a non-zero step writes a different value in every row, so no two of
+    # them can collide at any seed. Measured 20/20 where the draw was 10/20.
+    Table(Subscriber, rows=50, email=Sequential("a", "b"))
+
+
+def test_a_derivation_on_a_unique_column_is_left_alone() -> None:
+    # Not an exemption but a different question. A derivation reads other
+    # columns of the row rather than only its index, so it is the one
+    # declaration that can be arranged to differ per row -- and whether a given
+    # compute= is arranged that way is not readable from a type.
+    #
+    # NB this test is the only thing holding `Derivation` in that isinstance.
+    # Dropping it from the tuple leaves the suite green at 100% line and branch,
+    # because the tuple is one branch arc however many types it names.
+    Table(
+        Ticketed,
+        rows=50,
+        prefix=Sequential("a", "b"),
+        reference=Derived("prefix", compute=lambda prefix: prefix),
+    )
+
+
+def test_a_fan_out_on_a_unique_column_is_left_to_the_shape() -> None:
+    # The other half of the same tuple, and the reason it is a step-over rather
+    # than an acceptance: check_constraints refuses this one, because deciding
+    # it needs the parent's row count and only a whole shape has that.
+    Table(
+        Ticketed,
+        rows=50,
+        prefix=Constant("p"),
+        reference=Sequential("r", "x"),
+        company=FanOut(Zipf()),
+    )
+
+
+def test_a_single_row_cannot_collide_with_itself() -> None:
+    # The other exemption, and the one that keeps the refusal honest: a table of
+    # one row has no second row to collide with, whatever fills the column.
+    Table(Subscriber, rows=1, email=Constant("only@x.com"))
 
 
 def test_a_constant_cannot_fill_a_unique_column_twice() -> None:

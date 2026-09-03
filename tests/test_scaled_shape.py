@@ -131,12 +131,17 @@ def test_a_fractional_factor_is_refused(factor: float) -> None:
 
 
 def test_a_declaration_that_only_holds_at_its_own_size_is_refused_by_factor() -> None:
-    # Three distinct values fill three unique rows and cannot fill six. The
-    # arithmetic is one Table already refuses; what the factor adds is that the
-    # row count in the message is not one the caller ever wrote, so the message
-    # has to say where it came from.
-    emails = Skew({"a@example.com": 0.4, "b@example.com": 0.3, "c@example.com": 0.3})
-    shape = Shape(Table(Subscriber, rows=3, email=emails))
+    # One row cannot collide with itself, so a Constant on a unique column is an
+    # ordinary thing to write at rows=1 and refused at rows=2. The arithmetic is
+    # one Table already makes; what the factor adds is that the row count in the
+    # message is not one the caller ever wrote, so the message has to say where
+    # it came from.
+    #
+    # This used to be three values over three rows, which was accepted because
+    # the capacity cleared the row count. It is not any more: a draw is not a
+    # permutation at any capacity, so the boundary that survives scaling is the
+    # single row rather than the exact fit.
+    shape = Shape(Table(Subscriber, rows=1, email=Constant("a@example.com")))
 
     with pytest.raises(InvalidShape, match="At scale factor 2") as raised:
         scaled_shape(shape, 2)

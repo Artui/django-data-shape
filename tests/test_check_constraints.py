@@ -43,6 +43,7 @@ from tests.testapp.models import (
     Booking,
     Company,
     Contest,
+    Coupon,
     Escalation,
     Event,
     EventSession,
@@ -54,7 +55,9 @@ from tests.testapp.models import (
     Seat,
     Template,
     TemplateSession,
+    Ticketed,
     Venue,
+    Voucher,
 )
 
 _START = datetime.datetime(2020, 1, 1, tzinfo=datetime.timezone.utc)
@@ -438,6 +441,108 @@ def test_every_constraint_this_cannot_read_is_left_to_the_other_two_nets() -> No
             state=Skew({"HELD": 0.5, "PAID": 0.5}),
             seats=Constant(0),
         ),
+    )
+
+
+def test_a_fan_out_on_a_one_to_one_is_refused() -> None:
+    # The instance neither path was checking: a unique=True column makes no
+    # entry in _meta.constraints, so this loop never saw it, and Table steps
+    # over a fan-out because whether a partition gives any parent two rows
+    # depends on the parent's row count -- which one table cannot see and a
+    # shape can. Measured 0/20: it does not merely usually fail, it never loads.
+    with pytest.raises(InvalidShape) as raised:
+        Shape(
+            _companies(100),
+            Table(
+                Ticketed,
+                rows=50,
+                prefix=Constant("p"),
+                reference=Sequential("r", "x"),
+                company=FanOut(Zipf()),
+            ),
+        )
+
+    message = str(raised.value)
+    assert "Ticketed.company" in message
+    assert "one row at most" in message
+
+
+def test_a_fan_out_that_cannot_collide_keeps_a_one_to_one() -> None:
+    # The same proof the other three refusals carry: a partition giving no
+    # parent two rows cannot break a uniqueness on that column either.
+    # Measured 20/20 at exactly these numbers.
+    Shape(
+        _companies(100),
+        Table(
+            Ticketed,
+            rows=50,
+            prefix=Constant("p"),
+            reference=Sequential("r", "x"),
+            company=FanOut(Constant(1)),
+        ),
+    )
+
+
+def test_a_composite_uniqueness_with_no_fan_out_at_all_is_refused() -> None:
+    # The instance the two fan-out refusals do not reach, and the one that shows
+    # the fan-out was never what was special. Both columns are drawn per row and
+    # nothing partitions either, so nothing enumerates the pairs.
+    #
+    # Three hundred combinations for fifty rows -- six times the room -- loaded
+    # zero runs out of twenty. Ten thousand combinations, two hundred times the
+    # room, still failed two.
+    with pytest.raises(InvalidShape) as raised:
+        Shape(
+            Table(
+                Coupon,
+                rows=50,
+                batch=Skew({f"b{i}": 1 for i in range(10)}),
+                code=Skew({f"c{i}": 1 for i in range(30)}),
+            )
+        )
+
+    message = str(raised.value)
+    assert "one_code_per_batch" in message
+    assert "are all drawn per row" in message
+    assert "Distinct" in message
+
+
+def test_a_distinct_column_keeps_a_composite_uniqueness_with_no_fan_out() -> None:
+    # The same exemption the fan-out refusals carry, and for the same one-line
+    # reason: a pair is distinct as soon as either half is. Measured 20/20.
+    Shape(Table(Coupon, rows=50, batch=Constant("b"), code=Sequential(0, 1)))
+
+
+def test_a_composite_uniqueness_short_of_combinations_still_says_so_first() -> None:
+    # Ordering again: the pigeonhole answers first where it can, because "this
+    # does not fit at all" is a different instruction from "it fits and nothing
+    # arranges it".
+    with pytest.raises(InvalidShape) as raised:
+        Shape(Table(Coupon, rows=50, batch=Constant("b"), code=Skew({"c0": 1, "c1": 1})))
+
+    assert "can produce 2" in str(raised.value)
+
+
+def test_a_column_the_shape_leaves_undeclared_takes_the_refusal_away() -> None:
+    # Nullable and undeclared, so every row loads NULL -- and PostgreSQL counts
+    # each NULL in a unique index as its own value, so no two rows collide
+    # whatever the other column draws. Refusing this would be the pre-check
+    # inventing a problem the database does not have.
+    Shape(Table(Voucher, rows=50, batch=Skew({f"b{i}": 1 for i in range(10)})))
+
+
+def test_a_derivation_in_the_constraint_is_left_alone_here_too() -> None:
+    # A derivation reads something other than its own row index, which is what
+    # makes it the one declaration able to arrange values across rows. Whether a
+    # particular compute= does is not readable from here, and refusing on a
+    # callable this package cannot read would be the refusal that is wrong.
+    Shape(
+        Table(
+            Coupon,
+            rows=50,
+            batch=Skew({f"b{i}": 1 for i in range(10)}),
+            code=Derived("batch", compute=lambda batch: f"{batch}-x"),
+        )
     )
 
 
