@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.0] — 2026-09-03
+
 ### Added
 - **`FanOut(parents=[...])` narrows a fan-out to the parents it names**, which
   is the only gap two independent consumers reached separately: a tenant-scoped
@@ -879,7 +881,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   into `COPY FROM STDIN`, which psycopg 2 cannot do without materialising them
   first.
 
-[Unreleased]: https://github.com/Artui/django-data-shape/compare/v0.12.0...HEAD
+[Unreleased]: https://github.com/Artui/django-data-shape/compare/v0.13.0...HEAD
+[0.13.0]: https://github.com/Artui/django-data-shape/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/Artui/django-data-shape/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/Artui/django-data-shape/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/Artui/django-data-shape/compare/v0.9.0...v0.10.0
