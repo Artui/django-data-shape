@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from typing import Any, cast
 
 from django.db.models import Field, Model, Q, UniqueConstraint
@@ -642,28 +643,49 @@ def _is_declaration(declared: object) -> bool:
 def _condition(condition: Q) -> tuple[str, tuple[object, ...]] | None:
     """The column a condition tests and the values that satisfy it, or None.
 
-    ``Q(column=value)`` and ``Q(column__in=[...])``, both un-negated and alone.
-    An equality is returned as a set of one, because it *is* one and the
-    arithmetic downstream does not care how many members it has: what decides
-    the refusal is whether a row can land inside the condition, and membership
-    answers that for both spellings.
+    Three spellings of one thing, and they are read as one thing:
+    ``Q(column=value)``, ``Q(column__in=[...])``, and an OR of equalities over a
+    single column -- which is what ``__in`` compiles to and what an ORM gives no
+    reason to prefer either way. An equality comes back as a **set of one**,
+    because it is one and nothing downstream cares how many members it has:
+    what decides the refusal is whether a row can land inside the condition, and
+    membership answers that for every spelling.
 
-    **The set form is the commoner one in real schemas**, which is why reading
-    only the equality was a gap rather than a simplification. "One open review
-    per project" is open-ness across three statuses far more often than one, and
-    a consumer met exactly that -- their shape was accepted, and the identical
-    declaration spelled with ``=`` was refused with the arithmetic in it.
+    **This has been widened twice, and the second time is the lesson.** Reading
+    only the bare equality left the likelier spelling unchecked -- "one open
+    review per project" is several statuses far more often than one -- so
+    ``__in`` was added. A consumer then pointed out that *their* constraint was
+    an OR-tree, and that a fix aimed at the ``__in`` return specifically would
+    not reach it. It did not. The shape to check for is *"is this decidable
+    from values the caller wrote down"*, not *"is this one of the spellings seen
+    so far"*, and widening it twice is what makes that worth writing down.
 
-    Everything past these two is still declined: a negation, two clauses joined,
-    a lookup like ``__gt``, or an ``__in`` over a queryset rather than a literal
-    sequence. Those would mean this package deciding which rows an arbitrary
-    predicate matches, which is the database's job and not one worth half-doing.
-    A set the caller wrote out is not that -- it is a list of values, and
-    checking membership in it needs no query planner.
+    Everything else is still declined, and the line has not moved: a negation, a
+    comparison like ``__gt``, an ``__in`` over a queryset, clauses joined by AND,
+    or an OR whose branches name **different columns** -- which describes no set
+    for any one column and would mean deciding what an arbitrary predicate
+    matches. That is the database's job. A set of values the caller wrote out is
+    not that.
     """
-    if condition.negated or len(condition.children) != 1:
+    if condition.negated:
         return None
-    child: Any = condition.children[0]
+    if condition.connector == Q.OR:
+        return _union(_decode(child) for child in condition.children)
+    # AND, which is what a lone clause also arrives as. More than one means two
+    # separate predicates, and their conjunction is not a set of values.
+    return _decode(condition.children[0]) if len(condition.children) == 1 else None
+
+
+def _decode(child: object) -> tuple[str, tuple[object, ...]] | None:
+    """One branch of a condition: a nested ``Q``, or a ``(lookup, value)`` pair.
+
+    Django hands ``Q(Q(a) | Q(b))`` over as a single child that is itself a
+    ``Q``, which is a different object graph from the same expression written
+    bare -- so the recursion is what makes the two spellings agree rather than
+    an extra case being handled.
+    """
+    if isinstance(child, Q):
+        return _condition(child)
     if not isinstance(child, tuple) or len(child) != 2:
         return None
     lookup, value = child
@@ -675,13 +697,36 @@ def _condition(condition: Q) -> tuple[str, tuple[object, ...]] | None:
     # A set has no order of its own, and this tuple reaches the caller's screen
     # in a refusal message. Ordering it by repr keeps that message the same
     # between runs, which a test asserting on it has to be able to rely on.
-    # An empty set needs no special case and deliberately does not get one: it
-    # matches no row, and `_produces_any` answers "provably never" for it
-    # already, because every member being absent is vacuously true of no
-    # members. A branch here would say the same thing twice and have to be
-    # covered twice.
-    members = tuple(value) if isinstance(value, (list, tuple)) else tuple(sorted(value, key=repr))
-    return column, members
+    return column, (
+        tuple(value) if isinstance(value, (list, tuple)) else tuple(sorted(value, key=repr))
+    )
+
+
+def _union(
+    branches: Iterable[tuple[str, tuple[object, ...]] | None],
+) -> tuple[str, tuple[object, ...]] | None:
+    """Every branch's values, if every branch decodes and names one column.
+
+    A **set**, not a bag: a value named twice is counted once, or the share
+    arithmetic downstream would total it twice and quote a number the
+    declaration never asked for. Order is the order it was written in, for the
+    same reason the set spelling is sorted -- the tuple ends up in a message.
+
+    An empty set needs no special case and deliberately does not get one: it
+    matches no row, and ``_produces_any`` answers "provably never" for it
+    already, because every member being absent is vacuously true of no members.
+    """
+    values: dict[object, None] = {}
+    column: str | None = None
+    for branch in branches:
+        if branch is None:
+            return None
+        found, members = branch
+        if column is not None and found != column:
+            return None
+        column = found
+        values.update(dict.fromkeys(members))
+    return None if column is None else (column, tuple(values))
 
 
 def _matching(column: str, values: tuple[object, ...]) -> str:

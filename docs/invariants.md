@@ -221,13 +221,17 @@ how many companies there are.
   keep a per-group rule *at any weight* -- 2.5% is as broken as 10%, just later
   in the load -- so the refusal does not depend on the arithmetic, only the
   message does.
-- **The condition may name a set as well as a single value.** `Q(status="DRAFT")`
-  and `Q(status__in=["DRAFT", "IN_REVIEW", "APPROVED"])` are read the same way,
+- **The condition may name a set as well as a single value, however it is
+  spelled.** `Q(status="DRAFT")`, `Q(status__in=[...])` and an OR of equalities
+  over one column -- `Q(status="DRAFT") | Q(status="IN_REVIEW")` -- are read the
+  same way,
   because what decides the refusal is whether a row can land *inside* the
   condition and membership answers that for both. The set form is the commoner
   one in real schemas -- "one open review per project" is usually several
   statuses rather than one -- so reading only the equality left the likelier
-  spelling unchecked.
+  spelling unchecked. An ORM offers no reason to prefer `__in` to the OR-tree,
+  so making the arithmetic depend on which one a caller happened to write would
+  be the same gap with an extra step.
 - A `PerParent` over one of the constraint's own fields, with `count=1` and a
   `rest` that stays **outside** the condition, is accepted. Grouped by something
   else, or with `count` above one, or with a `rest` that also lands inside, it
@@ -240,9 +244,10 @@ how many companies there are.
 
 ### What it cannot decide, and leaves to the other two nets
 
-- A condition that is neither a single equality nor a single `__in` over a
-  literal sequence: a negation, two clauses joined, a comparison like `__gt`, or
-  an `__in` over a queryset. Reading one would mean this package deciding what
+- A condition that describes no set of values for one column: a negation, two
+  clauses joined by AND, a comparison like `__gt` (written either as a keyword
+  argument or as a bare lookup expression), an `__in` over a queryset, or an OR
+  whose branches name **different columns**. Reading one would mean this package deciding what
   an arbitrary predicate matches, which is the database's job. A set the caller
   wrote out is not that -- it is a list of values, and deciding membership in it
   needs no planner.

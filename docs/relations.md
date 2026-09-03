@@ -73,6 +73,27 @@ hand-written fixtures always omit, and the one that changes what a query returns
 a parent nobody references is the difference between an inner join and an outer
 join giving the same answer and giving different ones.
 
+## One-to-one
+
+A `OneToOneField` is a fan-out whose partition never gives a parent two rows,
+and the spelling is a flat distribution over at least as many parents as this
+table has rows:
+
+```python
+# over a Table(User, rows=50) or more
+Table(Profile, rows=50, user=FanOut(Constant(1)), headline=Constant("hi"))
+```
+
+`Constant(1)` rather than `Uniform(1, 1)`, which is refused: an inclusive range
+of one value is a range that says nothing, and a distribution asked for
+variation it cannot supply is more likely a typo than an intention.
+
+Anything skewed is refused here, and the refusal is not conservative. A skew
+exists to give some parent several children and a one-to-one permits none, so
+`FanOut(Zipf())` on a unique column does not merely usually fail -- measured at
+fifty rows over a hundred parents, it loaded **zero times in twenty**.
+`childless=` still asks for parents with no row at all.
+
 ## Nullable keys
 
 `null=0.25` leaves a quarter of the children with a `NULL` foreign key. Only
