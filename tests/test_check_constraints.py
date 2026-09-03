@@ -303,6 +303,92 @@ def test_a_sequential_that_does_not_move_is_not_distinct() -> None:
         )
 
 
+def test_a_partition_that_gives_no_parent_two_rows_cannot_collide() -> None:
+    # The second exemption, and a proof rather than a probability: a collision
+    # here is always two rows of one group drawing the same value, so a
+    # partition with no group of two cannot produce one. Flat weights make every
+    # share rows/parents, and at fifty rows over fifty companies that is exactly
+    # one each -- measured as a largest group of one across every parent count
+    # up to sixty, every row count at or below it, and five seeds.
+    Shape(
+        _companies(50),
+        Table(Seat, rows=50, company=FanOut(Constant(1)), label=Constant("x")),
+    )
+
+
+def test_the_exemption_holds_below_the_boundary_as_well_as_on_it() -> None:
+    # Fewer rows than parents leaves every share below one, so the largest
+    # remainder hands out forty-nine single rows and one company gets none.
+    Shape(
+        _companies(50),
+        Table(Seat, rows=49, company=FanOut(Constant(1)), label=Constant("x")),
+    )
+
+
+def test_the_boundary_is_where_the_proof_stops_and_the_refusal_starts() -> None:
+    # Two labels rather than one, on purpose, and the pair below is the point.
+    # Fifty rows over fifty companies is one seat each and cannot collide;
+    # fifty-one gives some company two, and two rows of one group drawing from
+    # {a, b} agree half the time. Constant would not test this at all -- its
+    # capacity is fifty, so the pigeonhole would answer first and the bound
+    # being asserted here would never be reached.
+    Shape(
+        _companies(50),
+        Table(Seat, rows=50, company=FanOut(Constant(1)), label=Skew({"a": 1, "b": 1})),
+    )
+
+    with pytest.raises(InvalidShape, match="one_seat_label_per_company") as raised:
+        Shape(
+            _companies(50),
+            Table(Seat, rows=51, company=FanOut(Constant(1)), label=Skew({"a": 1, "b": 1})),
+        )
+
+    # The arrangement refusal and not the arithmetic one: a hundred pairs hold
+    # fifty-one rows comfortably, so the pigeonhole passes it exactly as it did
+    # one row earlier.
+    assert "is a fan-out beside" in str(raised.value)
+
+
+def test_a_childless_share_takes_the_proof_away() -> None:
+    # A childless parent is weighed at zero and its rows go to the others, which
+    # is what breaks the bound rather than tightening it: at childless=0.1 the
+    # largest group over fifty rows and fifty companies is two.
+    with pytest.raises(InvalidShape, match="one_seat_label_per_company"):
+        Shape(
+            _companies(50),
+            Table(
+                Seat,
+                rows=50,
+                company=FanOut(Constant(1), childless=0.1),
+                label=Constant("x"),
+            ),
+        )
+
+
+def test_a_parent_this_shape_does_not_build_takes_the_proof_away_too() -> None:
+    # The bound is rows against parents, and a parent loaded by the caller has
+    # however many rows it has. A bound resting on a number this package cannot
+    # read is not a bound, so the refusal stands.
+    with pytest.raises(InvalidShape, match="one_seat_label_per_company"):
+        Shape(Table(Seat, rows=50, company=FanOut(Constant(1)), label=Constant("x")))
+
+
+def test_sizes_that_are_not_provably_flat_are_not_exempt() -> None:
+    # Uniform(1, 10) is bounded by nothing this can read and gives a largest
+    # group of two at the very numbers Constant(1) gives one. "Usually one each"
+    # is not the question -- the exemption is a proof or it is not there.
+    with pytest.raises(InvalidShape, match="one_seat_label_per_company"):
+        Shape(
+            _companies(50),
+            Table(
+                Seat,
+                rows=50,
+                company=FanOut(Uniform(1, 10)),
+                label=Constant("x"),
+            ),
+        )
+
+
 def test_a_column_derived_from_the_group_is_left_to_the_other_two_nets() -> None:
     # The exemption that is the point rather than a gap. A derivation reads
     # something other than its own row index, so it is the one kind of

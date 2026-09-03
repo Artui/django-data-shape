@@ -13,7 +13,7 @@ from typing import Any, cast
 
 import pytest
 from django.db import IntegrityError, connection
-from django.db.models import Q
+from django.db.models import Count, Q
 
 from django_data_shape import (
     Constant,
@@ -290,6 +290,29 @@ def test_the_remedy_the_refusal_names_is_one_that_builds() -> None:
     )
 
     assert Seat.objects.count() == 100
+
+
+def test_a_partition_with_no_group_of_two_really_does_load_under_the_index() -> None:
+    # The exemption against the database rather than against the arithmetic. A
+    # flat fan-out at fifty rows over fifty companies gives every company one
+    # seat, so one label for the whole table collides with nothing -- and the
+    # unique index is really there to say so.
+    build_shape(
+        Shape(
+            _companies(50),
+            Table(Seat, rows=50, company=FanOut(Constant(1)), label=Constant("x")),
+        )
+    )
+
+    assert Seat.objects.count() == 50
+    # The claim the exemption actually rests on, asserted rather than assumed:
+    # no group holds two rows, so there is nothing for two draws to collide in.
+    largest = max(
+        Seat.objects.values("company_id")
+        .annotate(seats=Count("id"))
+        .values_list("seats", flat=True)
+    )
+    assert largest == 1
 
 
 def test_an_invariant_that_finds_nothing_lets_the_build_finish() -> None:

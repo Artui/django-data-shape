@@ -174,6 +174,22 @@ how many companies there are.
   rather than drawn beside it — `Derived("company", compute=..., scope="group")`
   receives this row's position among its parent's children and how many there
   are — and the refusal says so.
+- **A partition with no group of two is exempt**, because a collision under
+  such a constraint is always two rows of the *same* group drawing the same
+  value. Flat sizes with no `childless` share give every parent `rows / parents`
+  children, so at `rows <= parents` every parent gets zero or one -- and the
+  parent has to be declared in the same shape, because a bound resting on a row
+  count this package cannot read is not a bound. One row past that, some parent
+  gets two and the refusal comes back.
+
+    !!! warning "That exemption is the shape this package argues against"
+
+        A fan-out giving every parent exactly one child is the uniform fan-out
+        that makes the planner always right -- the one database in which join
+        misestimation cannot occur. Prefer a `Zipf` and a constraint you can
+        actually keep. But it builds, and a refusal must never tell you a shape
+        cannot be built when it demonstrably can.
+
 - **A column that is distinct in every row is exempt**, because a pair is
   distinct as soon as either half is and there is then nothing to arrange.
   `Sequential` says so about itself through

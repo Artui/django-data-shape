@@ -90,8 +90,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   arranged now gets a refusal naming the fan-out, the drawn columns, and the
   form that does keep such a constraint -- `Derived(relation, compute=...,
   scope="group")`, which receives this row's position among its parent's
-  children. A column that is `Distinct` is exempt, because then there is nothing
-  to arrange.
+  children. Two exemptions, and both are proofs rather than probabilities: a
+  column that is `Distinct`, because then there is nothing to arrange; and a
+  fan-out that provably gives no parent two rows -- flat sizes, no `childless`
+  share, the parent declared in the same shape and `rows <= parents` -- because
+  a collision here is always two rows of one group and there is then no such
+  group. The second is deliberately not "this usually works": at one row past
+  that bound some parent gets two, and two rows drawing from two labels agree
+  half the time.
 - **A forgotten foreign key is told how to declare one, rather than told that
   relations are unsupported.** The message said "relations are not supported
   yet, so this shape cannot be built. Declaring fan-out as a distribution is the

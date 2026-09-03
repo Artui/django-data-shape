@@ -105,7 +105,7 @@ def _check_one(table: Table, constraint: UniqueConstraint, rows_of: dict[type[Mo
         # branch gate with no pragma, would take the 0.8.0 message down with it.
         _check_unconditional(table, constraint.name, fields, capacity)
         _check_independent_fan_outs(table, constraint.name, fields)
-        _check_a_fan_out_beside_a_draw(table, constraint.name, fields, capacity)
+        _check_a_fan_out_beside_a_draw(table, constraint.name, fields, capacity, rows_of)
         return
     decoded = _equality(constraint.condition)
     if decoded is None:
@@ -178,7 +178,11 @@ def _check_independent_fan_outs(table: Table, name: str, fields: tuple[str, ...]
 
 
 def _check_a_fan_out_beside_a_draw(
-    table: Table, name: str, fields: tuple[str, ...], capacity: int | None
+    table: Table,
+    name: str,
+    fields: tuple[str, ...],
+    capacity: int | None,
+    rows_of: dict[type[Model], int],
 ) -> None:
     """One fan-out and one drawn column: the same defect, one column over.
 
@@ -208,10 +212,15 @@ def _check_a_fan_out_beside_a_draw(
     resolved against the parent's real keys at build time -- by which point the
     declaration has already been accepted, cached and passed around.
 
-    ``Distinct`` is the exemption, and the only one that needs no coordination:
-    a pair is distinct as soon as either half is, so a
+    **Two exemptions, and both are proofs rather than probabilities.**
+    ``Distinct`` is the first: a pair is distinct as soon as either half is, so a
     :class:`~django_data_shape.distributions.sequential.Sequential` beside a
-    fan-out keeps the constraint in every row and is accepted.
+    fan-out keeps the constraint in every row with nothing arranged around it. A
+    partition that gives no parent two rows is the second -- there is then no
+    group for two draws to collide inside -- and :func:`_cannot_collide` is the
+    four conditions that establish it. Neither exemption is "this usually works":
+    a shape that merely usually works is the case this refusal is for, and the
+    measured ones sit at ten and eleven times out of twenty.
 
     **What this does not decide.** A column filled by a
     :class:`~django_data_shape.derivations.derivation.Derivation` is left alone,
@@ -238,6 +247,8 @@ def _check_a_fan_out_beside_a_draw(
         return
     if any(isinstance(one, Distinct) and one.is_distinct_per_row() for one in declared):
         return
+    if _cannot_collide(table, fanned[0], rows_of):
+        return
     where = table.model.__name__
     drawn = ", ".join(f"{where}.{column}={table.fields[column]!r}" for column in others)
     room = (
@@ -258,6 +269,55 @@ def _check_a_fan_out_beside_a_draw(
         "receives this row's position among its parent's children and how many there are. A "
         "column that is distinct in every row keeps the constraint on its own, and says so with "
         "Distinct -- Sequential does."
+    )
+
+
+def _cannot_collide(table: Table, column: str, rows_of: dict[type[Model], int]) -> bool:
+    """Whether this fan-out provably gives no parent two rows to draw for.
+
+    The second exemption, and it is a **proof rather than a probability**, which
+    is the line this refusal is drawn on. A collision under a constraint like
+    this one is always two rows of the *same* group drawing the same value, so a
+    partition in which no group holds two rows cannot produce one, whatever the
+    other column draws and whatever the seed.
+
+    Four conditions, and all four are needed. The sizes have to be provably flat
+    -- ``Bounded`` with exactly one distinct value, so every parent is weighed
+    the same -- because ``_sizes`` divides ``rows`` by a total and hands the
+    remainder to the parents with the largest fractional part: flat weights make
+    every share ``rows / parents``, so at ``rows <= parents`` every parent gets
+    zero or one and at one row more some parent gets two. ``childless`` has to be
+    zero, because a childless parent is weighed at zero and its rows go to the
+    others, which is what breaks the bound rather than tightening it -- measured
+    at ``childless=0.1`` and fifty rows over fifty parents, where the largest
+    group is two. And the parent's row count has to be known here, which means
+    the parent is declared in this same shape: a parent loaded by the caller has
+    however many rows it has, and a bound resting on a number this package
+    cannot read is not a bound.
+
+    **The asymmetry is worth stating.** Everywhere else in this module a
+    ``Bounded`` that lied would cost a refusal that is wrong; here it costs an
+    acceptance that is, and the load would die inside ``COPY`` again. That is the
+    same exposure every use of the protocol carries and the package cannot do
+    better than the contract -- but it is the reason this asks for a proof and
+    then asks for three more things beside it, rather than reading one number and
+    trusting the shape of the answer.
+
+    Worth knowing what is being exempted: a fan-out giving every parent exactly
+    one child is the uniform fan-out this package exists to argue against, and it
+    is the one database in which join misestimation cannot occur. That is a
+    reason to say so in the documentation. It is never a reason for a refusal to
+    tell a caller their shape cannot be built when it demonstrably can.
+    """
+    fan_out = cast("FanOut", table.fields[column])
+    parent = cast("type[Model]", table.model._meta.get_field(column).related_model)
+    parent_rows = rows_of.get(parent)
+    return (
+        isinstance(fan_out.sizes, Bounded)
+        and fan_out.sizes.distinct_values() == 1
+        and not fan_out.childless
+        and parent_rows is not None
+        and table.rows <= parent_rows
     )
 
 
