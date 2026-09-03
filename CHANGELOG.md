@@ -7,7 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0] — 2026-09-03
+
 ### Fixed
+
 - **An OR of equalities over one column is read like the set it is.**
   `Q(status="DRAFT") | Q(status="IN_REVIEW") | Q(status="APPROVED")` says exactly
   what `Q(status__in=[...])` says, and an ORM gives no reason to prefer either --
@@ -20,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   OR whose branches name **different columns** describes no set for any one
   column and is still declined, along with a negation, clauses joined by AND, a
   comparison in either spelling, and an `__in` over a queryset.
+
 - **A required foreign key that carries a `default=` now says why the default
   does not fill it.** The message said the shape did not say which parent, and
   from the caller's side they had said: they wrote `default=` on the model, and
@@ -29,15 +33,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   usually reads the database, which is the one thing a value for a row must
   never do.
 
-### Documentation
-- **The one-to-one spelling has an example.** `FanOut(Constant(1))` over at
-  least as many parents as the table has rows, and `Constant(1)` rather than
-  `Uniform(1, 1)`, which is refused. The refusal for anything skewed is quoted
-  with its measurement, because "a skew is probably wrong here" and "it loaded
-  zero times in twenty" are different claims.
-
-
-### Fixed
 - **"There is room" is never "there is a way", and the fan-out was never what
   was special.** Three more declarations that the arithmetic passed and the load
   then failed on, seed-dependently. All three are the one sentence the fan-out
@@ -63,6 +58,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     exists to give some parent several children and a one-to-one permits none,
     so it never loads -- zero in twenty. The message names the shape that does:
     flat sizes over at least as many parents as rows.
+
 - **A partial `UniqueConstraint` whose condition names a set is checked, not
   skipped.** `Q(status__in=["DRAFT", "IN_REVIEW", "APPROVED"])` was read as a
   predicate this package should not interpret, so the constraint was passed over
@@ -78,12 +74,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   refusal was drawn on and the reason it drew it in the wrong place. A negation,
   two clauses joined, a comparison and an `__in` over a queryset are all still
   declined.
+
 - **`PerParent`'s `rest` has to sit outside the condition, and now says so.**
   The set form makes reachable a case the equality form made hard to write:
   `last="DRAFT", rest="IN_REVIEW"` puts *every* row of every group inside a
   three-status condition, so the declaration that answers the equality form
   breaks this one. The remedy in the message names the requirement rather than
   leaving `rest=` an ellipsis.
+
 - **A required foreign key carrying a Python-level `default=` is refused with
   the other undeclared required relations.** It fell between the two halves that
   should have caught it: the refusal skipped any column with a default, and the
@@ -95,6 +93,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   value distribution on a relation is refused for. A real `db_default` is DDL
   and is still left to the database.
 
+### Documentation
+
+- **The one-to-one spelling has an example.** `FanOut(Constant(1))` over at
+  least as many parents as the table has rows, and `Constant(1)` rather than
+  `Uniform(1, 1)`, which is refused. The refusal for anything skewed is quoted
+  with its measurement, because "a skew is probably wrong here" and "it loaded
+  zero times in twenty" are different claims.
 
 ## [0.11.0] — 2026-09-03
 
@@ -827,7 +832,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   into `COPY FROM STDIN`, which psycopg 2 cannot do without materialising them
   first.
 
-[Unreleased]: https://github.com/Artui/django-data-shape/compare/v0.11.0...HEAD
+[Unreleased]: https://github.com/Artui/django-data-shape/compare/v0.12.0...HEAD
+[0.12.0]: https://github.com/Artui/django-data-shape/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/Artui/django-data-shape/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/Artui/django-data-shape/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/Artui/django-data-shape/compare/v0.8.0...v0.9.0
