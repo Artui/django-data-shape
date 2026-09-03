@@ -29,6 +29,7 @@ from django_data_shape import (
     Derived,
     FanOut,
     InvalidShape,
+    Paired,
     PerParent,
     Projection,
     Sequential,
@@ -494,6 +495,50 @@ def test_a_fan_out_that_cannot_collide_keeps_a_one_to_one() -> None:
             prefix=Constant("p"),
             reference=Sequential("r", "x"),
             company=FanOut(Constant(1)),
+        ),
+    )
+
+
+def test_the_two_fan_out_refusal_names_the_pairing_that_replaces_it() -> None:
+    # The remedy this refusal named used to be raw SQL, because nothing else
+    # could keep the constraint. Paired is that algorithm, so the message points
+    # at the declaration first and keeps the statement as the escape hatch.
+    with pytest.raises(InvalidShape) as raised:
+        Shape(
+            _companies(50),
+            Table(Person, rows=200, name=Constant("p")),
+            Table(
+                Membership,
+                rows=2000,
+                company=FanOut(Zipf()),
+                person=FanOut(Zipf()),
+                role=Constant("r"),
+            ),
+        )
+
+    message = str(raised.value)
+    assert "Paired('company', Zipf())" in message
+    assert "Projection" in message
+
+
+def test_a_pairing_beside_a_fan_out_keeps_the_constraint_and_is_accepted() -> None:
+    """The declaration the refusal above sends a reader to has to be accepted.
+
+    It is exempt for a reason rather than by omission: a pairing takes distinct
+    partners inside each group, so no two rows of one group share a partner and
+    no two rows of different groups share a pair. That is the same "a pair is
+    distinct as soon as either half is" the other exemptions rest on, arrived at
+    from the group rather than from the column.
+    """
+    Shape(
+        _companies(50),
+        Table(Person, rows=200, name=Constant("p")),
+        Table(
+            Membership,
+            rows=2000,
+            company=FanOut(Zipf()),
+            person=Paired("company", Zipf()),
+            role=Constant("r"),
         ),
     )
 

@@ -21,10 +21,13 @@ from django_data_shape.generate_rows import generate_rows
 from django_data_shape.invalid_shape import InvalidShape
 from django_data_shape.keys.disjoint import Disjoint
 from django_data_shape.order_tables import order_tables
+from django_data_shape.paired import Paired
+from django_data_shape.paired_plan import PairedPlan
 from django_data_shape.projection import Projection
 from django_data_shape.refuse_queries import refuse_queries
 from django_data_shape.require_postgres import require_postgres
 from django_data_shape.resolve_fan_out import resolve_fan_out
+from django_data_shape.resolve_paired import resolve_paired
 from django_data_shape.shape import Shape
 from django_data_shape.shape_not_empty import ShapeNotEmpty
 from django_data_shape.table import Table
@@ -115,8 +118,8 @@ def build(
             if isinstance(table, Projection):
                 loaded = _project(connection, table, shape.seed)
             else:
-                plans = _resolve(connection, table, shape.seed)
-                loaded = _load(connection, table, shape.seed, plans)
+                plans, pairings = _resolve(connection, table, shape.seed)
+                loaded = _load(connection, table, shape.seed, plans, pairings)
             _reset_sequence(connection, table.model)
             _analyze(connection, table.db_table)
             results.append(TableResult(table=table.db_table, rows=loaded))
@@ -163,11 +166,21 @@ def _project(connection: Any, projection: Projection, seed: int) -> int:
     return inserted
 
 
-def _resolve(connection: Any, table: Table, seed: int) -> dict[str, FanOutPlan]:
-    """Partition each declared relation over the parent keys that exist."""
+def _resolve(
+    connection: Any, table: Table, seed: int
+) -> tuple[dict[str, FanOutPlan], dict[str, PairedPlan]]:
+    """Partition each declared relation over the parent keys that exist.
+
+    Fan-outs first and pairings second, because a pairing chooses partners
+    *inside* the groups a fan-out produced -- so the partition it reads has to
+    exist before it can be resolved. That ordering is the mechanism rather than
+    a detail of this function: it is what makes an edge table one pass.
+    """
     parent_fields = table.parent_fields()
     plans: dict[str, FanOutPlan] = {}
     for name, field in table.relations():
+        if isinstance(table.fields[name], Paired):
+            continue
         plans[name] = resolve_fan_out(
             cast("FanOut", table.fields[name]),
             cast("type[Model]", field.related_model),
@@ -178,7 +191,22 @@ def _resolve(connection: Any, table: Table, seed: int) -> dict[str, FanOutPlan]:
             connection,
             parent_fields.get(name, ()),
         )
-    return plans
+    pairings: dict[str, PairedPlan] = {}
+    for name, field in table.relations():
+        declared = table.fields[name]
+        if not isinstance(declared, Paired):
+            continue
+        pairings[name] = resolve_paired(
+            declared,
+            cast("type[Model]", field.related_model),
+            plans[declared.relation],
+            table.rows,
+            seed,
+            table.db_table,
+            name,
+            connection,
+        )
+    return plans, pairings
 
 
 def _require_empty(connection: Any, table: Table | Projection) -> None:
@@ -228,7 +256,13 @@ def _require_empty(connection: Any, table: Table | Projection) -> None:
 # API reached through Django's cursor wrapper, and it appears on no Django base
 # class, so annotating the real wrapper type would mean asserting the checker
 # out of the way on every line that uses it.
-def _load(connection: Any, table: Table, seed: int, plans: dict[str, FanOutPlan]) -> int:
+def _load(
+    connection: Any,
+    table: Table,
+    seed: int,
+    plans: dict[str, FanOutPlan],
+    pairings: dict[str, PairedPlan],
+) -> int:
     """Stream generated rows into the table, by the fastest route the backend has.
 
     Each declared value is passed through its field's ``get_db_prep_save``
@@ -254,7 +288,7 @@ def _load(connection: Any, table: Table, seed: int, plans: dict[str, FanOutPlan]
     prepare = [pk_field.get_db_prep_save] + [field.get_db_prep_save for _, field in table.columns()]
     rows = (
         tuple(prep(value, connection) for prep, value in zip(prepare, row, strict=True))
-        for row in generate_rows(table, seed, plans)
+        for row in generate_rows(table, seed, plans, pairings)
     )
 
     # The guard is built here rather than inside each route because it belongs

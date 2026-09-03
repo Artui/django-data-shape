@@ -21,6 +21,7 @@ from django_data_shape import (
     Given,
     InvalidShape,
     KeyFunction,
+    Paired,
     PerParent,
     Sequential,
     SequentialKeys,
@@ -37,6 +38,7 @@ from tests.testapp.models import (
     Defaulted,
     Delegated,
     DeliveryDocument,
+    Membership,
     Memo,
     Order,
     Project,
@@ -283,6 +285,64 @@ def test_a_relation_default_is_not_folded_into_a_constant() -> None:
         Table(Assigned, rows=1, label=Constant("x"))
 
     assert "company=FanOut(Zipf())" in str(raised.value)
+
+
+def test_a_pairing_has_to_name_a_fan_out_this_table_declares() -> None:
+    with pytest.raises(InvalidShape) as raised:
+        Table(
+            Membership,
+            rows=10,
+            company=FanOut(Zipf()),
+            person=Paired("nowhere", Zipf()),
+            role=Constant("r"),
+        )
+
+    message = str(raised.value)
+    assert "paired with 'nowhere', which this table does not declare" in message
+    # The correction is one read away rather than a second round trip.
+    assert "Its fan-outs are: company" in message
+
+
+def test_a_pairing_over_a_column_that_is_not_a_fan_out_is_refused() -> None:
+    # A pairing takes its groups from a partition, and only a fan-out
+    # partitions this table's rows over a parent.
+    with pytest.raises(InvalidShape, match="rather than a fan-out"):
+        Table(
+            Membership,
+            rows=10,
+            company=FanOut(Zipf()),
+            person=Paired("role", Zipf()),
+            role=Constant("r"),
+        )
+
+
+def test_a_pairing_with_itself_is_refused() -> None:
+    with pytest.raises(InvalidShape, match="paired with itself"):
+        Table(
+            Membership,
+            rows=10,
+            company=FanOut(Zipf()),
+            person=Paired("person", Zipf()),
+            role=Constant("r"),
+        )
+
+
+def test_a_table_with_no_fan_out_at_all_says_that_rather_than_listing_none() -> None:
+    with pytest.raises(InvalidShape) as raised:
+        Table(Membership, rows=10, company=Paired("person", Zipf()), role=Constant("r"))
+
+    assert "declares no fan-out at all" in str(raised.value)
+
+
+def test_a_pairing_on_a_column_that_is_not_a_relation_is_refused() -> None:
+    with pytest.raises(InvalidShape, match="has nothing to fan out over"):
+        Table(
+            Membership,
+            rows=10,
+            company=FanOut(Zipf()),
+            person=Paired("company", Zipf()),
+            role=Paired("company", Zipf()),
+        )
 
 
 def test_a_nullable_relation_may_be_omitted_and_loads_null() -> None:

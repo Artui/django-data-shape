@@ -163,8 +163,12 @@ def _check_independent_fan_outs(
     That is why this is otherwise a refusal and not a wider capacity
     calculation: no arithmetic over the two marginals decides it, because the
     failure is that nothing enumerates the combinations at all. Deduplicated edges are a
-    different algorithm rather than a bigger loop, and until they arrive the
-    thing that works is a statement --
+    different algorithm rather than a bigger loop. **That algorithm now exists**
+    as :class:`~django_data_shape.paired.Paired`, which is the remedy this
+    refusal names: one side stays a fan-out and the other takes distinct
+    partners inside its groups, so a duplicate pair is impossible rather than
+    removed. A statement of your own is still the answer for an edge set that
+    has to be a particular one --
     :class:`~django_data_shape.projection.Projection` with ``columns=`` and
     ``sql=`` fills the table from a select that can deduplicate.
     """
@@ -191,10 +195,11 @@ def _check_independent_fan_outs(
         "pairs come out together is an artefact of that index, and two rows sharing a pair is a "
         "matter of the seed. The combinations do fit, which is why the pigeonhole arithmetic "
         "lets this through -- what is missing is anything that enumerates them, and the load "
-        "then fails inside COPY at a row number that moves when the seed does. A deduplicated "
-        f"edge table is filled by a statement rather than by two draws: Projection({where}, "
-        "columns=(...), sql=...) selects the pairs already distinct, which is the form that "
-        "keeps this constraint today."
+        "then fails inside COPY at a row number that moves when the seed does. An edge table "
+        f"declares one side and pairs the other: {fanned[1]}=Paired({fanned[0]!r}, Zipf()) takes "
+        f"distinct partners inside each {fanned[0]} group, so no pair can repeat and the edge "
+        "count is still exactly the row count. An edge set that has to be a particular one is "
+        f"filled by a statement instead -- Projection({where}, columns=(...), sql=...)."
     )
 
 

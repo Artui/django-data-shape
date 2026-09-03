@@ -10,6 +10,8 @@ from django_data_shape.derivations.derivation import Derivation
 from django_data_shape.derivations.scope import Scope
 from django_data_shape.distributions.distribution import Distribution
 from django_data_shape.fan_out_plan import FanOutPlan
+from django_data_shape.paired import Paired
+from django_data_shape.paired_plan import PairedPlan
 from django_data_shape.table import Table
 from django_data_shape.utils import draw, field_stream
 
@@ -20,7 +22,10 @@ _Source = Callable[[int, list[object]], object]
 
 
 def generate_rows(
-    table: Table, seed: int, plans: Mapping[str, FanOutPlan] | None = None
+    table: Table,
+    seed: int,
+    plans: Mapping[str, FanOutPlan] | None = None,
+    pairings: Mapping[str, PairedPlan] | None = None,
 ) -> Iterator[tuple[Any, ...]]:
     """Yield one tuple per row: the primary key, then each declared column.
 
@@ -54,6 +59,7 @@ def generate_rows(
     nothing but peak RSS.
     """
     plans = plans or {}
+    pairings = pairings or {}
     keys = table.keys
     key_stream = field_stream(seed, table.db_table, ":key")
     columns = table.columns()
@@ -64,7 +70,7 @@ def generate_rows(
     # of column this is, and where each of its sources comes from, are decided
     # once rather than a million times.
     steps: list[_Step] = [
-        (slot_of[name], _producer(table, seed, plans, name))
+        (slot_of[name], _producer(table, seed, plans, pairings, name))
         for name, _field in columns
         if name not in table.computation_order()
     ]
@@ -81,12 +87,23 @@ def generate_rows(
 
 
 def _producer(
-    table: Table, seed: int, plans: Mapping[str, FanOutPlan], name: str
+    table: Table,
+    seed: int,
+    plans: Mapping[str, FanOutPlan],
+    pairings: Mapping[str, PairedPlan],
+    name: str,
 ) -> Callable[[int, list[object]], object]:
     """The step for a column that depends on nothing already in the row."""
     plan = plans.get(name)
     if plan is not None:
         return partial(_from_plan, plan)
+    pairing = pairings.get(name)
+    if pairing is not None:
+        # Two questions of the fan-out this pairs with -- which group, and where
+        # in it -- and one of the pairing. All three are O(1) because both are
+        # partitions of the row range rather than per-row draws.
+        declared = cast("Paired", table.fields[name])
+        return partial(_from_pairing, plans[declared.relation], pairing)
     distribution = cast("Distribution", table.fields[name])
     return partial(_from_distribution, distribution, field_stream(seed, table.db_table, name))
 
@@ -147,6 +164,11 @@ def _from_distribution(
 
 def _from_plan(plan: FanOutPlan, row: int, values: list[object]) -> object:
     return plan.key_for(row)
+
+
+def _from_pairing(plan: FanOutPlan, pairing: PairedPlan, row: int, values: list[object]) -> object:
+    position, _size = plan.group_position(row)
+    return pairing.partner_for(plan.group_of(row), position)
 
 
 def _from_derivation(

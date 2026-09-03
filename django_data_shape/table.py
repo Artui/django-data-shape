@@ -21,6 +21,7 @@ from django_data_shape.infer_key_strategy import infer_key_strategy
 from django_data_shape.invalid_shape import InvalidShape
 from django_data_shape.keys.key_strategy import KeyStrategy
 from django_data_shape.order_derivations import order_derivations
+from django_data_shape.paired import Paired
 from django_data_shape.utils import (
     check_not_inherited,
     check_statistics_target,
@@ -229,13 +230,15 @@ class Table:
         mismatched = sorted(
             name
             for name, declared in self.fields.items()
-            if known[name].is_relation and not isinstance(declared, FanOut)
+            if known[name].is_relation and not isinstance(declared, (FanOut, Paired))
         )
         if mismatched:
             raise InvalidShape(
                 f"{self.model.__name__}.{', '.join(mismatched)} is a relation, so it needs a "
                 "FanOut rather than a value distribution or a derivation. Either would emit keys "
-                "drawn from nothing, pointing at rows that may not exist."
+                "drawn from nothing, pointing at rows that may not exist. The second key of an "
+                "edge table is a Paired instead, which chooses partners distinct inside the "
+                "fan-out beside it."
             )
         self_referential = sorted(
             name
@@ -253,13 +256,14 @@ class Table:
         misapplied = sorted(
             name
             for name, declared in self.fields.items()
-            if not known[name].is_relation and isinstance(declared, FanOut)
+            if not known[name].is_relation and isinstance(declared, (FanOut, Paired))
         )
         if misapplied:
             raise InvalidShape(
                 f"{self.model.__name__}.{', '.join(misapplied)} is not a relation, so a FanOut "
                 "has nothing to fan out over."
             )
+        self._check_pairings(known)
 
         self._resolve_defaults(known)
         # After the defaults for the reason the derivation check is: a target on
@@ -466,6 +470,45 @@ class Table:
                 "drop order_by -- it changes no plan, only which row of the group is the special "
                 "one."
             )
+
+    def _check_pairings(self, known: dict[str, Field[Any, Any]]) -> None:
+        """Every ``Paired`` has to name a fan-out in this same table.
+
+        The pairing is what makes an edge table buildable in one pass: the
+        fan-out partitions the rows, and the paired column takes distinct
+        partners inside each of its groups. So the name it gives has to be a
+        fan-out here -- not a relation filled some other way, not a column of
+        another table, and not itself.
+        """
+        for name, declared in sorted(self.fields.items()):
+            if not isinstance(declared, Paired):
+                continue
+            where = f"{self.model.__name__}.{name}"
+            partner = self.fields.get(declared.relation)
+            if declared.relation == name:
+                raise InvalidShape(
+                    f"{where} is paired with itself. Paired names the *other* key of the edge -- "
+                    "the fan-out whose groups this column takes distinct partners inside."
+                )
+            if partner is None:
+                fanned = sorted(
+                    other for other, one in self.fields.items() if isinstance(one, FanOut)
+                )
+                available = (
+                    f"Its fan-outs are: {', '.join(fanned)}."
+                    if fanned
+                    else "It declares no fan-out at all, and a pairing takes its groups from one."
+                )
+                raise InvalidShape(
+                    f"{where} is paired with {declared.relation!r}, which this table does not "
+                    f"declare. {available}"
+                )
+            if not isinstance(partner, FanOut):
+                raise InvalidShape(
+                    f"{where} is paired with {declared.relation!r}, which is declared as "
+                    f"{partner!r} rather than a fan-out. A pairing takes its groups from a "
+                    "partition, and only a fan-out partitions this table's rows over a parent."
+                )
 
     def _check_satisfiable(self, known: dict[str, Field[Any, Any]]) -> None:
         """Refuse a declaration the database provably cannot hold.

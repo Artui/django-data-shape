@@ -101,6 +101,15 @@ class FanOutPlan:
         end = self._starts[index + 1] if index + 1 < len(self._starts) else self._rows
         return slot - start, end - start
 
+    def group_of(self, row: int) -> int:
+        """Which parent this row belongs to, as an index into the parent keys.
+
+        Public because a paired column needs it: the partner is chosen inside
+        this row's group, so "which group" and "where in it" are both asked of
+        the partition rather than recomputed beside it.
+        """
+        return self._slot(row)
+
     def _slot(self, row: int) -> int:
         """Which parent owns this child row, as an index into ``keys``."""
         slot = (row * self._stride) % self._rows

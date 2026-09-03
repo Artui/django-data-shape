@@ -6,6 +6,8 @@
 
 ::: django_data_shape.fan_out.FanOut
 
+::: django_data_shape.paired.Paired
+
 ::: django_data_shape.fan_out_sizes.fan_out_sizes
 
 ::: django_data_shape.children_per_parent.ChildrenPerParent
