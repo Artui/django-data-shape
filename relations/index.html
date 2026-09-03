@@ -1013,7 +1013,9 @@ database insists — Django creates every PostgreSQL foreign key
 satisfy them — but because a fan-out reads the parent's keys, and a table with no
 rows yet has none.</p>
 <p>Two tables that fan out over each other are refused by name: one of them has to
-load first, and a cycle means neither can.</p>
+load first, and a cycle means neither can. That refusal happens when the <code>Shape</code>
+is constructed rather than when the build starts, because which table can be
+filled first is decided by the declarations and needs no connection to answer.</p>
 <h2 id="what-is-refused">What is refused<a class="headerlink" href="#what-is-refused" title="Permanent link">&para;</a></h2>
 <ul>
 <li>A relation declared with a <strong>value distribution</strong> rather than a <code>FanOut</code>. It
@@ -1023,7 +1025,20 @@ load first, and a cycle means neither can.</p>
 <li>A <strong>self-referential</strong> <code>FanOut</code>. It would read keys from a table still empty at
   load time; self-referential trees are their own feature.</li>
 <li>A required relation <strong>left undeclared</strong>, which would fail the load on a
-  not-null violation rather than at declaration time.</li>
+  not-null violation rather than at declaration time. The message names the
+  column and the fan-out that fills it: forgetting one foreign key is the
+  commonest mistake there is, so it is the first thing many readers ever see
+  this package say.</li>
+<li>A model using <strong>multi-table inheritance</strong>. One of its rows is two rows, in two
+  tables, sharing a key — and this package fills one table per declaration and
+  assigns that table's keys itself, so it can write either half and has nothing
+  to pair them with. Declaring the two separately does not help: the child's
+  primary key is a foreign key to the parent, and a fan-out is a partition
+  rather than the bijection that would need to be. <code>_meta.concrete_fields</code> spans
+  both tables while <code>db_table</code> names one, so this used to be accepted and then
+  raise a bare <code>KeyError</code> from inside the loader. A proxy model is not this case
+  and is fine: it adds no column and no table, so a shape naming one is a shape
+  about the table it proxies.</li>
 </ul>
 
 

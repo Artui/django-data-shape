@@ -1529,6 +1529,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#django_data_shape.distributions.distinct.Distinct" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Distinct
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#django_data_shape.distributions.skew.Skew" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1617,6 +1628,17 @@
   
     <nav class="md-nav" aria-label="Sequential">
       <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#django_data_shape.distributions.sequential.Sequential.is_distinct_per_row" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        is_distinct_per_row
+      
+    </span>
+  </a>
+  
+</li>
         
           <li class="md-nav__item">
   <a href="#django_data_shape.distributions.sequential.Sequential.is_ascending" class="md-nav__link">
@@ -2837,6 +2859,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#django_data_shape.distributions.distinct.Distinct" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Distinct
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#django_data_shape.distributions.skew.Skew" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2925,6 +2958,17 @@
   
     <nav class="md-nav" aria-label="Sequential">
       <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#django_data_shape.distributions.sequential.Sequential.is_distinct_per_row" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        is_distinct_per_row
+      
+    </span>
+  </a>
+  
+</li>
         
           <li class="md-nav__item">
   <a href="#django_data_shape.distributions.sequential.Sequential.is_ascending" class="md-nav__link">
@@ -3194,6 +3238,14 @@ many rows it declares; only a shape knows how many companies there are, and
 <code>one_active_project_per_company permits at most 50,000</code> is arithmetic that
 needs both. See
 :func:<code>~django_data_shape.check_constraints.check_constraints</code>.</p>
+<p><strong>Load order is checked here too, for the same reason.</strong> Which declaration
+can be filled first is decided by the declarations alone -- a fan-out reads
+its parent, a projection selects from what it names -- so a set of them that
+each have to come after another is refusable without a connection. It was
+the one purely structural refusal this package left until build time, which
+meant a shape could be constructed, cached and passed around for a while
+before saying it could never be built. See
+:func:<code>~django_data_shape.order_tables.order_tables</code>.</p>
 
 
 
@@ -3997,6 +4049,17 @@ whose current value is not part of any declaration. Nothing else about the
 select is inspected -- that is what an escape hatch is -- but the build
 still gives it the emptiness check, the sequence reset, the <code>ANALYZE</code> and
 the transaction.</p>
+<p><strong><code>reads=</code> is how such a statement says what it selects from</strong>, and it
+goes with <code>sql=</code> rather than being an alternative to it. Nothing here
+parses SQL, so a raw statement is opaque and
+:func:<code>~django_data_shape.order_tables.order_tables</code> runs it as late as the
+rest of the declaration allows. That is right until something fans out over
+this table: the projection then has to run <em>before</em> that table, and may find
+the tables it selects from still empty. Naming them puts it back in the
+graph precisely -- after what it reads, before what reads it -- and it is
+part of the cache key, because a statement run before and after a table
+returns different rows. A derived projection has no use for it: <code>per</code> and
+<code>copying</code> already are the answer.</p>
 <p>Like :class:<code>~django_data_shape.shape.Shape</code> and
 :class:<code>~django_data_shape.table.Table</code>, this is inert data: every attribute
 is read-only and every derived plan is a tuple, so a declaration stays
@@ -4067,11 +4130,12 @@ hold it -- the route the rows took in has nothing to do with it.</p>
 
     <div class="doc doc-contents ">
 
-        <p>The models this projection selects from, or nothing for a raw one.</p>
+        <p>The models this projection selects from, or nothing if it did not say.</p>
 <p>What :func:<code>~django_data_shape.order_tables.order_tables</code> sorts on. A
 derived projection names its two inputs, so it can be ordered after them
-precisely; a statement this package did not write names nothing, and is
-ordered after everything instead.</p>
+precisely. A statement this package did not write is opaque -- nothing
+here parses SQL -- so a raw projection answers with whatever <code>reads=</code>
+declared, and with nothing at all when it declared nothing.</p>
 
     </div>
 
@@ -4848,7 +4912,8 @@ is the wrong one.</strong> It deliberately excludes conditional constraints -- i
 exists to answer whether a relation is one-to-one, and a constraint that
 only sometimes applies cannot answer that -- so it skips exactly the case
 this function is for. <code>_meta.constraints</code> is read directly.</p>
-<p>Two arithmetics, and they differ in how certain they are.</p>
+<p>Three checks, and they differ in how certain they are and in what they are
+counting.</p>
 <p><strong>An unconditional <code>UniqueConstraint</code> is pigeonhole</strong>, and provable. Two
 million rows needing distinct <code>(company, label)</code> pairs cannot be built
 from fifty thousand companies and three labels, whatever the seed. That is
@@ -4856,6 +4921,13 @@ also the multi-column analysis
 :meth:<code>~django_data_shape.table.Table._check_satisfiable</code> declines to
 attempt, and it declines for a good reason: a table alone does not know how
 many companies there are. A whole shape does, which is why this runs here.</p>
+<p><strong>Enough room is not a way to fill it</strong>, which is the second check and the
+one no arithmetic reaches. An unconditional constraint over two fan-outs --
+the through table of a many-to-many -- passes the pigeonhole comfortably,
+because the product of two parent counts dwarfs the row count, and still
+cannot be built: two partitions of the same rows are computed independently,
+so the pairs they produce are an artefact of the row index and a collision
+is a matter of the seed. It is refused rather than counted.</p>
 <p><strong>A conditional <code>UniqueConstraint</code> is a statement about a group</strong>, and the
 refusal is categorical rather than arithmetic. <code>one_active_project_per_company</code>
 permits one <code>ACTIVE</code> row per company; a <code>Skew</code> filling <code>status</code> draws
@@ -6915,6 +6987,87 @@ ones already written against the single-method protocol.</p>
 
 
 
+<h2 id="django_data_shape.distributions.distinct.Distinct" class="doc doc-heading">
+            <span class="doc doc-object-name doc-class-name">Distinct</span>
+
+
+<a href="#django_data_shape.distributions.distinct.Distinct" class="headerlink" title="Permanent link">&para;</a></h2>
+
+
+    <div class="doc doc-contents first">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="typing.Protocol">Protocol</span></code></p>
+
+
+
+        <p>A distribution whose value differs in every row of the table.</p>
+<p>The sixth opt-in protocol, and the exact dual of
+:class:<code>~django_data_shape.distributions.bounded.Bounded</code>: that one says
+<em>how few different values can this produce</em>, this one says <em>it produces a
+different one every time</em>.</p>
+<p>It exists for one question, and the question is not about capacity.
+A multi-column <code>UniqueConstraint</code> needs the <strong>tuple</strong> to be distinct, and
+every mechanism this package has for filling a column -- a
+:class:<code>~django_data_shape.fan_out.FanOut</code> partition, and every
+:class:<code>~django_data_shape.distributions.distribution.Distribution</code> --
+computes its column from the row index and from nothing else. So no column
+can see what another column put in the same row, nothing enumerates the
+tuples, and whether two rows collide is a matter of the seed. That is
+refused by
+:func:<code>~django_data_shape.check_constraints.check_constraints</code> rather than
+left to fail inside <code>COPY</code>.</p>
+<p>One kind of column keeps such a constraint anyway, and keeps it without
+coordinating with anything: one whose own values are already distinct. A
+pair is distinct as soon as either half is, so <code>(company, invoice_number)</code>
+is unique for free when <code>invoice_number</code> is. <code>Distinct</code> is how a
+distribution says that about itself, and saying it is what separates the
+declaration that builds from the one that is a lottery.</p>
+<p><code>is_distinct_per_row</code> returns a bool rather than the protocol being a bare
+marker, for the same reason
+:class:<code>~django_data_shape.distributions.ascending.Ascending</code> does: the
+answer is a property of the parameters and not of the class.
+:class:<code>~django_data_shape.distributions.sequential.Sequential</code> with a
+non-zero step writes a different value in every row and with a zero step
+writes one value in all of them, and those are the same class.</p>
+<p>Structural and opt-in like every protocol here. A distribution that does not
+implement it is read as <em>not</em> distinct, which is the safe direction: the
+worst that costs is a refusal a caller answers by adding one method, where
+the other reading costs a load that dies at a row number which moves when
+the seed does.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
 <h2 id="django_data_shape.distributions.skew.Skew" class="doc doc-heading">
             <span class="doc doc-object-name doc-class-name">Skew</span>
 
@@ -7166,6 +7319,36 @@ the one distribution whose value is a function of position alone.</p>
 
 
 
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="django_data_shape.distributions.sequential.Sequential.is_distinct_per_row" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">is_distinct_per_row</span>
+
+
+<a href="#django_data_shape.distributions.sequential.Sequential.is_distinct_per_row" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">is_distinct_per_row</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">bool</span>
+</span></code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Whether every row gets its own value. See <code>Distinct</code>.</p>
+<p>True for any non-zero step, in either direction: this is a statement
+about injectivity and not about order, so a column counting backwards
+keeps a unique constraint exactly as well as one counting forwards.
+<code>Ascending</code> is deliberately not reused for it -- that protocol answers
+which <em>end</em> of a group is last, and a caller's own distribution may
+climb without strictly climbing, which would make it an unsound proof of
+distinctness.</p>
+<p><code>self._step * 0</code> rather than a literal zero, for the reason
+:meth:<code>is_ascending</code> computes its own: a date column steps by a
+<code>timedelta</code> and a numeric one by a number.</p>
+
+
+    </div>
+
+</div>
 
 <div class="doc doc-object doc-function">
 

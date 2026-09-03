@@ -911,6 +911,14 @@ offering fewer values than there are rows, is refused before a row is generated
 rather than found by the database halfway through a load. A generated database that is wrong is worse
 than one that refuses to exist, because the suite it feeds asserts on rows that
 could never occur.</p>
+<p>Two of them are refusals of a whole model shape rather than of a field.
+<strong>Multi-table inheritance</strong> puts one logical row in two tables sharing a key,
+and this package fills one table per declaration and owns that table's keys, so
+it can write either half and has nothing to pair them with. A <strong>through table
+whose uniqueness spans two fan-outs</strong> is refused for a different reason: it fits
+comfortably, and nothing enumerates the combinations, so a collision is a matter
+of the seed. Both used to be accepted and then fail during the load, one with a
+bare <code>KeyError</code> and one with a unique violation inside <code>COPY</code>.</p>
 <p><code>build()</code> raises <code>UnsupportedBackend</code> on anything but PostgreSQL, because a
 shaped database whose plans mean nothing is worse than no shaped database.</p>
 <p><code>build(shape, require_statistics=False)</code> is the other half of the same sentence.
@@ -948,8 +956,12 @@ query count is an ORM property; the session world skips with a stated reason
 where a shaped database cannot exist, because its job is to be believed by a
 planner. See <a href="pytest/">From pytest</a>.</p>
 <h2 id="not-in-this-release">Not in this release<a class="headerlink" href="#not-in-this-release" title="Permanent link">&para;</a></h2>
-<p>Many-to-many edges, and emitting a declaration from a database or a factory that
-already exists.</p>
+<p>Many-to-many edges as a declared form, multi-table inheritance, and emitting a
+declaration from a database or a factory that already exists. The first two are
+<strong>refused by name</strong> rather than left to fail during the load, and the refusal
+for a through table points at the escape hatch that does build one today: a
+<code>Projection</code> with your own <code>sql=</code>, which can select the pairs already
+deduplicated.</p>
 
 
 
