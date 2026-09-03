@@ -302,3 +302,33 @@ def test_the_inversion_survives_the_template_database_cache(
     assert sum(counts.values()) == 1500
     assert {parent: count for parent, count in counts.items() if count} == loaded
     assert counts.childless()
+
+
+@_POSTGRES_ONLY
+@pytest.mark.django_db(transaction=True)
+def test_a_narrowed_fan_out_is_not_a_world_that_changed() -> None:
+    """The check has to compare against what was narrowed to, not the table.
+
+    ``WorldChanged`` exists for a parent that gained or lost rows since the
+    build, because the partition would then describe a world nobody built. A
+    ``parents=`` fan-out covers the keys it named and no others, so the parent
+    table holding fifty rows while the partition covers two is the declaration
+    working, not the world moving -- and a key among the named ones going
+    missing is already refused by name when the partition is resolved.
+    """
+    shape = Shape(
+        Table(Company, rows=50, name=Constant("c")),
+        Table(
+            Session,
+            rows=100,
+            company=FanOut(Constant(1), parents=list(range(1, 11))),
+            label=Constant("s"),
+        ),
+        seed=3,
+    )
+    build_shape(shape)
+
+    counts = fan_out_sizes(shape, Session, "company")
+
+    assert len(counts) == 10
+    assert sum(counts.values()) == 100

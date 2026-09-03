@@ -454,8 +454,7 @@ def _cannot_collide(table: Table, column: str, rows_of: dict[type[Model], int]) 
          and the two-fan-out pair beside it.
     """
     fan_out = cast("FanOut", table.fields[column])
-    parent = cast("type[Model]", table.model._meta.get_field(column).related_model)
-    parent_rows = rows_of.get(parent)
+    parent_rows = _parents_available(table, column, fan_out, rows_of)
     return (
         isinstance(fan_out.sizes, Bounded)
         and fan_out.sizes.distinct_values() == 1
@@ -561,8 +560,7 @@ def _capacity(table: Table, fields: tuple[str, ...], rows_of: dict[type[Model], 
             # those rows are exempt from the constraint entirely.
             if declared.null:
                 return None
-            parent = cast("type[Model]", table.model._meta.get_field(name).related_model)
-            parent_rows = rows_of.get(parent)
+            parent_rows = _parents_available(table, name, declared, rows_of)
             if parent_rows is None:
                 return None
             total *= parent_rows
@@ -571,6 +569,28 @@ def _capacity(table: Table, fields: tuple[str, ...], rows_of: dict[type[Model], 
         else:
             return None
     return total
+
+
+def _parents_available(
+    table: Table, column: str, fan_out: FanOut, rows_of: dict[type[Model], int]
+) -> int | None:
+    """How many parents this fan-out can actually point at, or None if unknown.
+
+    ``parents=`` is the answer where it is given, and it is a **better** answer
+    than the parent's row count rather than a substitute for it: it is known
+    without the parent being declared in this shape at all, and it is what the
+    partition will really spread over. Reading the table's rows instead would
+    overstate the room by the ratio of the two -- fifty companies declared and
+    one pinned -- and an overstated capacity is a pigeonhole that fails to refuse
+    a shape which cannot fit.
+
+    Without it, the parent has to be declared here: a parent loaded by the caller
+    has however many rows it has, and this runs before anything is built.
+    """
+    if fan_out.parents is not None:
+        return len(fan_out.parents)
+    parent = cast("type[Model]", table.model._meta.get_field(column).related_model)
+    return rows_of.get(parent)
 
 
 def _produces_any(declared: object, values: tuple[object, ...]) -> bool | None:

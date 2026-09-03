@@ -19,6 +19,7 @@ class _Cursor:
 
     def execute(self, sql: str, params: Any = None) -> None:
         self.sql = sql
+        self.params = params
 
     def fetchall(self) -> list[tuple[int]]:
         return [(key,) for key in self._keys]
@@ -35,11 +36,16 @@ class _Connection:
 
     def __init__(self, keys: list[int]) -> None:
         self._keys = keys
+        self.last_sql = ""
+        self.last_params: Any = None
         self.ops = type("Ops", (), {"quote_name": staticmethod(lambda name: f'"{name}"')})()
 
     @contextmanager
     def cursor(self) -> Any:
-        yield _Cursor(self._keys)
+        cursor = _Cursor(self._keys)
+        yield cursor
+        self.last_sql = cursor.sql
+        self.last_params = cursor.params
 
 
 def _resolve(keys: list[int], rows: int, fan_out: FanOut | None = None) -> Any:
@@ -189,3 +195,49 @@ def test_a_childless_parent_is_never_the_group_a_row_is_attributed_to() -> None:
 
     assert 0 in plan.sizes()
     assert all(plan.group_position(row)[1] > 0 for row in range(200))
+
+
+def test_parents_narrows_which_keys_the_partition_covers() -> None:
+    # The narrowing is done by the database -- the statement carries the keys as
+    # parameters -- so what the stub hands back is what a server would have. What
+    # is checked here is that the partition covers exactly those.
+    plan = _resolve([20, 40], rows=2, fan_out=FanOut(Constant(1), parents=[20, 40]))
+
+    assert plan.parent_keys() == (20, 40)
+
+
+def test_the_statement_asks_for_only_the_named_parents() -> None:
+    connection = _Connection([20, 40])
+
+    resolve_fan_out(
+        FanOut(Constant(1), parents=[20, 40]),
+        Company,
+        2,
+        seed=7,
+        table="t",
+        field="company",
+        connection=connection,
+    )
+
+    assert "IN (%s, %s)" in connection.last_sql
+    assert connection.last_params == [20, 40]
+
+
+def test_a_named_parent_that_is_not_there_is_refused_by_key() -> None:
+    # The failure this has to catch loudly: a caller passes a primary key from
+    # another database, another test, or a factory whose row was rolled back.
+    # Every child that would have pointed at it silently goes somewhere else --
+    # or the table is empty, if it was the only key named.
+    with pytest.raises(InvalidShape) as raised:
+        _resolve([20], rows=2, fan_out=FanOut(Constant(1), parents=[20, 99]))
+
+    message = str(raised.value)
+    assert "99" in message
+    assert "Company" in message
+
+
+def test_the_refusal_names_every_missing_key_and_not_only_the_first() -> None:
+    # A list built from the wrong queryset is wrong in several places at once,
+    # and finding that out one round trip at a time is the slow way.
+    with pytest.raises(InvalidShape, match=r"98, 99"):
+        _resolve([], rows=2, fan_out=FanOut(Constant(1), parents=[98, 99]))

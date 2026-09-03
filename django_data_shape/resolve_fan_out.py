@@ -41,7 +41,8 @@ def resolve_fan_out(
     out of the parent table rather than recomputed from the parent's
     declaration, so a parent this package never built works identically.
     """
-    keys, parent_values = _read_parents(parent, parent_fields, connection)
+    keys, parent_values = _read_parents(parent, parent_fields, connection, fan_out.parents)
+    _require_every_named_parent(fan_out.parents, keys, parent, table, field)
 
     if not keys and rows:
         raise InvalidShape(
@@ -68,8 +69,51 @@ def resolve_fan_out(
     )
 
 
+def _require_every_named_parent(
+    named: tuple[object, ...] | None,
+    keys: list[int],
+    parent: type[Model],
+    table: str,
+    field: str,
+) -> None:
+    """Every key ``parents=`` named has to be a row, or the narrowing is a lie.
+
+    The database does the narrowing, so a key that matches nothing simply does
+    not come back -- and the rows that would have pointed at it go to whatever
+    else was named instead, or the table comes out empty if it was the only one.
+    Both are silent, and both produce a world the declaration does not describe.
+
+    The likely causes are worth the message: a primary key from another test, a
+    factory whose row was rolled back, or a list built from a queryset that was
+    filtered differently from the one in the reader's head. None of them is
+    visible in the shape.
+
+    **Every missing key, not the first.** A list built from the wrong queryset is
+    wrong in several places at once, and finding that out one round trip at a
+    time is the slow way to learn it.
+    """
+    if named is None:
+        return
+    missing = [key for key in named if key not in set(keys)]
+    if not missing:
+        return
+    raise InvalidShape(
+        f"{table}.{field} fans out over {parent.__name__} and names "
+        f"{', '.join(repr(key) for key in missing)} in parents=, which "
+        f"{'is not a row' if len(missing) == 1 else 'are not rows'} of "
+        f"{parent._meta.db_table}. A key that matches nothing is not an empty share -- the rows "
+        "that would have gone to it go to the other parents named instead, and to none at all if "
+        "it was the only one, so the world would be built and quietly not be the declared one. "
+        "The usual causes are a key from another test, a factory row that was rolled back, and a "
+        "list built from a queryset filtered differently from the one you meant."
+    )
+
+
 def _read_parents(
-    parent: type[Model], parent_fields: tuple[str, ...], connection: Any
+    parent: type[Model],
+    parent_fields: tuple[str, ...],
+    connection: Any,
+    named: tuple[object, ...] | None = None,
 ) -> tuple[list[int], dict[str, list[object]]]:
     """The parent's keys, and any of its columns a child derives from.
 
@@ -93,10 +137,26 @@ def _read_parents(
     if not parent_fields:
         pk_column = parent._meta.pk.column
         quote = connection.ops.quote_name
+        # The narrowing is a predicate rather than a filter applied afterwards,
+        # so a shape pinned to one tenant reads one row instead of every key in
+        # a table it is about to ignore. The keys go out as parameters, which is
+        # what keeps a caller's own primary key off the statement text.
+        # One placeholder per key rather than a single one for the whole list.
+        # A driver is free to adapt a Python list to its own array syntax --
+        # psycopg 3 does, and `IN '{1,2}'` is a syntax error -- and `= ANY(%s)`,
+        # which would take the array, is PostgreSQL's alone. This package
+        # generates on every backend, so the portable form is the one to write.
+        where = (
+            ""
+            if named is None
+            else f" WHERE {quote(pk_column)} IN ({', '.join(['%s'] * len(named))})"
+        )
+        params = None if named is None else list(named)
         with connection.cursor() as cursor:
             cursor.execute(
-                f"SELECT {quote(pk_column)} FROM {quote(parent._meta.db_table)} "
-                f"ORDER BY {quote(pk_column)}"
+                f"SELECT {quote(pk_column)} FROM {quote(parent._meta.db_table)}"
+                f"{where} ORDER BY {quote(pk_column)}",
+                params,
             )
             return [row[0] for row in cursor.fetchall()], {}
 
@@ -105,11 +165,10 @@ def _read_parents(
     # manager hides would point children at a subset while reporting the whole.
     # It is the manager Django itself uses to follow a relation, for the same
     # reason.
-    records = list(
-        parent._base_manager.using(connection.alias)
-        .order_by("pk")
-        .values_list("pk", *parent_fields)
-    )
+    queryset = parent._base_manager.using(connection.alias)
+    if named is not None:
+        queryset = queryset.filter(pk__in=list(named))
+    records = list(queryset.order_by("pk").values_list("pk", *parent_fields))
     return (
         [record[0] for record in records],
         {

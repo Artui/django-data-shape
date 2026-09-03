@@ -867,3 +867,40 @@ def test_the_pigeonhole_arithmetic_is_still_what_answers_first() -> None:
         )
 
     assert "fan-outs" not in str(raised.value)
+
+
+def test_a_narrowed_fan_out_is_weighed_on_the_parents_it_named() -> None:
+    # The capacity of a fan-out column is how many parents it can point at, and
+    # parents= makes that the named count rather than the parent's row count.
+    # Reading the table's rows here would overstate the room by the ratio of the
+    # two -- fifty companies declared, one pinned -- and an overstated capacity
+    # does not refuse a shape that cannot fit.
+    with pytest.raises(InvalidShape) as raised:
+        Shape(
+            _companies(50),
+            Table(
+                Seat,
+                rows=20,
+                company=FanOut(Constant(1), parents=[1]),
+                label=Skew({"a": 1, "b": 1}),
+            ),
+        )
+
+    message = str(raised.value)
+    assert "needs 20 distinct (company, label) combinations" in message
+    assert "can produce 2" in message
+
+
+def test_a_narrowed_fan_out_cannot_collide_on_the_parents_it_named() -> None:
+    # The same substitution on the exemption side: twenty rows over twenty named
+    # parents gives no parent two rows, whatever the parent table holds.
+    Shape(
+        _companies(50),
+        Table(
+            Membership,
+            rows=20,
+            company=FanOut(Constant(1), parents=list(range(1, 21))),
+            person=FanOut(Zipf()),
+            role=Constant("r"),
+        ),
+    )

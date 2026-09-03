@@ -173,3 +173,64 @@ def test_a_self_referential_fan_out_is_refused() -> None:
 
     with pytest.raises(InvalidShape, match="points at its own table"):
         Table(Referred, rows=5, label=Constant("x"), referrer=FanOut(Uniform(1, 2)))
+
+
+def test_every_row_can_be_pinned_to_one_pre_existing_parent() -> None:
+    """The declaration a tenant-scoped schema could not write.
+
+    Every heavy table in such a schema hangs off a tenant foreign key that has
+    to point at one company the caller's own fixture made, and a fan-out spread
+    over the whole parent table instead -- fifty rows landing 15/15/12/8 across
+    four tenants, with only the last eleven visible to the caller.
+
+    The parent here is made by the ORM rather than declared, which is the case
+    that matters: its key is whatever the sequence handed out, so the narrowing
+    has to be by real key rather than by position.
+    """
+    tenants = [Company.objects.create(name=f"tenant-{index}") for index in range(4)]
+    ours = tenants[2]
+
+    build_shape(
+        Shape(
+            Table(
+                Session,
+                rows=50,
+                company=FanOut(Constant(1), parents=[ours.pk]),
+                label=Constant("s"),
+            ),
+            seed=1,
+        )
+    )
+
+    assert Session.objects.count() == 50
+    assert set(Session.objects.values_list("company_id", flat=True)) == {ours.pk}
+
+
+def test_pinning_leaves_the_other_parents_alone_rather_than_childless() -> None:
+    """childless= is a share of the parents named, not of the table.
+
+    Worth pinning because the two readings differ in what they claim about the
+    rows nobody asked about: a parent outside parents= has no children because
+    it was not in the declaration, which is a different statement from a parent
+    weighed at zero, and only the second is what childless= describes.
+    """
+    tenants = [Company.objects.create(name=f"tenant-{index}") for index in range(4)]
+    named = [tenants[0].pk, tenants[1].pk]
+
+    build_shape(
+        Shape(
+            Table(
+                Session,
+                rows=40,
+                company=FanOut(Constant(1), parents=named, childless=0.5),
+                label=Constant("s"),
+            ),
+            seed=4,
+        )
+    )
+
+    used = set(Session.objects.values_list("company_id", flat=True))
+    assert used <= set(named)
+    # Half of the two named parents is one of them, and the unnamed pair is
+    # simply not part of this declaration at all.
+    assert len(used) == 1

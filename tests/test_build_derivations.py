@@ -222,3 +222,31 @@ def test_a_parent_hidden_by_its_own_default_manager_is_still_a_parent() -> None:
     # reporting the whole.
     assert len({supply.vendor_id for supply in supplies}) == 4
     assert all(supply.vendor_name == supply.vendor.name for supply in supplies)
+
+
+def test_a_narrowed_fan_out_derives_from_the_parents_it_named() -> None:
+    """``parents=`` and a parent-scoped derivation take the ORM route together.
+
+    The keys and the values come back from one query, so the narrowing has to
+    reach both -- a partition over two vendors reading names from all four would
+    line the wrong name up against the wrong key, which is the failure a
+    derivation exists to prevent rather than cause.
+    """
+    vendors = [Vendor.objects.create(name=f"v{index}") for index in range(4)]
+    named = [vendors[1].pk, vendors[3].pk]
+
+    build_shape(
+        Shape(
+            Table(
+                Supply,
+                rows=200,
+                vendor=FanOut(Uniform(1, 2), parents=named),
+                vendor_name=Derived("vendor.name", compute=str, scope="parent"),
+            ),
+            seed=2,
+        )
+    )
+
+    supplies = list(Supply.objects.select_related("vendor").all())
+    assert {supply.vendor_id for supply in supplies} == set(named)
+    assert all(supply.vendor_name == supply.vendor.name for supply in supplies)
