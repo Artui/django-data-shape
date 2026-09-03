@@ -39,6 +39,7 @@ from django_data_shape.keys.md5_keys import Md5Keys
 from django_data_shape.keys.sequential_keys import SequentialKeys
 from django_data_shape.keys.sql_keys import SqlKeys
 from django_data_shape.keys.uuid_keys import UuidKeys
+from django_data_shape.paired import Paired
 from django_data_shape.projection import Projection
 from django_data_shape.require_clone_strategy import require_clone_strategy
 from django_data_shape.scale_protocol import ScaleProtocol
@@ -79,6 +80,7 @@ __all__ = [
     "KeyFunction",
     "Md5Keys",
     "KeyStrategy",
+    "Paired",
     "PerParent",
     "Projection",
     "ScaleProtocol",

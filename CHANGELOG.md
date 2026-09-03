@@ -8,6 +8,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`Paired` fills the second key of a many-to-many, and the edge count stays
+  exact.** Two fan-outs on one through table are refused because a fan-out is a
+  partition computed from the row index alone, so two of them partition the same
+  rows without either seeing the other -- nothing enumerates the pairs and a
+  collision is a matter of the seed. `person=Paired("company", Zipf())` is the
+  half that looks: `company` partitions the rows as any fan-out does, and within
+  each of its groups `person` takes that many **distinct** partners. A duplicate
+  pair is impossible by construction rather than removed afterwards, so nothing
+  is deduplicated and the build never reports an achieved count against a
+  requested one. The design notes for this milestone had given that up; they
+  were wrong, and the rule that cardinality is declared survives M2M.
+  - **What binds is the busiest group, not the product.** Every row of one
+    group needs a different partner, so the constraint is
+    `largest group <= partners` rather than `rows <= groups x partners` -- and a
+    heavy tail puts a large share of every edge on one group, `Zipf(1.2)` over
+    five thousand of them putting 21% on the top one. A declaration that looks
+    sparse against the product can still be impossible, and it cannot be known
+    until the partition is resolved: this is the one structural refusal that
+    waits for the build rather than firing where the shape is written.
+  - **The second side is derived and approximate, and the numbers are
+    published.** Both marginals plus the edge count is over-determined, and
+    fixing all three is a constraint satisfaction problem that cannot stream
+    into `COPY`. Measured against exact weighted sampling over 200,000 edges,
+    the busiest partner comes out 1.09 times as busy, the 99th percentile about
+    30% high, and about 7% fewer partners are touched.
+  - **Partners are allocated across weight bands and strided within one**, so
+    nothing is ever drawn and asked whether it is taken. Rejection sampling
+    degenerates exactly where the shape is most interesting -- 245 probes per
+    row on that world -- and the usual fix, sampling the ones to leave out when
+    a group wants more than half, is ten times faster and **a different sampling
+    rule**, so a group one row over the halfway mark would get a materially
+    different membership from one row under. The band count is **derived from
+    the declared weights** rather than chosen, which systematic allocation is
+    what makes possible: it converges as bands get finer where largest-remainder
+    runs away, so "enough" is a limit rather than a number somebody tuned.
+- **`FanOutPlan.group_of`** answers which parent a row belongs to, which a
+  pairing needs to choose partners inside this row's group.
+
+### Changed
+- **The two-fan-out refusal names the declaration that replaces it.** Its remedy
+  used to be a statement of your own, because nothing else could keep the
+  constraint. It now names `Paired` first and keeps `Projection(columns=, sql=)`
+  as the escape hatch for an edge set that has to be a particular one.
+
+
+### Added
 - **`Projection(..., through=Model)` says which model a derived join runs on.**
   An abstract base carrying `created_by`/`updated_by` to `User` -- a pattern most
   Django schemas have -- makes **any two models in the schema joinable**, so the

@@ -227,6 +227,72 @@ uniformly in expectation, not exactly. `counts.null_share` is the share it was
 thinned by, and it is `0.0` whenever these numbers are row counts. The ranking is
 unaffected either way, which is what the head and the tail are read for.
 
+## Many-to-many, and the second key of an edge table
+
+Two fan-outs on one through table are refused, and the reason is the reason a
+pairing exists: a fan-out is a partition computed from the row index alone, so
+two of them partition the same rows without either seeing the other. Nothing
+enumerates the pairs, and whether two rows collide is a matter of the seed.
+
+`Paired` is the half that looks:
+
+```python
+Table(
+    Membership,
+    rows=50_000,
+    company=FanOut(Zipf()),
+    person=Paired("company", Zipf()),
+    role=Constant("member"),
+)
+```
+
+`company` partitions the rows as any fan-out does — that is the **declared**
+degree distribution, and it is exact. Within each of its groups, `person` takes
+that many **distinct** partners, so a duplicate pair is impossible by
+construction rather than removed afterwards. The edge count is therefore exactly
+`rows`: nothing is deduplicated, and the build never reports an achieved count
+against a requested one.
+
+### What binds is the busiest group, not the product
+
+Every row of one group needs a different partner, so the constraint is
+**`largest group ≤ partners`** — not `rows ≤ companies × people`, which is far
+larger and would let impossible shapes through.
+
+A heavy tail puts a large share of every edge on one group: `Zipf(1.2)` over
+5,000 companies puts **21% of the edges on the top one**. So 50,000 edges over
+20,000 people means one company needs 10,681 distinct people, and a declaration
+that looks sparse against the product is still refused. It cannot be known until
+the partition is resolved, so this is the one structural refusal that waits for
+the build rather than firing at declaration time.
+
+### The second side is derived, and approximate
+
+Both marginals plus the edge count is over-determined — fixing all three is a
+constraint satisfaction problem, and a CSP cannot stream into `COPY`. So the
+edge count and one side's distribution are declared, and the other follows.
+
+What follows *approximates* `weights` rather than reproducing it. Measured
+against exact weighted sampling without replacement, over 200,000 edges:
+
+| | exact sampling | what this builds |
+| --- | --- | --- |
+| busiest partner | 4,774 | 5,223 (1.09×) |
+| 99th percentile | 37 | 48 |
+| partners touched | 44,758 | 41,571 |
+
+It concentrates somewhat more than exact sampling, consistently and boundedly.
+The numbers are here rather than only in the code because a derived shape nobody
+quotes is a shape nobody can check.
+
+It is an approximation with **no tuning parameter**, which is the bar the
+alternatives failed: choosing partners one at a time and rejecting duplicates
+costs 245 probes per row on that world, and the usual fix — sampling the ones to
+leave out when a group wants more than half — is ten times faster and *a
+different sampling rule*, so a group one row over the halfway mark would get a
+materially different membership from one row under. A cliff at an arbitrary size
+that no declaration mentions is not something this package will build.
+
 ## Placement — where the children physically sit
 
 `placement` decides the order children are written in, and it is not cosmetic.
