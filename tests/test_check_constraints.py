@@ -35,6 +35,8 @@ from tests.testapp.models import (
     Event,
     EventSession,
     Invitation,
+    Membership,
+    Person,
     Project,
     Seat,
     Template,
@@ -299,3 +301,59 @@ def test_a_projection_is_skipped_entirely() -> None:
     )
 
     assert len(shape.tables) == 5
+
+
+def test_two_fan_outs_under_one_uniqueness_are_refused_by_name() -> None:
+    # The through table of a many-to-many, and the case the arithmetic cannot
+    # see: twenty companies and twenty people leave four hundred pairs for two
+    # hundred rows, so the pigeonhole check passes it and the load dies inside
+    # COPY on a unique violation, at a row number that moves with the seed.
+    # Room was never the question -- nothing enumerates the combinations.
+    with pytest.raises(InvalidShape, match="one_membership_per_company_person") as raised:
+        Shape(
+            _companies(20),
+            Table(Person, rows=20, name=Constant("p")),
+            Table(
+                Membership,
+                rows=200,
+                company=FanOut(Zipf()),
+                person=FanOut(Zipf()),
+                role=Constant("member"),
+            ),
+        )
+
+    message = str(raised.value)
+    assert "Membership.company, Membership.person are fan-outs" in message
+    # And it points at the form that does build one today, rather than leaving a
+    # reader to discover that the escape hatch is also the answer.
+    assert "Projection(Membership, columns=(...), sql=...)" in message
+
+
+def test_a_single_fan_out_under_a_uniqueness_is_a_different_question() -> None:
+    # One fan-out and one bounded column is what the pigeonhole arithmetic is
+    # for, and it is left to it: this refusal is about two partitions of the
+    # same rows, computed without either seeing the other.
+    Shape(
+        _companies(50),
+        Table(Seat, rows=100, company=FanOut(Zipf()), label=Skew({"a": 1, "b": 1})),
+    )
+
+
+def test_the_pigeonhole_arithmetic_is_still_what_answers_first() -> None:
+    # Both refusals apply to this declaration, and the arithmetic is the more
+    # useful of the two: it says the shape does not fit at all, which is a
+    # different instruction from "it fits and nothing arranges it".
+    with pytest.raises(InvalidShape, match="can produce 25") as raised:
+        Shape(
+            _companies(5),
+            Table(Person, rows=5, name=Constant("p")),
+            Table(
+                Membership,
+                rows=200,
+                company=FanOut(Zipf()),
+                person=FanOut(Zipf()),
+                role=Constant("member"),
+            ),
+        )
+
+    assert "fan-outs" not in str(raised.value)

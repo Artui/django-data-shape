@@ -32,7 +32,10 @@ from django_data_shape import (
 )
 from tests.testapp.models import (
     Company,
+    CompanyProxy,
     Defaulted,
+    DeliveryDocument,
+    Memo,
     Order,
     Project,
     Referred,
@@ -211,8 +214,24 @@ def test_omitting_a_required_relation_is_refused_like_declaring_one() -> None:
     # and reached COPY to die there on a not-null violation. Both directions
     # have to refuse, or the contract only holds for callers who tried the
     # unsupported thing explicitly.
-    with pytest.raises(InvalidShape, match="relation that cannot be null"):
+    with pytest.raises(InvalidShape, match="Project.company cannot be null"):
         Table(Project, rows=1, status=Constant("ACTIVE"), created_at=Sequential(0, 1))
+
+
+def test_a_forgotten_foreign_key_is_told_how_to_declare_one() -> None:
+    # The commonest possible mistake, and so the first thing many readers ever
+    # see this package say. It used to say relations were unsupported and that
+    # fan-out was coming in the next release -- true when it was written, wrong
+    # from the release after, and read by a first-time user as "this package
+    # cannot do the thing it is for". The remedy has to be in the message, and
+    # named after the field that is missing rather than in the abstract.
+    with pytest.raises(InvalidShape) as raised:
+        Table(Project, rows=1, status=Constant("ACTIVE"), created_at=Sequential(0, 1))
+
+    message = str(raised.value)
+    assert "company=FanOut(Zipf())" in message
+    assert "not supported" not in message
+    assert "next release" not in message
 
 
 def test_a_nullable_relation_may_be_omitted_and_loads_null() -> None:
@@ -550,3 +569,54 @@ def test_ordering_a_group_under_grouped_placement_is_accepted() -> None:
     )
 
     assert table.computation_order() == ("status",)
+
+
+def test_multi_table_inheritance_is_refused_and_says_so() -> None:
+    # It had no working spelling at all. Declaring the parent's columns was
+    # accepted -- _meta.concrete_fields spans both tables -- and then the
+    # statistics pass read the child table's own catalogue and raised a bare
+    # KeyError from inside the loader, naming neither the model, the column nor
+    # inheritance. Omitting them instead hit the missing-column refusal, which
+    # is a true sentence about a column that is not the child's to fill.
+    with pytest.raises(InvalidShape, match="multi-table inheritance") as raised:
+        Table(
+            DeliveryDocument,
+            rows=5,
+            title=Constant("t"),
+            tracking=Constant("x"),
+        )
+
+    message = str(raised.value)
+    assert "Document" in message
+    assert "testapp_deliverydocument holds document_ptr_id, tracking" in message
+    assert "testapp_document holds id, title" in message
+
+
+def test_multi_table_inheritance_is_refused_before_anything_else_is_read() -> None:
+    # Declaring nothing at all reaches the same refusal rather than a complaint
+    # about title, which is a column this declaration could never have filled
+    # from here. A reader told to declare it would declare it and be no better
+    # off, which is the shape of an error that knows less than it says.
+    with pytest.raises(InvalidShape, match="multi-table inheritance"):
+        Table(DeliveryDocument, rows=5)
+
+
+def test_abstract_inheritance_is_not_the_refused_kind() -> None:
+    # By far the commoner inheritance, and a refusal that caught it would be a
+    # serious regression: Django copies an abstract base's fields onto the
+    # child, so every column belongs to the child's own table and nothing lands
+    # next door. The two kinds are told apart by which table a field's own model
+    # writes to, which is the only test that separates them.
+    table = Table(Memo, rows=5, body=Constant("b"), created_at=Sequential(0, 1))
+
+    assert [name for name, _ in table.columns()] == ["body", "created_at"]
+
+
+def test_a_proxy_declares_the_table_it_proxies() -> None:
+    # Not the inherited case, and it must not be caught by it: a proxy adds no
+    # column and no table, so a shape naming one is a shape about the table it
+    # proxies. _meta.parents is populated for a proxy too, which is why the test
+    # is which table a field's own model writes to.
+    table = Table(CompanyProxy, rows=5, name=Constant("acme"))
+
+    assert table.db_table == Company._meta.db_table

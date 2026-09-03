@@ -7,6 +7,7 @@ from collections.abc import Sequence
 from django_data_shape.check_constraints import check_constraints
 from django_data_shape.invalid_shape import InvalidShape
 from django_data_shape.invariant import Invariant
+from django_data_shape.order_tables import order_tables
 from django_data_shape.projection import Projection
 from django_data_shape.table import Table
 
@@ -49,6 +50,15 @@ class Shape:
     ``one_active_project_per_company permits at most 50,000`` is arithmetic that
     needs both. See
     :func:`~django_data_shape.check_constraints.check_constraints`.
+
+    **Load order is checked here too, for the same reason.** Which declaration
+    can be filled first is decided by the declarations alone -- a fan-out reads
+    its parent, a projection selects from what it names -- so a set of them that
+    each have to come after another is refusable without a connection. It was
+    the one purely structural refusal this package left until build time, which
+    meant a shape could be constructed, cached and passed around for a while
+    before saying it could never be built. See
+    :func:`~django_data_shape.order_tables.order_tables`.
     """
 
     def __init__(
@@ -69,6 +79,13 @@ class Shape:
                 )
             seen[key] = table
         check_constraints(tables)
+        # For the refusal, not for the order -- the result is discarded exactly
+        # as ``check_constraints`` returns nothing. Load order is structural: it
+        # reads the declarations and nothing else, so a cycle among them is
+        # decidable here, and it was the one purely structural refusal this
+        # package deferred to build time. A shape stays inert data, so the plan
+        # is not kept; the build recomputes it from these same declarations.
+        order_tables(tables)
         self._tables = tables
         self._seed = seed
         self._invariants = tuple(invariants)

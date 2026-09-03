@@ -283,6 +283,17 @@ naming the field. In particular:
 - **A derivation that queries the database.** The generation pass is guarded, so
   the rule is a refusal rather than advice. Read what you need before the build
   and close over it.
+- **One table per declaration.** A model using multi-table inheritance puts one
+  logical row in two tables sharing a key, and this package owns each table's
+  keys, so it can write either half and has nothing to pair them with. It is
+  refused by name. Abstract bases and proxies are ordinary single-table models
+  and are fine.
+- **A uniqueness it can keep.** A multi-column `UniqueConstraint` over two
+  fan-outs -- the through table of a many-to-many -- fits comfortably and still
+  cannot be built: two partitions of the same rows are computed without either
+  seeing the other, so a collision is a matter of the seed. It is refused at
+  declaration time, pointing at the `Projection` with your own `sql=` that
+  builds a deduplicated edge table today.
 
 ## Status
 

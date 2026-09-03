@@ -30,7 +30,8 @@ def check_constraints(tables: tuple[Table | Projection, ...]) -> None:
     only sometimes applies cannot answer that -- so it skips exactly the case
     this function is for. ``_meta.constraints`` is read directly.
 
-    Two arithmetics, and they differ in how certain they are.
+    Three checks, and they differ in how certain they are and in what they are
+    counting.
 
     **An unconditional ``UniqueConstraint`` is pigeonhole**, and provable. Two
     million rows needing distinct ``(company, label)`` pairs cannot be built
@@ -39,6 +40,14 @@ def check_constraints(tables: tuple[Table | Projection, ...]) -> None:
     :meth:`~django_data_shape.table.Table._check_satisfiable` declines to
     attempt, and it declines for a good reason: a table alone does not know how
     many companies there are. A whole shape does, which is why this runs here.
+
+    **Enough room is not a way to fill it**, which is the second check and the
+    one no arithmetic reaches. An unconditional constraint over two fan-outs --
+    the through table of a many-to-many -- passes the pigeonhole comfortably,
+    because the product of two parent counts dwarfs the row count, and still
+    cannot be built: two partitions of the same rows are computed independently,
+    so the pairs they produce are an artefact of the row index and a collision
+    is a matter of the seed. It is refused rather than counted.
 
     **A conditional ``UniqueConstraint`` is a statement about a group**, and the
     refusal is categorical rather than arithmetic. ``one_active_project_per_company``
@@ -87,6 +96,7 @@ def _check_one(table: Table, constraint: UniqueConstraint, rows_of: dict[type[Mo
     capacity = _capacity(table, fields, rows_of)
     if constraint.condition is None:
         _check_unconditional(table, constraint.name, fields, capacity)
+        _check_independent_fan_outs(table, constraint.name, fields)
         return
     decoded = _equality(constraint.condition)
     if decoded is None:
@@ -110,6 +120,51 @@ def _check_unconditional(
         f"{table.model.__name__}, and this shape can produce {capacity}. Two rows would have to "
         "share a combination, so the database refuses the load however the seed falls. Widen a "
         "distribution, build more parents, or lower rows."
+    )
+
+
+def _check_independent_fan_outs(table: Table, name: str, fields: tuple[str, ...]) -> None:
+    """Two fan-outs over one constraint: enough room, and nothing to arrange it.
+
+    The through table of a many-to-many, which is the shape this reaches first
+    and the one it was written for. ``Membership(project, person)`` is unique on
+    the pair, both columns are relations, so both are fan-outs -- and the
+    pigeonhole check above passes it happily, because fifty projects and two
+    hundred people leave ten thousand pairs for five hundred rows.
+
+    Room is not the question. A fan-out is a **partition of this table's rows
+    over one parent's keys**, computed from the row index and from nothing else,
+    which is what lets a child's foreign key be satisfied with no lookup and no
+    global solve. Two of them partition the same rows independently and neither
+    can see the other's assignment, so which pairs come out together is an
+    artefact of the row index. Whether two rows land on the same pair is then a
+    matter of the seed, and the load dies inside ``COPY`` at a row number that
+    moves when the seed does.
+
+    That is why this is a refusal and not a wider capacity calculation: no
+    arithmetic over the two marginals decides it, because the failure is that
+    nothing enumerates the combinations at all. Deduplicated edges are a
+    different algorithm rather than a bigger loop, and until they arrive the
+    thing that works is a statement --
+    :class:`~django_data_shape.projection.Projection` with ``columns=`` and
+    ``sql=`` fills the table from a select that can deduplicate.
+    """
+    fanned = sorted(name for name in fields if isinstance(table.fields.get(name), FanOut))
+    if len(fanned) < 2:
+        return
+    where = table.model.__name__
+    raise InvalidShape(
+        f"{name} needs every ({', '.join(fields)}) combination distinct, and "
+        f"{', '.join(f'{where}.{column}' for column in fanned)} are fan-outs. A fan-out is a "
+        "partition of this table's rows over one parent's keys, computed from the row index "
+        "alone, so two of them partition the same rows without either seeing the other: which "
+        "pairs come out together is an artefact of that index, and two rows sharing a pair is a "
+        "matter of the seed. The combinations do fit, which is why the pigeonhole arithmetic "
+        "lets this through -- what is missing is anything that enumerates them, and the load "
+        "then fails inside COPY at a row number that moves when the seed does. A deduplicated "
+        f"edge table is filled by a statement rather than by two draws: Projection({where}, "
+        "columns=(...), sql=...) selects the pairs already distinct, which is the form that "
+        "keeps this constraint today."
     )
 
 

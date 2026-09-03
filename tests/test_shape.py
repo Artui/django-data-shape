@@ -4,8 +4,17 @@ from __future__ import annotations
 
 import pytest
 
-from django_data_shape import Constant, FanOut, InvalidShape, Projection, Shape, Table, Zipf
-from tests.testapp.models import Company, Event, EventSession, TemplateSession
+from django_data_shape import (
+    Constant,
+    FanOut,
+    InvalidShape,
+    Projection,
+    Shape,
+    Table,
+    Uniform,
+    Zipf,
+)
+from tests.testapp.models import Company, Event, EventSession, Left, Right, TemplateSession
 
 
 def _company(rows: int = 1) -> Table:
@@ -59,4 +68,16 @@ def test_a_model_declared_as_both_a_table_and_a_projection_is_refused() -> None:
                 EventSession, rows=5, event=FanOut(Zipf()), title=Constant("s"), minutes=Constant(1)
             ),
             Projection(EventSession, per=Event, copying=TemplateSession),
+        )
+
+
+def test_a_load_order_cycle_is_refused_where_the_shape_is_declared() -> None:
+    # The last purely structural refusal this package deferred to build time.
+    # Which declaration can be filled first is decided by the declarations and
+    # nothing else, so a shape that could never be built was being constructed,
+    # hashed and passed around before anything said so.
+    with pytest.raises(InvalidShape, match="cycle"):
+        Shape(
+            Table(Left, rows=5, right=FanOut(Uniform(1, 2))),
+            Table(Right, rows=5, left=FanOut(Uniform(1, 2))),
         )

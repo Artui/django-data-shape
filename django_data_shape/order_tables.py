@@ -34,14 +34,33 @@ def order_tables(tables: tuple[Table | Projection, ...]) -> tuple[Table | Projec
     graph at once costs nothing here and removes the restriction: a projection
     is just another node with edges to what it reads.
 
-    A statement this package did not write -- ``Projection(..., sql=...)`` --
-    names nothing it reads, because nothing here parses SQL. It is ordered after
-    every table and every derived projection instead, which is the only safe
-    reading of "this could select from anything". Two of them have no edge
-    between them and keep the order they were declared in.
+    **An edge is a claim, and only a declaration gets to make one.** A statement
+    this package did not write -- ``Projection(..., sql=...)`` without
+    ``reads=`` -- names nothing, because nothing here parses SQL, and the only
+    safe reading of "this could select from anything" is to run it as late as
+    possible. That is a *preference*, and expressing it as edges to every other
+    declaration is what made this pass report a cycle that did not exist: a
+    table fanning out over a raw projection was told ``A -> B -> A`` when the
+    two form a chain, with no ``after=`` anywhere for the caller to correct it
+    with. So the preference is expressed as a visit order instead. The graph
+    holds declared edges only, and the sweep below reaches every declaration
+    that says what it reads before it reaches any statement that does not --
+    which puts an opaque projection last where nothing needs it, and directly
+    before its dependents where something does. A preference cannot contradict
+    another preference; an edge can, and did.
 
-    A cycle is refused by name. Two declarations that each read the other cannot
-    both be filled second, and no amount of deferring changes that.
+    ``reads=`` is how a raw statement rejoins the graph properly. Without it,
+    being ordered early enough for a dependent may put it *before* a table it
+    selects from, which the build catches as a projection that inserted
+    nothing -- a loud failure, but one the caller can now prevent by naming its
+    inputs.
+
+    A cycle is refused by name, and now only a declared one can be: two
+    declarations that each say they read the other cannot both be filled second,
+    and no amount of deferring changes that. Because the refusal is structural
+    and reads nothing but the declarations, it is raised when the
+    :class:`~django_data_shape.shape.Shape` is built rather than when the build
+    starts.
     """
     by_model: dict[type[Model], Table | Projection] = {table.model: table for table in tables}
     ordered: list[Table | Projection] = []
@@ -60,35 +79,43 @@ def order_tables(tables: tuple[Table | Projection, ...]) -> tuple[Table | Projec
         state[table] = 1
         # No self-edge to skip. A self-referential ``FanOut`` is refused by
         # ``Table``, a projection reading the table it fills is refused by
-        # ``Projection``, and a raw projection is left out of its own dependency
-        # list below -- so guarding against one here would be a branch no
-        # declaration can reach. The day self-referential trees arrive, this is
-        # the line that has to learn about them.
-        for dependency in _dependencies(table, by_model, tables):
+        # ``Projection`` -- through ``per``/``copying`` and through ``reads=``
+        # alike -- so guarding against one here would be a branch no declaration
+        # can reach. The day self-referential trees arrive, this is the line
+        # that has to learn about them.
+        for dependency in _dependencies(table, by_model):
             visit(dependency, (*trail, table))
         state[table] = 2
         ordered.append(table)
 
+    # Two sweeps rather than one, and this is where "as late as possible" is
+    # decided. Everything that says what it reads goes first, so a statement
+    # that says nothing is reached only after them -- and is then already
+    # placed, if something declared it reads this table and pulled it in early.
+    for table in tables:
+        if not _is_opaque(table):
+            visit(table, ())
     for table in tables:
         visit(table, ())
     return tuple(ordered)
 
 
 def _dependencies(
-    table: Table | Projection,
-    by_model: dict[type[Model], Table | Projection],
-    everything: tuple[Table | Projection, ...],
+    table: Table | Projection, by_model: dict[type[Model], Table | Projection]
 ) -> list[Table | Projection]:
-    """The declarations ``table`` has to be filled after.
+    """The declarations ``table`` says it has to be filled after.
 
     A model that is not in the shape is a table the caller built themselves,
     which is the supported hybrid: the ORM for the small tables, this package
     for the large ones. Its rows are read when the time comes, and nothing here
     has to order it.
+
+    One expression covers both kinds of projection because ``reads`` already
+    does: a derived one answers with the two models it joins, a raw one with
+    whatever ``reads=`` declared, and a raw one that declared nothing answers
+    with nothing and gets no edges at all.
     """
     if isinstance(table, Projection):
-        if not table.reads:
-            return [other for other in everything if other is not table and not _is_opaque(other)]
         return [by_model[model] for model in table.reads if model in by_model]
 
     parents: list[Table | Projection] = []

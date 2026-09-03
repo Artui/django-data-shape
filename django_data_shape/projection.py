@@ -13,6 +13,7 @@ from django_data_shape.invalid_shape import InvalidShape
 from django_data_shape.keys.key_strategy import KeyStrategy
 from django_data_shape.keys.sql_keys import SqlKeys
 from django_data_shape.utils import (
+    check_not_inherited,
     check_statistics_target,
     field_stream,
     has_db_default,
@@ -143,6 +144,18 @@ class Projection:
     still gives it the emptiness check, the sequence reset, the ``ANALYZE`` and
     the transaction.
 
+    **``reads=`` is how such a statement says what it selects from**, and it
+    goes with ``sql=`` rather than being an alternative to it. Nothing here
+    parses SQL, so a raw statement is opaque and
+    :func:`~django_data_shape.order_tables.order_tables` runs it as late as the
+    rest of the declaration allows. That is right until something fans out over
+    this table: the projection then has to run *before* that table, and may find
+    the tables it selects from still empty. Naming them puts it back in the
+    graph precisely -- after what it reads, before what reads it -- and it is
+    part of the cache key, because a statement run before and after a table
+    returns different rows. A derived projection has no use for it: ``per`` and
+    ``copying`` already are the answer.
+
     Like :class:`~django_data_shape.shape.Shape` and
     :class:`~django_data_shape.table.Table`, this is inert data: every attribute
     is read-only and every derived plan is a tuple, so a declaration stays
@@ -159,6 +172,7 @@ class Projection:
         columns: Sequence[str] | None = None,
         sql: str | None = None,
         params: Sequence[object] = (),
+        reads: Sequence[type[Model]] = (),
         keys: KeyStrategy | None = None,
         statistics: Mapping[str, int] | None = None,
     ) -> None:
@@ -167,6 +181,7 @@ class Projection:
         self._copying = copying
         self._sql = sql
         self._params = tuple(params)
+        self._reads: tuple[type[Model], ...] = tuple(reads)
         self._statistics = dict(statistics or {})
         self._copied: tuple[tuple[str, str, str], ...] = ()
         self._literals: tuple[tuple[str, object], ...] = ()
@@ -174,6 +189,11 @@ class Projection:
         self._join: tuple[str, str] = ("", "")
         self._keys: SqlKeys | None = None
 
+        # Before anything reads the model's fields, for the reason ``Table``
+        # runs it first: under multi-table inheritance ``_meta.concrete_fields``
+        # spans two tables and every column decision below would be made about
+        # the wrong one.
+        check_not_inherited(model)
         pk_field = primary_key_field(model)
         if sql is None:
             self._derive(pk_field, columns, keys)
@@ -206,15 +226,16 @@ class Projection:
 
     @property
     def reads(self) -> tuple[type[Model], ...]:
-        """The models this projection selects from, or nothing for a raw one.
+        """The models this projection selects from, or nothing if it did not say.
 
         What :func:`~django_data_shape.order_tables.order_tables` sorts on. A
         derived projection names its two inputs, so it can be ordered after them
-        precisely; a statement this package did not write names nothing, and is
-        ordered after everything instead.
+        precisely. A statement this package did not write is opaque -- nothing
+        here parses SQL -- so a raw projection answers with whatever ``reads=``
+        declared, and with nothing at all when it declared nothing.
         """
         if self._sql is not None:
-            return ()
+            return self._reads
         return (cast("type[Model]", self._per), cast("type[Model]", self._copying))
 
     def statement(self, connection: Any, seed: int) -> tuple[str, tuple[object, ...]]:
@@ -286,6 +307,13 @@ class Projection:
             raise InvalidShape(
                 f"{self._model.__name__} declares params= without sql=. Parameters belong to a "
                 "statement, and this projection's statement is derived rather than given."
+            )
+        if self._reads:
+            raise InvalidShape(
+                f"{self._model.__name__} declares reads= without sql=. A derived projection "
+                "already names everything it selects from -- per= and copying= are the two -- so "
+                "reads= would be a second, quieter answer to a question already answered. It "
+                "exists for a statement this package cannot read."
             )
         if self._copying is self._model or self._per is self._model:
             raise InvalidShape(
@@ -377,6 +405,13 @@ class Projection:
                 "are what the insert lists, and this package will not guess at the order they "
                 "come out in."
             )
+        if self._model in self._reads:
+            raise InvalidShape(
+                f"{self._model.__name__} names itself in reads=. A projection fills an empty "
+                "table by reading tables already built, so a table that reads itself reads "
+                "nothing -- and load order has no answer for a declaration that has to come "
+                "after itself."
+            )
         known = {field.name: field for field in self._model._meta.concrete_fields}
         unknown = sorted(name for name in columns if name not in known)
         if unknown:
@@ -435,6 +470,10 @@ class Projection:
             self._columns,
             self._sql,
             self._params,
+            # In the key although it writes no column, because it decides load
+            # order and load order reaches the data: a raw statement selecting
+            # from a table built before it and after it returns different rows.
+            tuple(str(model._meta.label) for model in self._reads),
             self._copied,
             self._literals,
             self._join,

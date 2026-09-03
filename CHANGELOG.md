@@ -7,7 +7,72 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`Projection(..., reads=(Model, ...))` says what a statement of your own
+  selects from.** Nothing here parses SQL, so a raw `sql=` projection was a
+  black box that could only be run last -- and last stopped being right the
+  moment something fanned out over the table it fills, because the projection
+  then has to run *before* that table and may find its own inputs still empty.
+  `reads=` puts it back in the graph precisely: after what it reads, before what
+  reads it. It is part of the declaration the template-database cache keys on,
+  because the same statement run before and after a table selects different
+  rows. Declaring it on a derived projection is refused -- `per=` and `copying=`
+  already are that answer -- and so is naming the projected model itself, which
+  would otherwise have surfaced as a cycle from inside the ordering pass.
+
+### Changed
+- **A load-order cycle is refused where the `Shape` is declared, not where the
+  build starts.** Which table can be filled first is decided by the declarations
+  and needs no connection to answer, so this was the one purely structural
+  refusal left until build time: a shape that could never be built could be
+  constructed, digested and passed around before anything said so.
+
 ### Fixed
+- **A table fanning out over a raw `sql=` projection is no longer reported as a
+  cycle that does not exist.** The refusal read
+  `Assignment -> TimeEntry -> Assignment` for what is a chain, and there was no
+  `after=` or `reads=` anywhere for the caller to correct it with. The cause was
+  "a raw projection is ordered after every table" being expressed as an edge to
+  every other declaration: an edge is a claim, it met the caller's own declared
+  edge coming back, and the cycle detector was right about the graph it was
+  given. Running such a statement last is a **preference**, so it is expressed
+  as a visit order instead -- the graph now holds declared edges only, and
+  everything that says what it reads is placed before anything that does not. A
+  preference cannot contradict a declared edge, and two preferences that
+  contradict each other are simply both dropped rather than reported as
+  impossible.
+- **Multi-table inheritance is refused by name instead of raising a bare
+  `KeyError` from inside the loader.** `_meta.concrete_fields` for an inheriting
+  child spans two tables while `db_table` names one, so declaring the parent's
+  columns was accepted and then failed in the statistics pass with `KeyError:
+  'title'` -- no message, no field, no mention of inheritance -- while omitting
+  them hit a required-column refusal about a column the child could never have
+  filled. There was therefore no working spelling at all. Both routes into a
+  table, `Table` and `Projection`, now refuse the model up front and say what
+  the obstruction is: one logical row is two physical rows sharing a key, this
+  package fills one table per declaration and owns that table's keys, and
+  declaring the two halves separately does not help because the child's primary
+  key is a foreign key to the parent and a fan-out is a partition rather than a
+  bijection. A proxy model is not this case and stays declarable.
+- **A through table whose uniqueness spans two fan-outs is refused at
+  declaration time instead of dying inside `COPY`.** The pigeonhole pre-check
+  passed it happily, and correctly: the product of two parent counts dwarfs the
+  row count, so there is ample room. Room was never the question. A fan-out is a
+  partition of this table's rows over one parent's keys, computed from the row
+  index alone, so two of them partition the same rows without either seeing the
+  other -- which pairs come out together is an artefact of that index, and a
+  collision is a matter of the seed. The refusal names the constraint, both
+  fan-outs, and the form that does build a deduplicated edge table today: a
+  `Projection` with `columns=` and your own `sql=`.
+- **A forgotten foreign key is told how to declare one, rather than told that
+  relations are unsupported.** The message said "relations are not supported
+  yet, so this shape cannot be built. Declaring fan-out as a distribution is the
+  next release" -- true when it was written, wrong from the release after, and
+  still there several releases later. Forgetting one required foreign key is the
+  commonest possible mistake, so it is the first thing many readers ever see
+  this package say, and what it said was that the package could not do the thing
+  it exists for. It now names the column, the fan-out that fills it, and where
+  the parent's keys have to come from.
 - **`scaled_shape` no longer drops the rules and targets the shape declared.**
   It rebuilt each `Table` without `statistics` and the `Shape` without
   `invariants`, so a business rule stopped being checked in every scaled world --

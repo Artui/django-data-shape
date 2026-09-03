@@ -152,6 +152,16 @@ how many companies there are.
   million rows needing distinct `(company, label)` pairs cannot be built from
   fifty thousand companies and three labels, whatever the seed. This is the
   multi-column analysis a single `Table` declines to attempt.
+- **Enough room is not a way to fill it.** An unconditional constraint over
+  **two fan-outs** — the through table of a many-to-many — passes the pigeonhole
+  comfortably, because the product of two parent counts dwarfs the row count,
+  and still cannot be built. A fan-out is a partition of this table's rows over
+  one parent's keys, computed from the row index alone; two of them partition
+  the same rows without either seeing the other, so which pairs come out
+  together is an artefact of that index and a collision is a matter of the seed.
+  It used to be accepted and then die inside `COPY` at a row number that moved
+  when the seed did. A deduplicated edge table is filled by a statement instead
+  — `Projection(Membership, columns=(...), sql=...)` — which the refusal says.
 - **A conditional `UniqueConstraint` is categorical.** A per-row draw cannot
   keep a per-group rule *at any weight* -- 2.5% is as broken as 10%, just later
   in the load -- so the refusal does not depend on the arithmetic, only the

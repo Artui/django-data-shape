@@ -129,3 +129,65 @@ def draw(stream: int, row: int) -> float:
     # contract every distribution is written against. This is the same
     # construction the standard library uses for ``random.random()``.
     return (z >> 11) / 9007199254740992.0
+
+
+def check_not_inherited(model: type[Model]) -> None:
+    """Refuse a model whose rows would land in more than one table.
+
+    Multi-table inheritance gives the child a table of its own holding only the
+    columns it declared, and leaves the rest next door in the parent's. One
+    logical row is then two physical rows sharing a key, and this package fills
+    one table per declaration and assigns that table's keys itself as a dense
+    1..N range -- so it can write either half and has nothing to pair them with.
+    Building the two as separate declarations does not work either: the child's
+    primary key is a foreign key to the parent, and a fan-out is a partition
+    rather than the bijection that would need to be.
+
+    **The declaration itself is where the disagreement shows**, which is why
+    this is a refusal rather than a gap. ``_meta.concrete_fields`` spans both
+    tables while ``db_table`` names one, so naming an inherited column is
+    accepted here and then loads a column the table does not have. That used to
+    surface as a bare ``KeyError`` from inside the statistics pass, naming
+    neither the model, the column nor inheritance.
+
+    A proxy is not this case and must not be caught by it: it declares no column
+    and no table of its own, so a shape naming a proxy is a shape about the
+    table it proxies. The test is therefore which table a field's own model
+    writes to rather than whether ``_meta.parents`` is populated -- that is true
+    for a proxy too, and it is false for a proxy of an inheriting model, which
+    is exactly the case a parents check would wave through.
+
+    Shared because both routes into a table -- generating rows for it, and
+    projecting into it -- write columns read off ``_meta.concrete_fields``, so
+    both are wrong in the same way and a refusal worded twice is one that will
+    drift.
+    """
+    db_table = str(model._meta.db_table)
+    elsewhere: dict[type[Model], list[str]] = {}
+    here: list[str] = []
+    for field in model._meta.concrete_fields:
+        owner = field.model
+        if str(owner._meta.db_table) == db_table:
+            here.append(str(field.column))
+        else:
+            elsewhere.setdefault(owner, []).append(str(field.column))
+    if not elsewhere:
+        return
+    parents = ", ".join(parent.__name__ for parent in elsewhere)
+    split = "; ".join(
+        f"{parent._meta.db_table} holds {', '.join(sorted(columns))}"
+        for parent, columns in elsewhere.items()
+    )
+    raise InvalidShape(
+        f"{model.__name__} inherits from {parents} through multi-table inheritance, so one of "
+        f"its rows is two rows: {db_table} holds {', '.join(sorted(here))}, and {split}. This "
+        "package fills one table per declaration and assigns that table's keys itself as a "
+        "dense 1..N range, so it can write either half and has nothing to pair them with -- and "
+        "declaring the two separately does not work either, because the child's primary key is "
+        "a foreign key to the parent and a fan-out is a partition rather than a bijection. The "
+        "disagreement is in the declaration too: _meta.concrete_fields spans both tables while "
+        f"db_table names one, so naming an inherited column is accepted and then loads {db_table} "
+        f"with a column it does not have. Multi-table inheritance is not supported. Declare "
+        f"{parents} on its own for the columns that live in its table, and make the rows of "
+        f"{model.__name__} another way."
+    )
