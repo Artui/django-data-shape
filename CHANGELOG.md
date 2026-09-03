@@ -8,6 +8,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **An OR of equalities over one column is read like the set it is.**
+  `Q(status="DRAFT") | Q(status="IN_REVIEW") | Q(status="APPROVED")` says exactly
+  what `Q(status__in=[...])` says, and an ORM gives no reason to prefer either --
+  so reading one and not the other made the arithmetic depend on which of two
+  equivalent spellings a caller happened to write. It was reported by the same
+  consumer whose constraint the `__in` work was done for, who pointed out before
+  any test existed that a fix aimed at that return statement specifically would
+  miss this one. It did. The decoder now recurses, so a nested `Q(Q(a) | Q(b))`
+  is read too, a value named twice counts once, and the line has not moved: an
+  OR whose branches name **different columns** describes no set for any one
+  column and is still declined, along with a negation, clauses joined by AND, a
+  comparison in either spelling, and an `__in` over a queryset.
+- **A required foreign key that carries a `default=` now says why the default
+  does not fill it.** The message said the shape did not say which parent, and
+  from the caller's side they had said: they wrote `default=` on the model, and
+  every other tool they use honours it. It now names the default, says that
+  `save()` is what applies one and that this package never calls `save()`, and
+  adds what a callable default costs -- a callable default on a foreign key
+  usually reads the database, which is the one thing a value for a row must
+  never do.
+
+### Documentation
+- **The one-to-one spelling has an example.** `FanOut(Constant(1))` over at
+  least as many parents as the table has rows, and `Constant(1)` rather than
+  `Uniform(1, 1)`, which is refused. The refusal for anything skewed is quoted
+  with its measurement, because "a skew is probably wrong here" and "it loaded
+  zero times in twenty" are different claims.
+
+
+### Fixed
 - **"There is room" is never "there is a way", and the fan-out was never what
   was special.** Three more declarations that the arithmetic passed and the load
   then failed on, seed-dependently. All three are the one sentence the fan-out

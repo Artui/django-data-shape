@@ -39,6 +39,7 @@ from django_data_shape import (
     Zipf,
 )
 from tests.testapp.models import (
+    Approval,
     Assignment,
     Booking,
     Company,
@@ -53,6 +54,7 @@ from tests.testapp.models import (
     Project,
     Review,
     Seat,
+    Submission,
     Template,
     TemplateSession,
     Ticketed,
@@ -421,11 +423,24 @@ def test_a_column_derived_from_the_group_is_left_to_the_other_two_nets() -> None
 
 
 def test_every_constraint_this_cannot_read_is_left_to_the_other_two_nets() -> None:
-    # Five skips in one model: a condition written over an expression rather
-    # than fields, one grouped by a column no fan-out partitions, one joining
-    # two clauses, one whose single clause is a nested Q, and a check
-    # constraint, which is not a unique constraint at all. A sixth used to live
-    # here -- state__in -- and moved to Review when it stopped being a skip.
+    # Eight skips in one model: a condition over an expression rather than
+    # fields, one grouped by a column no fan-out partitions, one joining two
+    # clauses with AND, an OR whose branches name two different columns, a
+    # negated OR, an OR one of whose branches is a comparison, a comparison as a
+    # keyword argument and the same comparison as a bare lookup expression --
+    # which arrive as different shapes of child and take different exits -- plus
+    # a check constraint, which is not a unique constraint at all.
+    #
+    # Two used to live here and moved out when they stopped being skips:
+    # state__in to Review, and a nested Q(Q(a) | Q(b)) to Approval. What is left
+    # is what genuinely describes no set of values for one column -- and the
+    # three OR shapes are here to hold that line, because the recursion that
+    # reads an OR-tree is the thing most likely to be widened past it.
+    #
+    # state is Skew({HELD, PAID}) and seats is Constant(0) on purpose: read as
+    # sets, those conditions would be decided and decided as refusals, so a
+    # decoder that stopped drawing the line here fails rather than passing
+    # quietly.
     #
     # seats is Constant(0) against a `seats__gt=0` condition on purpose: read as
     # an equality that condition would be decided, and decided as a refusal, so
@@ -623,6 +638,51 @@ def test_a_per_parent_whose_rest_is_also_inside_the_set_is_refused() -> None:
         )
 
     assert "status in ('DRAFT', 'IN_REVIEW', 'APPROVED')" in str(raised.value)
+
+
+def test_an_or_tree_of_equalities_is_read_like_the_set_it_is() -> None:
+    # The third spelling of one rule, and the one the consumer actually wrote.
+    # Reading __in and not this made the arithmetic depend on which of two
+    # equivalent spellings an ORM offered no reason to choose between -- so the
+    # fix for the set form was aimed one return statement too narrowly, which
+    # the same consumer said before this test existed.
+    with pytest.raises(InvalidShape) as raised:
+        Shape(
+            _companies(50),
+            Table(
+                Submission,
+                rows=200,
+                company=FanOut(Zipf()),
+                status=Skew({"DRAFT": 0.5, "COMPLETED": 0.5}),
+            ),
+        )
+
+    message = str(raised.value)
+    assert "status in ('DRAFT', 'IN_REVIEW', 'APPROVED')" in message
+    assert "at most 50 rows" in message
+    assert "asks for 100 of them" in message
+
+
+def test_an_or_tree_that_is_nested_and_repeats_a_value_is_read_as_one_set() -> None:
+    # Django hands `Q(Q(a) | Q(b))` over as a single child that is itself a Q,
+    # a different object graph from the same expression written bare -- so
+    # reading both is recursion rather than a second case. And the set is a set:
+    # 'OPEN' named twice is one member, or the share below would be totalled
+    # twice and quote a number the declaration never asked for.
+    with pytest.raises(InvalidShape) as raised:
+        Shape(
+            _companies(50),
+            Table(
+                Approval,
+                rows=2000,
+                company=FanOut(Zipf()),
+                status=Skew({"OPEN": 0.25, "ARCHIVED": 0.75}),
+            ),
+        )
+
+    message = str(raised.value)
+    assert "status in ('OPEN', 'HELD')" in message
+    assert "asks for 500 of them" in message
 
 
 def test_a_set_condition_written_as_a_set_is_ordered_before_it_is_quoted() -> None:

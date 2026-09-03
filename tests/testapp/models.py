@@ -11,6 +11,7 @@ import uuid
 
 import django
 from django.db import models
+from django.db.models import lookups  # noqa: F401  (reached as models.lookups below)
 
 
 class Company(models.Model):
@@ -461,17 +462,21 @@ class Seat(models.Model):
 class Booking(models.Model):
     """A model carrying every conditional constraint the pre-check cannot read.
 
-    One model rather than six, because what is being tested is a set of skips:
-    a condition written over an expression rather than fields, one grouped by a
-    column no fan-out partitions, one joining two clauses, one whose single
-    clause is itself a nested Q, one comparing rather than equating, and a check
-    constraint, which is not a unique constraint at all. A declaration naming
-    this model has to be accepted whole.
+    One model rather than eight, because what is being tested is a set of
+    skips: a condition written over an expression rather than fields, one
+    grouped by a column no fan-out partitions, one joining two clauses with AND,
+    an OR whose branches name two different columns, a negated OR, an OR one of
+    whose branches is a comparison, a comparison written as a keyword argument,
+    and one written as a bare lookup expression -- plus a check constraint,
+    which is not a unique constraint at all. A declaration naming this model has
+    to be accepted whole.
 
-    ``state__in`` used to be here as a seventh, standing for "not a single
-    equality". It moved to :class:`Review` when it stopped being a skip: a set
-    the caller wrote out is a list of values, and deciding membership in it
-    needs nothing this package should not do.
+    Two used to be here and are not skips any more. ``state__in`` moved to
+    :class:`Review`, and a nested ``Q(Q(a) | Q(b))`` over one column moved to
+    :class:`Submission`: both say what a bare equality says about a set instead
+    of a value, and deciding membership in a set the caller wrote out needs
+    nothing this package should not do. What survives here is the OR that
+    genuinely describes no set -- its two branches name **different columns**.
 
     ``seats`` is what makes the comparison bite: declared as ``Constant(0)`` a
     condition read as ``seats == 0`` would be refused, so a suffix check that
@@ -503,8 +508,23 @@ class Booking(models.Model):
             ),
             models.UniqueConstraint(
                 fields=["company"],
-                condition=models.Q(models.Q(state="HELD") | models.Q(state="PAID")),
-                name="booking_over_a_nested_clause",
+                condition=models.Q(state="HELD") | models.Q(room="one"),
+                name="booking_over_two_columns_in_one_or",
+            ),
+            models.UniqueConstraint(
+                fields=["company"],
+                condition=~(models.Q(state="HELD") | models.Q(state="PAID")),
+                name="booking_over_a_negated_or",
+            ),
+            models.UniqueConstraint(
+                fields=["company"],
+                condition=models.Q(state="HELD") | models.Q(seats__gt=0),
+                name="booking_over_an_or_with_a_comparison",
+            ),
+            models.UniqueConstraint(
+                fields=["company"],
+                condition=models.Q(models.lookups.LessThan(models.F("seats"), models.Value(10))),
+                name="booking_over_a_bare_lookup_expression",
             ),
             models.UniqueConstraint(
                 fields=["company"],
@@ -701,6 +721,25 @@ class Review(models.Model):
         ]
 
 
+def get_default_company() -> int:
+    """A callable default that would read the database if anything called it."""
+    return Company.objects.values_list("pk", flat=True).first() or 1
+
+
+class Delegated(models.Model):
+    """A required foreign key whose default is a **callable**.
+
+    The shape a consumer actually hit, and it slips two refusals rather than
+    one: the required-relation check used to skip anything with a default, and
+    the callable-default check skips anything that is a relation. The callable
+    matters beyond the null -- a default like this one reads the database, which
+    is the single thing a value for a row must never do.
+    """
+
+    company = models.ForeignKey(Company, on_delete=models.CASCADE, default=get_default_company)
+    label = models.CharField(max_length=20)
+
+
 class Assigned(models.Model):
     """A required foreign key carrying a Python-level ``default=``.
 
@@ -783,3 +822,56 @@ class Ticketed(models.Model):
     reference = models.CharField(max_length=100, unique=True)
     prefix = models.CharField(max_length=10)
     company = models.OneToOneField(Company, null=True, on_delete=models.SET_NULL)
+
+
+class Submission(models.Model):
+    """A partial unique whose condition is an **OR-tree of equalities**.
+
+    The third spelling of one rule, and the one a consumer actually wrote:
+    ``Q(status=DRAFT) | Q(status=IN_REVIEW) | Q(status=APPROVED)`` says exactly
+    what the ``__in`` form says, and an ORM offers no reason to prefer either.
+    Reading one and not the other made the arithmetic depend on which of two
+    equivalent spellings the caller happened to choose.
+    """
+
+    company = models.ForeignKey(Company, on_delete=models.CASCADE)
+    status = models.CharField(max_length=20, default="DRAFT")
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["company"],
+                condition=(
+                    models.Q(status="DRAFT")
+                    | models.Q(status="IN_REVIEW")
+                    | models.Q(status="APPROVED")
+                ),
+                name="one_open_submission_per_company",
+            ),
+        ]
+
+
+class Approval(models.Model):
+    """An OR-tree that is nested **and** names one of its values twice.
+
+    Two properties of the decoder in one declaration, because both come from
+    the same place. Django hands ``Q(Q(a) | Q(b))`` over as a single child that
+    is itself a ``Q``, so reading it is recursion rather than an extra case; and
+    a value named twice is one member of the set, not two, or the share
+    arithmetic in the refusal would total it twice and quote a number nobody
+    declared.
+    """
+
+    company = models.ForeignKey(Company, on_delete=models.CASCADE)
+    status = models.CharField(max_length=20, default="OPEN")
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["company"],
+                condition=models.Q(
+                    models.Q(status="OPEN") | models.Q(status="OPEN") | models.Q(status="HELD")
+                ),
+                name="one_open_approval_per_company",
+            ),
+        ]

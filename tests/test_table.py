@@ -35,6 +35,7 @@ from tests.testapp.models import (
     Company,
     CompanyProxy,
     Defaulted,
+    Delegated,
     DeliveryDocument,
     Memo,
     Order,
@@ -246,8 +247,30 @@ def test_a_required_relation_carrying_a_python_default_is_refused_too() -> None:
     #
     # Reported by a consumer against the release before the refusal existed, so
     # their case is fixed; this narrower one survived it.
-    with pytest.raises(InvalidShape, match="Assigned.company cannot be null"):
+    with pytest.raises(InvalidShape) as raised:
         Table(Assigned, rows=1, label=Constant("x"))
+
+    message = str(raised.value)
+    assert "Assigned.company cannot be null" in message
+    # The caller did say which parent, as far as they are concerned -- they
+    # wrote default= and every other tool they use honours it. A message that
+    # only said "this shape does not say which" reads as describing a different
+    # bug, and a consumer reported it as one.
+    assert "carries a default=, and a default is applied by save()" in message
+
+
+def test_a_callable_default_on_a_required_relation_is_refused_by_the_same_check() -> None:
+    # The shape the consumer actually hit, and it slips two refusals rather than
+    # one: this check used to skip anything with a default, and the callable
+    # check skips anything that is a relation. The callable matters beyond the
+    # null, because a default like theirs reads the database to find a parent --
+    # so the message says so rather than only naming the fan-out.
+    with pytest.raises(InvalidShape) as raised:
+        Table(Delegated, rows=1, label=Constant("x"))
+
+    message = str(raised.value)
+    assert "Delegated.company cannot be null" in message
+    assert "usually reads the database" in message
 
 
 def test_a_relation_default_is_not_folded_into_a_constant() -> None:
