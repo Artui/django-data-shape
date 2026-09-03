@@ -159,6 +159,30 @@ Nothing else about the select is inspected — that is what an escape hatch is �
 but the build still gives it the emptiness check, the sequence reset, the
 `ANALYZE` and the transaction.
 
+### `reads=` — what the statement selects from
+
+Nothing here parses SQL, so a statement of your own is opaque and is ordered as
+late as the rest of the declaration allows. That is the right default until
+something fans out over the table it fills: the projection then has to run
+*before* that table, and may find the tables it selects from still empty.
+`reads=` says what it needs, and puts it back in the graph precisely — after
+what it reads, before what reads it.
+
+```python
+Projection(
+    EventSession,
+    columns=("id", "event", "title", "minutes", "channel"),
+    sql="SELECT row_number() OVER (ORDER BY e.id), e.id, e.name, 1, %s FROM app_event e",
+    params=("web",),
+    reads=(Event,),
+)
+```
+
+It is part of the declaration the template-database cache keys on, because the
+same statement run before and after a table selects different rows. A derived
+projection has no use for it and is refused for asking: `per=` and `copying=`
+already are the answer.
+
 ## Load order
 
 A projection is ordered like everything else: after the tables it reads, before
@@ -173,11 +197,20 @@ Shape(
 )
 ```
 
-A raw `sql=` projection is the exception: nothing here parses SQL, so it names
-nothing it reads and is ordered after every table and every derived projection.
+A raw `sql=` projection without `reads=` is the exception: it names nothing, so
+"run it last" is a **preference** rather than an edge. It goes after everything
+where nothing needs it, and directly before whatever does.
 
-Two declarations that read each other are refused by name, the same way two
-tables fanning out over each other are.
+That distinction is the fix for a refusal that was simply wrong. Expressed as
+edges to every other declaration, the preference met a table fanning out over
+the projection and reported `Attendance -> EventSession -> Attendance` — a cycle
+in a chain, with no way for the caller to correct it. A preference cannot
+contradict a declared edge; an edge can, and did.
+
+Two declarations that really do read each other are still refused by name, the
+same way two tables fanning out over each other are — and the refusal happens
+when the `Shape` is built, because which table can be filled first is decided by
+the declarations and nothing else.
 
 ## Refusals
 

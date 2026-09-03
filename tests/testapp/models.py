@@ -589,3 +589,91 @@ class Assignment(models.Model):
                 name="one_lead_assignment_per_company",
             ),
         ]
+
+
+class Document(models.Model):
+    """The parent half of a multi-table inheritance pair.
+
+    Its own table, holding ``title``. That column is what makes the pair worth
+    having: it appears in the child's ``_meta.concrete_fields`` and in no column
+    of the child's table, which is the disagreement the inheritance refusal is
+    about.
+    """
+
+    title = models.CharField(max_length=100)
+
+
+class DeliveryDocument(Document):
+    """The child half, whose rows live in two tables at once.
+
+    Concrete inheritance rather than abstract, so Django gives it a table of its
+    own holding ``document_ptr_id`` and ``tracking`` while ``title`` stays next
+    door.
+    """
+
+    tracking = models.CharField(max_length=50)
+
+
+class CompanyProxy(Company):
+    """A proxy, which shares its parent's table rather than adding one.
+
+    Here because ``_meta.parents`` is non-empty for a proxy too, so the
+    inheritance refusal has to tell the two apart: a proxy declares no column
+    and no table of its own, and a shape naming it is a shape about the table it
+    proxies.
+    """
+
+    class Meta:
+        proxy = True
+
+
+class Person(models.Model):
+    """One end of a many-to-many edge."""
+
+    name = models.CharField(max_length=50)
+
+
+class Membership(models.Model):
+    """A through table whose uniqueness two fan-outs cannot keep.
+
+    The pair is unique, and each foreign key is partitioned over its own parents
+    independently of the other, so which pairs come out together is an artefact
+    of the row index. It fits -- the product of the two parent counts is far
+    larger than the row count -- which is why the pigeonhole arithmetic passes
+    it and something else has to refuse it.
+    """
+
+    company = models.ForeignKey(Company, on_delete=models.CASCADE)
+    person = models.ForeignKey(Person, on_delete=models.CASCADE)
+    role = models.CharField(max_length=20)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["company", "person"], name="one_membership_per_company_person"
+            ),
+        ]
+
+
+class Timestamped(models.Model):
+    """An abstract base, whose column belongs to whoever inherits it.
+
+    The inheritance that is not multi-table: Django copies the field onto the
+    child, so it writes to the child's own table and nothing lands next door.
+    """
+
+    created_at = models.DateTimeField()
+
+    class Meta:
+        abstract = True
+
+
+class Memo(Timestamped):
+    """A model inheriting abstractly, which is an ordinary single-table model.
+
+    Here so that the inheritance refusal has to distinguish the two kinds. Every
+    column it has is a column of its own table, so a shape naming it is a shape
+    about one table and nothing about it is refusable.
+    """
+
+    body = models.CharField(max_length=100)

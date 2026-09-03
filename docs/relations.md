@@ -188,7 +188,9 @@ satisfy them — but because a fan-out reads the parent's keys, and a table with
 rows yet has none.
 
 Two tables that fan out over each other are refused by name: one of them has to
-load first, and a cycle means neither can.
+load first, and a cycle means neither can. That refusal happens when the `Shape`
+is constructed rather than when the build starts, because which table can be
+filled first is decided by the declarations and needs no connection to answer.
 
 ## What is refused
 
@@ -199,4 +201,17 @@ load first, and a cycle means neither can.
 - A **self-referential** `FanOut`. It would read keys from a table still empty at
   load time; self-referential trees are their own feature.
 - A required relation **left undeclared**, which would fail the load on a
-  not-null violation rather than at declaration time.
+  not-null violation rather than at declaration time. The message names the
+  column and the fan-out that fills it: forgetting one foreign key is the
+  commonest mistake there is, so it is the first thing many readers ever see
+  this package say.
+- A model using **multi-table inheritance**. One of its rows is two rows, in two
+  tables, sharing a key — and this package fills one table per declaration and
+  assigns that table's keys itself, so it can write either half and has nothing
+  to pair them with. Declaring the two separately does not help: the child's
+  primary key is a foreign key to the parent, and a fan-out is a partition
+  rather than the bijection that would need to be. `_meta.concrete_fields` spans
+  both tables while `db_table` names one, so this used to be accepted and then
+  raise a bare `KeyError` from inside the loader. A proxy model is not this case
+  and is fine: it adds no column and no table, so a shape naming one is a shape
+  about the table it proxies.

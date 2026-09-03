@@ -27,6 +27,23 @@ class Sequential:
     def value(self, row: int, draw: float) -> object:
         return self._start + row * self._step
 
+    def is_distinct_per_row(self) -> bool:
+        """Whether every row gets its own value. See ``Distinct``.
+
+        True for any non-zero step, in either direction: this is a statement
+        about injectivity and not about order, so a column counting backwards
+        keeps a unique constraint exactly as well as one counting forwards.
+        ``Ascending`` is deliberately not reused for it -- that protocol answers
+        which *end* of a group is last, and a caller's own distribution may
+        climb without strictly climbing, which would make it an unsound proof of
+        distinctness.
+
+        ``self._step * 0`` rather than a literal zero, for the reason
+        :meth:`is_ascending` computes its own: a date column steps by a
+        ``timedelta`` and a numeric one by a number.
+        """
+        return bool(self._step != self._step * 0)
+
     def is_ascending(self) -> bool:
         """Whether the step moves values up rather than down. See ``Ascending``.
 

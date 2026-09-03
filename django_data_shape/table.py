@@ -20,7 +20,12 @@ from django_data_shape.infer_key_strategy import infer_key_strategy
 from django_data_shape.invalid_shape import InvalidShape
 from django_data_shape.keys.key_strategy import KeyStrategy
 from django_data_shape.order_derivations import order_derivations
-from django_data_shape.utils import check_statistics_target, has_db_default, primary_key_field
+from django_data_shape.utils import (
+    check_not_inherited,
+    check_statistics_target,
+    has_db_default,
+    primary_key_field,
+)
 
 
 class Table:
@@ -179,6 +184,12 @@ class Table:
         return {relation: tuple(sorted(names)) for relation, names in wanted.items()}
 
     def _validate(self) -> None:
+        # First, because every check below reads ``_meta.concrete_fields`` and
+        # under multi-table inheritance that list spans two tables while this
+        # declaration is about one. Refusing here means the reader is told about
+        # the inheritance rather than about whichever column happened to be
+        # noticed first somewhere downstream.
+        check_not_inherited(self.model)
         meta = self.model._meta
         known = {field.name: field for field in meta.concrete_fields}
 
@@ -501,10 +512,16 @@ class Table:
             if name not in self.fields and not field.primary_key
         ]
 
-        # Declaring a relation is refused in _validate; omitting a required one
-        # used to be accepted and then fail inside COPY with a not-null
-        # violation. Both directions have to refuse, or the contract only holds
-        # for the callers who tried the unsupported thing explicitly.
+        # Omitting a required relation used to be accepted and then fail inside
+        # COPY with a not-null violation, so it is refused here instead.
+        #
+        # The message names the remedy rather than a limitation, and that is the
+        # correction rather than the check: it used to say relations were not
+        # supported and that fan-out was coming in the next release, which was
+        # true when it was written and had been wrong for every release since.
+        # Forgetting one foreign key is the commonest possible mistake, so this
+        # is the first thing many readers ever see the package say -- and what
+        # it said was that the package could not do the thing it is for.
         required_relations = sorted(
             name
             for name, field in undeclared
@@ -512,9 +529,13 @@ class Table:
         )
         if required_relations:
             raise InvalidShape(
-                f"{self.model.__name__}.{', '.join(required_relations)} is a relation that "
-                "cannot be null, and relations are not supported yet, so this shape cannot be "
-                "built. Declaring fan-out as a distribution is the next release."
+                f"{self.model.__name__}.{', '.join(required_relations)} cannot be null, so every "
+                "row needs a parent and this shape does not say which. A relation is declared as "
+                f"a fan-out over the parent's real keys -- {required_relations[0]}=FanOut(Zipf()) "
+                "for the realistic heavy tail, FanOut(Uniform(1, 10)) for something flatter, and "
+                "childless= for the share of parents nobody references. The parent's own table "
+                "has to be built in the same shape or already loaded, because that is where the "
+                "keys are read from."
             )
         undeclared = [(name, field) for name, field in undeclared if not field.is_relation]
 

@@ -20,6 +20,7 @@ from django_data_shape.distributions.ascending import Ascending
 from django_data_shape.distributions.bounded import Bounded
 from django_data_shape.distributions.categorical import Categorical
 from django_data_shape.distributions.constant import Constant
+from django_data_shape.distributions.distinct import Distinct
 from django_data_shape.distributions.distribution import Distribution
 from django_data_shape.distributions.sequential import Sequential
 from django_data_shape.distributions.skew import Skew
@@ -65,6 +66,7 @@ __all__ = [
     "Derivation",
     "DerivationQueriedDatabase",
     "Derived",
+    "Distinct",
     "Distribution",
     "FanOut",
     "Given",

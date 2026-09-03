@@ -16,6 +16,7 @@ from django_data_shape import (
 )
 from tests.testapp.models import (
     Company,
+    DeliveryDocument,
     DualSession,
     Event,
     EventSession,
@@ -317,3 +318,51 @@ def test_a_statistics_target_is_checked_against_a_statement_the_caller_wrote_too
 def test_a_target_outside_postgres_own_range_is_refused_here_as_well() -> None:
     with pytest.raises(InvalidShape, match="collect no statistics"):
         Projection(EventSession, per=Event, copying=TemplateSession, statistics={"title": 0})
+
+
+def test_a_raw_projection_can_name_what_it_selects_from() -> None:
+    # Nothing here parses SQL, so a raw statement used to be a black box that
+    # could only be ordered last. reads= is how it rejoins the graph: after what
+    # it names, and before whatever fans out over the table it fills.
+    projection = Projection(
+        EventSession,
+        columns=("id", "event", "title"),
+        sql="SELECT e.id, e.id, e.name FROM testapp_event e",
+        reads=(Event,),
+    )
+
+    assert projection.reads == (Event,)
+
+
+def test_reads_without_a_statement_of_your_own_is_refused() -> None:
+    # A derived projection already names its two inputs, so reads= would be a
+    # second and quieter answer to a question per= and copying= have answered.
+    with pytest.raises(InvalidShape, match="declares reads= without sql="):
+        Projection(EventSession, per=Event, copying=TemplateSession, reads=(Company,))
+
+
+def test_a_raw_projection_naming_itself_in_reads_is_refused() -> None:
+    # order_tables carries no self-edge guard on purpose, because every way of
+    # writing one is refused where the declaration is made. reads= was a new way
+    # to write one, and a declaration that has to come after itself would have
+    # been reported as a cycle from inside the ordering pass instead.
+    with pytest.raises(InvalidShape, match="names itself in reads="):
+        Projection(EventSession, columns=("id",), sql="SELECT 1", reads=(EventSession,))
+
+
+def test_what_a_raw_projection_reads_is_part_of_the_declaration() -> None:
+    # It writes no column and still decides the data: the same statement run
+    # before and after a table selects different rows, so two declarations
+    # differing only in reads= must not share a cached template database.
+    without = Projection(EventSession, columns=("id",), sql="SELECT 1")
+    with_reads = Projection(EventSession, columns=("id",), sql="SELECT 1", reads=(Event,))
+
+    assert without.canonical() != with_reads.canonical()
+
+
+def test_projecting_into_an_inherited_model_is_refused_too() -> None:
+    # The escape hatch is the first thing a reader reaches for once Table has
+    # refused, so it has to refuse for the same reason rather than accept and
+    # then insert into a column the child's table has not got.
+    with pytest.raises(InvalidShape, match="multi-table inheritance"):
+        Projection(DeliveryDocument, columns=("id",), sql="SELECT 1")

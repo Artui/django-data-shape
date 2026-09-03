@@ -373,3 +373,53 @@ def test_a_statement_of_your_own_that_inserts_nothing_is_refused_too() -> None:
         )
 
     assert "whatever the statement you supplied selects from" in str(raised.value)
+
+
+def _events_into_sessions(reads: tuple[type[Model], ...] = ()) -> Projection:
+    """A statement of the caller's own, selecting from one table it may name."""
+    return Projection(
+        EventSession,
+        columns=("id", "event", "title", "minutes", "channel"),
+        sql=(
+            "SELECT row_number() OVER (ORDER BY e.id), e.id, e.name, 1, 'web' "
+            f"FROM {Event._meta.db_table} e"
+        ),
+        reads=reads,
+    )
+
+
+def test_a_statement_of_your_own_is_ordered_after_the_tables_it_names() -> None:
+    # The whole chain in one build: Event is fanned out over Template, the
+    # statement reads Event, and Attendance fans out over the table the
+    # statement fills. Nothing but reads= puts the statement between them --
+    # "run it last" cannot, because something needs it before the end.
+    build_shape(
+        Shape(
+            Table(Attendance, rows=40, session=FanOut(Zipf(1.1)), name=Constant("a")),
+            _events_into_sessions(reads=(Event,)),
+            Table(Template, rows=5, name=Constant("t")),
+            Table(Event, rows=20, template=FanOut(Zipf(1.1)), name=Constant("e")),
+        )
+    )
+
+    assert EventSession.objects.count() == 20
+    assert Attendance.objects.count() == 40
+
+
+def test_the_same_statement_without_reads_is_told_what_is_missing() -> None:
+    # The cost of the ordering preference being overridable: a statement that
+    # says nothing about its inputs can now be pulled in front of them by a
+    # dependent, and selects from an empty table. It is loud rather than silent
+    # -- the projection inserts nothing and the build refuses -- and the message
+    # has to name the thing that fixes it.
+    with pytest.raises(InvalidShape, match="inserted no rows") as raised:
+        build_shape(
+            Shape(
+                Table(Attendance, rows=40, session=FanOut(Zipf(1.1)), name=Constant("a")),
+                _events_into_sessions(),
+                Table(Template, rows=5, name=Constant("t")),
+                Table(Event, rows=20, template=FanOut(Zipf(1.1)), name=Constant("e")),
+            )
+        )
+
+    assert "name its inputs with reads=" in str(raised.value)

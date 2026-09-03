@@ -154,8 +154,10 @@ def _project(connection: Any, projection: Projection, seed: int) -> int:
             f"The projection into {projection.db_table} inserted no rows, so this shape declared "
             "a table and then left it empty. It copies a collection along a join, and a join "
             f"matches nothing when either side is empty or when no rows pair up. It reads: "
-            f"{reads or 'whatever the statement you supplied selects from'}. Declare those "
-            "tables in the same shape so they are built first, or load them before building."
+            f"{reads or 'whatever the statement you supplied selects from, which it did not say'}"
+            ". Declare those tables in the same shape so they are built first, or load them "
+            "before building -- and if this is a statement of your own, name its inputs with "
+            "reads= so it can be ordered after them rather than guessed at."
         )
     return inserted
 

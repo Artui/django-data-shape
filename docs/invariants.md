@@ -152,6 +152,55 @@ how many companies there are.
   million rows needing distinct `(company, label)` pairs cannot be built from
   fifty thousand companies and three labels, whatever the seed. This is the
   multi-column analysis a single `Table` declines to attempt.
+- **Enough room is not a way to fill it.** An unconditional constraint over
+  **two fan-outs** — the through table of a many-to-many — passes the pigeonhole
+  comfortably, because the product of two parent counts dwarfs the row count,
+  and still cannot be built. A fan-out is a partition of this table's rows over
+  one parent's keys, computed from the row index alone; two of them partition
+  the same rows without either seeing the other, so which pairs come out
+  together is an artefact of that index and a collision is a matter of the seed.
+  It used to be accepted and then die inside `COPY` at a row number that moved
+  when the seed did. A deduplicated edge table is filled by a statement instead
+  — `Projection(Membership, columns=(...), sql=...)` — which the refusal says.
+  **One** of the two fan-outs having no group of two is enough to exempt it, by
+  the same proof as below: such a fan-out never repeats a parent key, so no two
+  rows share that column and the pair is distinct on that half alone.
+- **The second column does not have to be a partition for that to be true.**
+  One fan-out beside a drawn column is refused on the same proof:
+  `Seat(company=FanOut(Zipf()), label=Skew({"a": 1, "b": 1}))` over fifty
+  companies fits a hundred rows into exactly a hundred pairs, and a company that
+  ends up with three seats still has only two labels to draw from. A
+  `Distribution` is a pure function of the row index and of a draw taken from
+  the field name and that same index, so it can no more see the fan-out's
+  assignment than a second fan-out could, and nothing enumerates the
+  combinations *inside a group*. The remedy is a value derived from the group
+  rather than drawn beside it — `Derived("company", compute=..., scope="group")`
+  receives this row's position among its parent's children and how many there
+  are — and the refusal says so.
+- **A partition with no group of two is exempt**, because a collision under
+  such a constraint is always two rows of the *same* group drawing the same
+  value. Flat sizes with no `childless` share give every parent `rows / parents`
+  children, so at `rows <= parents` every parent gets zero or one -- and the
+  parent has to be declared in the same shape, because a bound resting on a row
+  count this package cannot read is not a bound. One row past that, some parent
+  gets two and the refusal comes back.
+
+    !!! warning "That exemption is the shape this package argues against"
+
+        A fan-out giving every parent exactly one child is the uniform fan-out
+        that makes the planner always right -- the one database in which join
+        misestimation cannot occur. Prefer a `Zipf` and a constraint you can
+        actually keep. But it builds, and a refusal must never tell you a shape
+        cannot be built when it demonstrably can.
+
+- **A column that is distinct in every row is exempt**, because a pair is
+  distinct as soon as either half is and there is then nothing to arrange.
+  `Sequential` says so about itself through
+  [`Distinct`](reference.md#django_data_shape.distributions.distinct.Distinct),
+  so `(company, invoice_number)` builds. A distribution that does not implement
+  the protocol is read as not distinct, which is the safe direction: that costs
+  a refusal answered by adding one method, where the other reading costs a load
+  that fails at a row number which moves when the seed does.
 - **A conditional `UniqueConstraint` is categorical.** A per-row draw cannot
   keep a per-group rule *at any weight* -- 2.5% is as broken as 10%, just later
   in the load -- so the refusal does not depend on the arithmetic, only the
@@ -172,9 +221,18 @@ how many companies there are.
   because there is no partition here to satisfy it with and a refusal would name
   no remedy.
 - A column filled by a distribution that cannot enumerate itself, and a fan-out
-  over a parent this shape does not build.
-- A fan-out with a `null` share, because PostgreSQL counts each NULL in a unique
-  index as distinct and those rows are exempt from the constraint entirely.
+  over a parent this shape does not build. Both make the *capacity* unknown, so
+  a conditional refusal drops its arithmetic and an unconditional one falls back
+  to the structural sentence — neither stops the refusal itself.
+- A fan-out with a `null` share, for the capacity in the same way: PostgreSQL
+  counts each NULL in a unique index as distinct, so those rows are exempt from
+  the constraint and a number computed as though they were not would not be true
+  of this shape. The rows that do have a parent are unarranged exactly as
+  before.
+- A column filled by a `Derivation` under an unconditional constraint. A
+  derivation reads something other than its own row index, so it is the one kind
+  of declaration that *can* be arranged around a group — and whether a
+  particular `compute=` is arranged around it is not readable from here.
 
 In every one of those the declaration is allowed through, and net 2 and net 3
 are what catch it.

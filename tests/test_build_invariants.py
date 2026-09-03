@@ -9,14 +9,15 @@ wrong reason.
 from __future__ import annotations
 
 import datetime
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from django.db import IntegrityError, connection
-from django.db.models import Q
+from django.db.models import Count, Q
 
 from django_data_shape import (
     Constant,
+    Derived,
     FanOut,
     Invariant,
     InvariantViolated,
@@ -30,7 +31,18 @@ from django_data_shape import (
     shape_digest,
 )
 from django_data_shape import build as build_shape
-from tests.testapp.models import Booking, Company, Contest, Entry, Period, Project, Vendor
+from tests.testapp.models import (
+    Booking,
+    Company,
+    Contest,
+    Entry,
+    Membership,
+    Period,
+    Person,
+    Project,
+    Seat,
+    Vendor,
+)
 
 pytestmark = [
     pytest.mark.django_db(transaction=True),
@@ -42,6 +54,13 @@ pytestmark = [
 
 _START = datetime.datetime(2020, 1, 1, tzinfo=datetime.timezone.utc)
 _MINUTE = datetime.timedelta(minutes=1)
+_LETTERS = "abcdefghijklmnopqrstuvwxyz"
+
+
+def _letter_for_position(group: object) -> str:
+    """One letter per position inside a parent's group of children."""
+    position, _size = cast("tuple[int, int]", group)
+    return _LETTERS[position % len(_LETTERS)]
 
 
 def _companies(rows: int = 50) -> Table:
@@ -236,6 +255,96 @@ def test_the_database_is_the_net_the_pre_check_cannot_be() -> None:
 
     with pytest.raises(IntegrityError):
         build_shape(shape)
+
+
+def test_a_column_distinct_in_every_row_really_does_keep_a_two_column_uniqueness() -> None:
+    # The exemption, loaded rather than argued. ``one_seat_label_per_company``
+    # is a real unique index here, and this is the declaration the refusal lets
+    # through: a pair is distinct as soon as either half is, so nothing has to
+    # be arranged per group at all.
+    build_shape(
+        Shape(
+            _companies(50),
+            Table(Seat, rows=100, company=FanOut(Zipf()), label=Sequential(0, 1)),
+        )
+    )
+
+    assert Seat.objects.count() == 100
+
+
+def test_the_remedy_the_refusal_names_is_one_that_builds() -> None:
+    # The same table, the same constraint, and the form the message points at:
+    # a Scope.GROUP derivation receives this row's position among its parent's
+    # children, so it can hand back a value per position where a draw beside the
+    # fan-out can only hope. Asserted against the database rather than taken on
+    # trust -- a refusal naming a remedy that does not build would be worse than
+    # one naming none.
+    build_shape(
+        Shape(
+            _companies(50),
+            Table(
+                Seat,
+                rows=100,
+                company=FanOut(Zipf()),
+                label=Derived("company", compute=_letter_for_position, scope="group"),
+            ),
+        )
+    )
+
+    assert Seat.objects.count() == 100
+
+
+def test_a_partition_with_no_group_of_two_really_does_load_under_the_index() -> None:
+    # The exemption against the database rather than against the arithmetic. A
+    # flat fan-out at fifty rows over fifty companies gives every company one
+    # seat, so one label for the whole table collides with nothing -- and the
+    # unique index is really there to say so.
+    build_shape(
+        Shape(
+            _companies(50),
+            Table(Seat, rows=50, company=FanOut(Constant(1)), label=Constant("x")),
+        )
+    )
+
+    assert Seat.objects.count() == 50
+    # The claim the exemption actually rests on, asserted rather than assumed:
+    # no group holds two rows, so there is nothing for two draws to collide in.
+    largest = max(
+        Seat.objects.values("company_id")
+        .annotate(seats=Count("id"))
+        .values_list("seats", flat=True)
+    )
+    assert largest == 1
+
+
+def test_one_flat_fan_out_carries_a_two_fan_out_uniqueness_under_the_index() -> None:
+    # The asymmetric exemption against the database. Five people cannot hold
+    # twenty rows one apiece, so only the company fan-out satisfies the proof --
+    # and only one has to, because a company that owns one row cannot own the
+    # second half of a duplicate pair.
+    build_shape(
+        Shape(
+            _companies(20),
+            Table(Person, rows=5, name=Constant("p")),
+            Table(
+                Membership,
+                rows=20,
+                company=FanOut(Constant(1)),
+                person=FanOut(Zipf()),
+                role=Constant("member"),
+            ),
+        )
+    )
+
+    assert Membership.objects.count() == 20
+    # The claim the exemption rests on, asserted rather than assumed: every row
+    # has its own company, so no pair can repeat whatever the people do.
+    largest = max(
+        Membership.objects.values("company_id")
+        .annotate(rows=Count("id"))
+        .values_list("rows", flat=True)
+    )
+    assert largest == 1
 
 
 def test_an_invariant_that_finds_nothing_lets_the_build_finish() -> None:

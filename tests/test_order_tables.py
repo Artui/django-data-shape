@@ -117,3 +117,51 @@ def test_a_projection_and_a_table_reading_each_other_are_refused_by_name() -> No
 
     message = str(raised.value)
     assert "Left" in message and "Right" in message
+
+
+def test_a_table_fanning_out_over_a_raw_projection_is_not_a_cycle() -> None:
+    # The refusal that was simply wrong. A raw projection used to carry an edge
+    # to every other declaration, so a table fanning out over one met its own
+    # edge coming back and was told "A -> B -> A" about a chain -- with no
+    # after= anywhere to correct it with. "Run it last" is a preference, and a
+    # preference cannot contradict a declared edge; an edge can, and did.
+    opaque = Projection(EventSession, columns=("id",), sql="SELECT 1")
+    attendance = Table(Attendance, rows=5, session=FanOut(Zipf()), name=Constant("a"))
+
+    assert [t.model for t in order_tables((attendance, opaque))] == [EventSession, Attendance]
+
+
+def test_a_raw_projection_that_names_what_it_reads_is_ordered_after_it() -> None:
+    # And the reason reads= is needed rather than nice: once the preference can
+    # be overridden by a dependent, the statement may run before a table it
+    # selects from. Naming it puts the edge back.
+    opaque = Projection(
+        EventSession,
+        columns=("id",),
+        sql="SELECT 1",
+        reads=(Event,),
+    )
+    events = Table(Event, rows=5, template=FanOut(Zipf()), name=Constant("e"))
+    attendance = Table(Attendance, rows=5, session=FanOut(Zipf()), name=Constant("a"))
+
+    ordered = [t.model for t in order_tables((attendance, opaque, events))]
+
+    assert ordered == [Event, EventSession, Attendance]
+
+
+def test_two_raw_projections_with_a_dependent_each_are_still_not_a_cycle() -> None:
+    # The sharper version of the same arrangement, and the one the old edges
+    # could not express at all: two opaque statements, each needed by a
+    # different table, so "run each of them after every table" was two
+    # preferences that contradicted each other as well as the declared edges.
+    # There is an order satisfying every declared edge, and only the preferences
+    # were unsatisfiable together -- which is what makes them preferences.
+    sessions = Projection(EventSession, columns=("id",), sql="SELECT 1")
+    rights = Projection(Right, columns=("id",), sql="SELECT 2")
+    attendance = Table(Attendance, rows=5, session=FanOut(Zipf()), name=Constant("a"))
+    left = Table(Left, rows=5, right=FanOut(Uniform(1, 2)))
+
+    ordered = [t.model for t in order_tables((attendance, sessions, left, rights))]
+
+    assert ordered.index(EventSession) < ordered.index(Attendance)
+    assert ordered.index(Right) < ordered.index(Left)

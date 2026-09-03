@@ -103,6 +103,15 @@ rather than found by the database halfway through a load. A generated database t
 than one that refuses to exist, because the suite it feeds asserts on rows that
 could never occur.
 
+Two of them are refusals of a whole model shape rather than of a field.
+**Multi-table inheritance** puts one logical row in two tables sharing a key,
+and this package fills one table per declaration and owns that table's keys, so
+it can write either half and has nothing to pair them with. A **through table
+whose uniqueness spans two fan-outs** is refused for a different reason: it fits
+comfortably, and nothing enumerates the combinations, so a collision is a matter
+of the seed. Both used to be accepted and then fail during the load, one with a
+bare `KeyError` and one with a unique violation inside `COPY`.
+
 `build()` raises `UnsupportedBackend` on anything but PostgreSQL, because a
 shaped database whose plans mean nothing is worse than no shaped database.
 
@@ -151,5 +160,9 @@ planner. See [From pytest](pytest.md).
 
 ## Not in this release
 
-Many-to-many edges, and emitting a declaration from a database or a factory that
-already exists.
+Many-to-many edges as a declared form, multi-table inheritance, and emitting a
+declaration from a database or a factory that already exists. The first two are
+**refused by name** rather than left to fail during the load, and the refusal
+for a through table points at the escape hatch that does build one today: a
+`Projection` with your own `sql=`, which can select the pairs already
+deduplicated.

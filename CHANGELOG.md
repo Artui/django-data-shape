@@ -7,6 +7,123 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`Distinct` is the sixth opt-in distribution protocol, and it says a column
+  writes a different value in every row.** It is the exact dual of `Bounded`:
+  that one says how few values a distribution can produce, this one says it
+  never repeats. It exists because a pair is distinct as soon as either half is,
+  so a column that answers `True` keeps a multi-column `UniqueConstraint` on its
+  own with nothing arranged around it -- which is what separates the declaration
+  that builds from the one that is a lottery. `Sequential` implements it for any
+  non-zero step, in either direction: this is injectivity and not order, so it
+  is a claim of its own rather than a second reading of `Ascending`.
+- **`Projection(..., reads=(Model, ...))` says what a statement of your own
+  selects from.** Nothing here parses SQL, so a raw `sql=` projection was a
+  black box that could only be run last -- and last stopped being right the
+  moment something fanned out over the table it fills, because the projection
+  then has to run *before* that table and may find its own inputs still empty.
+  `reads=` puts it back in the graph precisely: after what it reads, before what
+  reads it. It is part of the declaration the template-database cache keys on,
+  because the same statement run before and after a table selects different
+  rows. Declaring it on a derived projection is refused -- `per=` and `copying=`
+  already are that answer -- and so is naming the projected model itself, which
+  would otherwise have surfaced as a cycle from inside the ordering pass.
+
+### Changed
+- **A load-order cycle is refused where the `Shape` is declared, not where the
+  build starts.** Which table can be filled first is decided by the declarations
+  and needs no connection to answer, so this was the one purely structural
+  refusal left until build time: a shape that could never be built could be
+  constructed, digested and passed around before anything said so.
+
+### Fixed
+- **A table fanning out over a raw `sql=` projection is no longer reported as a
+  cycle that does not exist.** The refusal read
+  `Assignment -> TimeEntry -> Assignment` for what is a chain, and there was no
+  `after=` or `reads=` anywhere for the caller to correct it with. The cause was
+  "a raw projection is ordered after every table" being expressed as an edge to
+  every other declaration: an edge is a claim, it met the caller's own declared
+  edge coming back, and the cycle detector was right about the graph it was
+  given. Running such a statement last is a **preference**, so it is expressed
+  as a visit order instead -- the graph now holds declared edges only, and
+  everything that says what it reads is placed before anything that does not. A
+  preference cannot contradict a declared edge, and two preferences that
+  contradict each other are simply both dropped rather than reported as
+  impossible.
+- **Multi-table inheritance is refused by name instead of raising a bare
+  `KeyError` from inside the loader.** `_meta.concrete_fields` for an inheriting
+  child spans two tables while `db_table` names one, so declaring the parent's
+  columns was accepted and then failed in the statistics pass with `KeyError:
+  'title'` -- no message, no field, no mention of inheritance -- while omitting
+  them hit a required-column refusal about a column the child could never have
+  filled. There was therefore no working spelling at all. Both routes into a
+  table, `Table` and `Projection`, now refuse the model up front and say what
+  the obstruction is: one logical row is two physical rows sharing a key, this
+  package fills one table per declaration and owns that table's keys, and
+  declaring the two halves separately does not help because the child's primary
+  key is a foreign key to the parent and a fan-out is a partition rather than a
+  bijection. A proxy model is not this case and stays declarable.
+- **A through table whose uniqueness spans two fan-outs is refused at
+  declaration time instead of dying inside `COPY`.** The pigeonhole pre-check
+  passed it happily, and correctly: the product of two parent counts dwarfs the
+  row count, so there is ample room. Room was never the question. A fan-out is a
+  partition of this table's rows over one parent's keys, computed from the row
+  index alone, so two of them partition the same rows without either seeing the
+  other -- which pairs come out together is an artefact of that index, and a
+  collision is a matter of the seed. The refusal names the constraint, both
+  fan-outs, and the form that does build a deduplicated edge table today: a
+  `Projection` with `columns=` and your own `sql=`. One exemption, and it is a
+  proof rather than a probability: a fan-out that provably gives no parent two
+  rows never repeats a parent key, so no two rows share that column and the pair
+  is distinct on that half alone. **One** of the two is enough -- twenty rows
+  over twenty companies partitioned flat, beside a `Zipf` over five people,
+  loads every time, and that person fan-out could not satisfy the proof at those
+  numbers. The conditions are flat sizes, no `childless` share, the parent
+  declared in the same shape, and `rows <= parents`; one row past that bound
+  some parent gets two and the refusal comes back.
+- **A fan-out beside a drawn column under one uniqueness is refused too, and
+  for the same reason a second fan-out is.** `Table(Seat, rows=100,
+  company=FanOut(Zipf()), label=Skew({"a": 1, "b": 1}))` over fifty companies
+  has capacity exactly one hundred, passed every check, and died inside `COPY`
+  at row 17 -- at a different row for the next seed. The proof does not need the
+  second column to be a partition: a `Distribution` is by contract a pure
+  function of the row index and of a draw derived from the field name and that
+  same index, so it cannot see which parent the fan-out gave its row, nothing
+  enumerates the pairs *inside a group*, and a group of three rows collides over
+  two labels whatever the table's total capacity says. No arithmetic decides it
+  either, because the quantity that would is the largest group the fan-out
+  produces and that is not known until the partition is resolved at build time.
+  The pigeonhole check still answers first where it applies, so a shape that
+  does not fit at all keeps its arithmetic; a shape that fits and cannot be
+  arranged now gets a refusal naming the fan-out, the drawn columns, and the
+  form that does keep such a constraint -- `Derived(relation, compute=...,
+  scope="group")`, which receives this row's position among its parent's
+  children. Two exemptions, and both are proofs rather than probabilities: a
+  column that is `Distinct`, because then there is nothing to arrange; and the
+  same non-colliding partition the entry above describes, because a collision
+  here is always two rows of one group and there is then no such group. Neither
+  is "this usually works" -- that is the case these refusals are *for*, and the
+  measured ones sit at ten and eleven times out of twenty.
+- **A forgotten foreign key is told how to declare one, rather than told that
+  relations are unsupported.** The message said "relations are not supported
+  yet, so this shape cannot be built. Declaring fan-out as a distribution is the
+  next release" -- true when it was written, wrong from the release after, and
+  still there several releases later. Forgetting one required foreign key is the
+  commonest possible mistake, so it is the first thing many readers ever see
+  this package say, and what it said was that the package could not do the thing
+  it exists for. It now names the column, the fan-out that fills it, and where
+  the parent's keys have to come from.
+- **`scaled_shape` no longer drops the rules and targets the shape declared.**
+  It rebuilt each `Table` without `statistics` and the `Shape` without
+  `invariants`, so a business rule stopped being checked in every scaled world --
+  which is every world a growth assertion builds -- and a table needing a raised
+  statistics target could not be scaled at any factor, including 1. Neither
+  raised, neither warned, and the suite passed either way: the build succeeded
+  and the declaration simply meant less than it said. A test now asserts that
+  scaling at factor 1 leaves the shape digest unchanged, so a field lost in the
+  copy shows up without needing a test per field, and a second one fails the day
+  a parameter is added to `Table` or `Shape` that this function does not forward.
+
 ## [0.10.0] — 2026-09-03
 
 ### Fixed
