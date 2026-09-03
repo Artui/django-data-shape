@@ -1436,7 +1436,68 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#django_data_shape.keys.uuid_keys.UuidKeys.is_disjoint_from_existing_rows" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        is_disjoint_from_existing_rows
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#django_data_shape.keys.uuid_keys.UuidKeys.canonical" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        canonical
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#django_data_shape.keys.md5_keys.Md5Keys" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Md5Keys
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Md5Keys">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#django_data_shape.keys.md5_keys.Md5Keys.key_sql" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        key_sql
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#django_data_shape.keys.md5_keys.Md5Keys.is_disjoint_from_existing_rows" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        is_disjoint_from_existing_rows
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#django_data_shape.keys.md5_keys.Md5Keys.canonical" class="md-nav__link">
     <span class="md-ellipsis">
       
         canonical
@@ -1467,6 +1528,17 @@
     <span class="md-ellipsis">
       
         SqlKeys
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#django_data_shape.keys.disjoint.Disjoint" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Disjoint
       
     </span>
   </a>
@@ -2766,7 +2838,68 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#django_data_shape.keys.uuid_keys.UuidKeys.is_disjoint_from_existing_rows" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        is_disjoint_from_existing_rows
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#django_data_shape.keys.uuid_keys.UuidKeys.canonical" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        canonical
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#django_data_shape.keys.md5_keys.Md5Keys" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Md5Keys
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Md5Keys">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#django_data_shape.keys.md5_keys.Md5Keys.key_sql" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        key_sql
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#django_data_shape.keys.md5_keys.Md5Keys.is_disjoint_from_existing_rows" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        is_disjoint_from_existing_rows
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#django_data_shape.keys.md5_keys.Md5Keys.canonical" class="md-nav__link">
     <span class="md-ellipsis">
       
         canonical
@@ -2797,6 +2930,17 @@
     <span class="md-ellipsis">
       
         SqlKeys
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#django_data_shape.keys.disjoint.Disjoint" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Disjoint
       
     </span>
   </a>
@@ -3688,7 +3832,12 @@ default interleaves them the way rows really arrive.</p>
 
     <div class="doc doc-contents ">
 
-        <p>The size distribution and the three shares that shape it. See <code>Canonical</code>.</p>
+        <p>The size distribution, the parents it spreads over, and the shares. See <code>Canonical</code>.</p>
+<p><code>parents</code> belongs here rather than being read as a filter applied
+afterwards: two shapes differing only in which parents they cover are
+two different worlds, and the template-database cache keys on this. A
+clone built for one tenant handed to a test asking for another would be
+the cache serving a world nobody declared.</p>
 
 
     </div>
@@ -6572,6 +6721,31 @@ in for.</p>
 <div class="doc doc-object doc-function">
 
 
+<h3 id="django_data_shape.keys.uuid_keys.UuidKeys.is_disjoint_from_existing_rows" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">is_disjoint_from_existing_rows</span>
+
+
+<a href="#django_data_shape.keys.uuid_keys.UuidKeys.is_disjoint_from_existing_rows" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">is_disjoint_from_existing_rows</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">bool</span>
+</span></code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Always. A 128-bit digest cannot land on a caller's row. See <code>Disjoint</code>.</p>
+<p>The full digest is what makes this a statement rather than a hope. A
+draw carries 53 bits, where birthday collisions arrive around ninety
+million rows; these are 122 bits after the version and variant are
+stamped, which is the space a version 4 UUID has and the space every
+application storing one is already relying on.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
 <h3 id="django_data_shape.keys.uuid_keys.UuidKeys.canonical" class="doc doc-heading">
             <span class="doc doc-object-name doc-function-name">canonical</span>
 
@@ -6583,6 +6757,147 @@ in for.</p>
     <div class="doc doc-contents ">
 
         <p>Nothing to say: the digest is a function of the seed and the row. See <code>Canonical</code>.</p>
+
+
+    </div>
+
+</div>
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h2 id="django_data_shape.keys.md5_keys.Md5Keys" class="doc doc-heading">
+            <span class="doc doc-object-name doc-class-name">Md5Keys</span>
+
+
+<a href="#django_data_shape.keys.md5_keys.Md5Keys" class="headerlink" title="Permanent link">&para;</a></h2>
+
+
+    <div class="doc doc-contents first">
+
+
+
+        <p>A version 4 shaped UUID per row, derived in Python <strong>and</strong> in SQL.</p>
+<p>The projection half of :class:<code>~django_data_shape.keys.uuid_keys.UuidKeys</code>,
+and a separate strategy rather than a second meaning for that one. The two
+produce different keys for the same row, so quietly making one become the
+other where a SQL twin is needed would change every key in every world
+already built, and would give one declaration two meanings depending on
+which statement filled the table.</p>
+<p><strong>Why md5 rather than blake2b.</strong> A
+:class:<code>~django_data_shape.projection.Projection</code> has no declared row count,
+so its rows never pass through Python and its keys have to be assigned by
+the <code>INSERT ... SELECT</code> that writes them -- which means the hash has to
+exist on both sides and agree byte for byte. <code>blake2b</code> has no PostgreSQL
+equivalent; <code>md5</code> is in the standard library and is a built-in function of
+the server. That is the whole of the reason, and it is worth being plain
+that <strong>this is not a security choice</strong>: nothing here authenticates anything,
+the input is a table's own seed and row index, and md5's weakness is
+collision resistance against an adversary who chooses the input. Nobody
+chooses these inputs.</p>
+<p>128 bits, of which 122 survive the version and variant stamp -- the same
+space every application storing a v4 UUID already relies on, and far past
+where birthday collisions matter for a test database.</p>
+<p><code>usedforsecurity=False</code> is passed because it has to be: on a FIPS build,
+<code>hashlib.md5</code> without it raises rather than returning a digest, which
+would make this strategy unusable on hosts that are otherwise fine.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="django_data_shape.keys.md5_keys.Md5Keys.key_sql" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">key_sql</span>
+
+
+<a href="#django_data_shape.keys.md5_keys.Md5Keys.key_sql" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">key_sql</span><span class="p">(</span><span class="n">stream</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">row</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span>
+</span></code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>The same digest, stamped the same way, computed by the server.</p>
+<p>The two halves are checked against each other rather than argued about:
+a test computes both for the same rows and compares them, which is the
+only form of agreement that means anything here.</p>
+<p><code>md5</code> takes the same eight-byte big-endian pair Python hashes, built
+with <code>to_hex</code>/<code>lpad</code> and turned back into bytes by <code>decode</code>, so
+neither side is hashing a rendering of the other's input. The stamp is
+two <code>overlay</code> calls on the hex digest: nibble 13 is the version and is
+always <code>4</code>, and nibble 17 is the variant, which keeps its low two bits
+and takes <code>8</code> in the high two.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="django_data_shape.keys.md5_keys.Md5Keys.is_disjoint_from_existing_rows" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">is_disjoint_from_existing_rows</span>
+
+
+<a href="#django_data_shape.keys.md5_keys.Md5Keys.is_disjoint_from_existing_rows" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">is_disjoint_from_existing_rows</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">bool</span>
+</span></code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Always, for the reason <code>UuidKeys</code> gives. See <code>Disjoint</code>.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="django_data_shape.keys.md5_keys.Md5Keys.canonical" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">canonical</span>
+
+
+<a href="#django_data_shape.keys.md5_keys.Md5Keys.canonical" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">canonical</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">object</span>
+</span></code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Nothing to say: the digest is a function of the seed and the row. See <code>Canonical</code>.</p>
+<p>Empty like <code>UuidKeys</code>' own, and not the same thing -- the strategy's
+type name is part of the digest, so two shapes differing only in which
+of them they use are two different worlds, which they are.</p>
 
 
     </div>
@@ -6694,6 +7009,80 @@ name when one is declared over it. Approximating instead -- a different hash
 in SQL from the one Python computes -- would give one strategy two meanings
 depending on which statement filled the table, which is the quiet divergence
 this package exists to prevent.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h2 id="django_data_shape.keys.disjoint.Disjoint" class="doc doc-heading">
+            <span class="doc doc-object-name doc-class-name">Disjoint</span>
+
+
+<a href="#django_data_shape.keys.disjoint.Disjoint" class="headerlink" title="Permanent link">&para;</a></h2>
+
+
+    <div class="doc doc-contents first">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="typing.Protocol">Protocol</span></code></p>
+
+
+
+        <p>A key strategy that cannot produce a key some existing row already holds.</p>
+<p>The opt-in protocol behind one refusal, and the refusal is worth stating
+before the protocol is. Building into a table that already has rows is
+normally refused, because this package assigns keys from 1 every time and a
+second build collides on the primary key -- an <code>IntegrityError</code> from
+inside <code>COPY</code> naming an index, which tells a reader nothing.</p>
+<p><strong>That reasoning is about integer keys, and the refusal was not.</strong> A
+:class:<code>~django_data_shape.keys.uuid_keys.UuidKeys</code> table derives a
+128-bit digest per row and cannot collide with anything a caller's factory
+wrote, so the refusal blocked the hybrid the documentation advertises --
+parents made by your own code, children made by this package -- for exactly
+the schemas where UUID keys are the norm.</p>
+<p>A strategy that does not implement this is read as <em>not</em> disjoint, which is
+the safe direction and the reason it is opt-in rather than a flag with a
+default. :class:<code>~django_data_shape.keys.key_function.KeyFunction</code> is the
+case that decides it: the caller's own function could return anything, this
+package cannot read it, and guessing "probably fine" would trade a clear
+refusal for a load that dies partway through.</p>
+<p><code>is_disjoint_from_existing_rows</code> returns a bool rather than the protocol
+being a bare marker, for the reason
+:class:<code>~django_data_shape.distributions.distinct.Distinct</code> does: the answer
+can be a property of the parameters and not only of the class.</p>
+<p><strong>It says nothing about anything but keys.</strong> A unique constraint on some
+other column can still collide with a row that was already there, and a
+business invariant can still be broken by rows this package did not write.
+Both are checked after the load, against the table as it then stands, which
+is the reading that stays true either way.</p>
 
 
 

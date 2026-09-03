@@ -373,6 +373,34 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#narrowing-which-parents" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Narrowing which parents
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Narrowing which parents">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#it-is-planner-visible-and-pinning-everything-to-one-tenant-is-a-lie" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        It is planner-visible, and pinning everything to one tenant is a lie
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#the-childless-tail" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -734,6 +762,34 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#narrowing-which-parents" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Narrowing which parents
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Narrowing which parents">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#it-is-planner-visible-and-pinning-everything-to-one-tenant-is-a-lie" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        It is planner-visible, and pinning everything to one tenant is a lie
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#the-childless-tail" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -920,6 +976,34 @@ nothing.</p>
 <p>Reading the keys is also what makes referential integrity hold <strong>by
 construction</strong>: every key written came out of the parent table, so there is
 nothing to validate afterwards.</p>
+<h2 id="narrowing-which-parents">Narrowing which parents<a class="headerlink" href="#narrowing-which-parents" title="Permanent link">&para;</a></h2>
+<p><code>parents=</code> spreads the table over the keys it names and no others:</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="n">Table</span><span class="p">(</span><span class="n">Session</span><span class="p">,</span> <span class="n">rows</span><span class="o">=</span><span class="mi">50</span><span class="p">,</span> <span class="n">company</span><span class="o">=</span><span class="n">FanOut</span><span class="p">(</span><span class="n">Constant</span><span class="p">(</span><span class="mi">1</span><span class="p">),</span> <span class="n">parents</span><span class="o">=</span><span class="p">[</span><span class="n">tenant</span><span class="o">.</span><span class="n">pk</span><span class="p">]),</span> <span class="n">label</span><span class="o">=</span><span class="n">Constant</span><span class="p">(</span><span class="s2">"s"</span><span class="p">))</span>
+</span></code></pre></div>
+<p>Real keys, read out of the parent table like any other fan-out — a key that
+matches no row is refused by name rather than quietly taking a smaller share.
+A <strong>list of keys, never a queryset</strong>: a declaration needs no connection, and
+evaluating a queryset here would give it one. Build the list yourself, which is
+the query you were going to run anyway.</p>
+<p><code>childless=</code> is then a share of the parents <em>named</em>. A parent outside the list
+has no children because it is not in this declaration, which is a different
+statement from one weighed at zero.</p>
+<h3 id="it-is-planner-visible-and-pinning-everything-to-one-tenant-is-a-lie">It is planner-visible, and pinning everything to one tenant is a lie<a class="headerlink" href="#it-is-planner-visible-and-pinning-everything-to-one-tenant-is-a-lie" title="Permanent link">&para;</a></h3>
+<p>This is the argument against the obvious use. A column pinned to a single parent
+has <code>n_distinct = 1</code>, and a planner that knows a tenant filter matches every row
+will price it at nothing — so a tenant-scoped query looks free in the test
+database and does not in production. That is the flattering, unreal shape this
+library exists to remove, arrived at through the library.</p>
+<p>Declare several tenants and make yours one of the heavy ones instead. The head
+of the distribution is reachable through
+<a href="#reading-the-fan-out-back"><code>fan_out_sizes</code></a>, so a test can ask which parent got
+the most rows rather than pinning to be sure:</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="n">counts</span> <span class="o">=</span> <span class="n">fan_out_sizes</span><span class="p">(</span><span class="n">shape</span><span class="p">,</span> <span class="n">Session</span><span class="p">,</span> <span class="s2">"company"</span><span class="p">)</span>
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="n">busiest</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="n">counts</span><span class="o">.</span><span class="n">ranked</span><span class="p">()[</span><span class="mi">0</span><span class="p">]</span>
+</span></code></pre></div>
+<p>Pin when the shape of the tenant column is genuinely not what is under test —
+a fixture for one screen, say — and know that you have given up any assertion
+about how a tenant filter is planned.</p>
 <h2 id="the-childless-tail">The childless tail<a class="headerlink" href="#the-childless-tail" title="Permanent link">&para;</a></h2>
 <p><code>childless=0.35</code> gives 35% of parents no children at all.</p>
 <p>The share is a probability per parent, not a quota, so it converges rather than
@@ -935,8 +1019,8 @@ join giving the same answer and giving different ones.</p>
 <p>A <code>OneToOneField</code> is a fan-out whose partition never gives a parent two rows,
 and the spelling is a flat distribution over at least as many parents as this
 table has rows:</p>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># over a Table(User, rows=50) or more</span>
-</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="n">Table</span><span class="p">(</span><span class="n">Profile</span><span class="p">,</span> <span class="n">rows</span><span class="o">=</span><span class="mi">50</span><span class="p">,</span> <span class="n">user</span><span class="o">=</span><span class="n">FanOut</span><span class="p">(</span><span class="n">Constant</span><span class="p">(</span><span class="mi">1</span><span class="p">)),</span> <span class="n">headline</span><span class="o">=</span><span class="n">Constant</span><span class="p">(</span><span class="s2">"hi"</span><span class="p">))</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="c1"># over a Table(User, rows=50) or more</span>
+</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="n">Table</span><span class="p">(</span><span class="n">Profile</span><span class="p">,</span> <span class="n">rows</span><span class="o">=</span><span class="mi">50</span><span class="p">,</span> <span class="n">user</span><span class="o">=</span><span class="n">FanOut</span><span class="p">(</span><span class="n">Constant</span><span class="p">(</span><span class="mi">1</span><span class="p">)),</span> <span class="n">headline</span><span class="o">=</span><span class="n">Constant</span><span class="p">(</span><span class="s2">"hi"</span><span class="p">))</span>
 </span></code></pre></div>
 <p><code>Constant(1)</code> rather than <code>Uniform(1, 1)</code>, which is refused: an inclusive range
 of one value is a range that says nothing, and a distribution asked for
@@ -959,14 +1043,14 @@ assertion about the head or the tail, and that needs to know <em>which</em> pare
 the head — which, without help, means a <code>GROUP BY</code> over the child table before
 the measurement has started.</p>
 <p><code>fan_out_sizes</code> answers it from the declaration instead:</p>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">django_data_shape</span><span class="w"> </span><span class="kn">import</span> <span class="n">fan_out_sizes</span>
-</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>
-</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="n">counts</span> <span class="o">=</span> <span class="n">fan_out_sizes</span><span class="p">(</span><span class="n">shape</span><span class="p">,</span> <span class="n">Order</span><span class="p">,</span> <span class="s2">"company"</span><span class="p">)</span>
-</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>
-</span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="n">whale</span><span class="p">,</span> <span class="n">orders</span> <span class="o">=</span> <span class="n">counts</span><span class="o">.</span><span class="n">ranked</span><span class="p">()[</span><span class="mi">0</span><span class="p">]</span>  <span class="c1"># the head</span>
-</span><span id="__span-3-6"><a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="n">quiet</span> <span class="o">=</span> <span class="n">counts</span><span class="o">.</span><span class="n">ranked</span><span class="p">()[</span><span class="o">-</span><span class="mi">5</span><span class="p">:]</span>  <span class="c1"># the tail</span>
-</span><span id="__span-3-7"><a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="n">nobody</span> <span class="o">=</span> <span class="n">counts</span><span class="o">.</span><span class="n">childless</span><span class="p">()</span>  <span class="c1"># the parents with no children at all</span>
-</span><span id="__span-3-8"><a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="k">assert</span> <span class="n">counts</span><span class="p">[</span><span class="n">whale</span><span class="p">]</span> <span class="o">==</span> <span class="n">orders</span>  <span class="c1"># and it is an ordinary mapping</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">django_data_shape</span><span class="w"> </span><span class="kn">import</span> <span class="n">fan_out_sizes</span>
+</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>
+</span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="n">counts</span> <span class="o">=</span> <span class="n">fan_out_sizes</span><span class="p">(</span><span class="n">shape</span><span class="p">,</span> <span class="n">Order</span><span class="p">,</span> <span class="s2">"company"</span><span class="p">)</span>
+</span><span id="__span-5-4"><a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>
+</span><span id="__span-5-5"><a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="n">whale</span><span class="p">,</span> <span class="n">orders</span> <span class="o">=</span> <span class="n">counts</span><span class="o">.</span><span class="n">ranked</span><span class="p">()[</span><span class="mi">0</span><span class="p">]</span>  <span class="c1"># the head</span>
+</span><span id="__span-5-6"><a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="n">quiet</span> <span class="o">=</span> <span class="n">counts</span><span class="o">.</span><span class="n">ranked</span><span class="p">()[</span><span class="o">-</span><span class="mi">5</span><span class="p">:]</span>  <span class="c1"># the tail</span>
+</span><span id="__span-5-7"><a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="n">nobody</span> <span class="o">=</span> <span class="n">counts</span><span class="o">.</span><span class="n">childless</span><span class="p">()</span>  <span class="c1"># the parents with no children at all</span>
+</span><span id="__span-5-8"><a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="k">assert</span> <span class="n">counts</span><span class="p">[</span><span class="n">whale</span><span class="p">]</span> <span class="o">==</span> <span class="n">orders</span>  <span class="c1"># and it is an ordinary mapping</span>
 </span></code></pre></div>
 <p>It costs one <code>SELECT</code> over the <strong>parent</strong> table. That is the asymmetry worth
 having: fifty thousand parents against two million children, and an aggregate
@@ -988,9 +1072,9 @@ same shape — which every cacheable shape is, since a template is built into a
 freshly migrated database — that is checked, and a mismatch raises
 <code>WorldChanged</code> rather than returning a plausible partition of a world nobody
 built:</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>Company holds 41 rows and this shape declares 40, so the fan-out for
-</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>Session.company would be spread over parents the children were never spread
-</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>across.
+<div class="language-text highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>Company holds 41 rows and this shape declares 40, so the fan-out for
+</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>Session.company would be spread over parents the children were never spread
+</span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>across.
 </span></code></pre></div>
 <p>Where the parents came from the ORM instead, there is nothing to check against
 and nothing is claimed: the answer describes the parents that are there. Ask
