@@ -7,7 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.0] — 2026-09-03
+
 ### Added
+
 - **`Paired` fills the second key of a many-to-many, and the edge count stays
   exact.** Two fan-outs on one through table are refused because a fan-out is a
   partition computed from the row index alone, so two of them partition the same
@@ -43,17 +46,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     the declared weights** rather than chosen, which systematic allocation is
     what makes possible: it converges as bands get finer where largest-remainder
     runs away, so "enough" is a limit rather than a number somebody tuned.
+
 - **`FanOutPlan.group_of`** answers which parent a row belongs to, which a
   pairing needs to choose partners inside this row's group.
 
-### Changed
-- **The two-fan-out refusal names the declaration that replaces it.** Its remedy
-  used to be a statement of your own, because nothing else could keep the
-  constraint. It now names `Paired` first and keeps `Projection(columns=, sql=)`
-  as the escape hatch for an edge set that has to be a particular one.
-
-
-### Added
 - **`Projection(..., through=Model)` says which model a derived join runs on.**
   An abstract base carrying `created_by`/`updated_by` to `User` -- a pattern most
   Django schemas have -- makes **any two models in the schema joinable**, so the
@@ -67,7 +63,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `through=` cannot narrow anything and the refusal says so instead of
   suggesting it.
 
+### Changed
+
+- **The two-fan-out refusal names the declaration that replaces it.** Its remedy
+  used to be a statement of your own, because nothing else could keep the
+  constraint. It now names `Paired` first and keeps `Projection(columns=, sql=)`
+  as the escape hatch for an edge set that has to be a particular one.
+
 ### Fixed
+
 - **A rounded `Uniform` can size a fan-out.**
   `FanOut(Uniform(1, 10, places=0))` was refused with "needs numeric fan-out
   sizes, but produced `Decimal('3')`" -- which reads as a contradiction, and was
@@ -79,6 +83,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the numeric tower plus `Decimal`, which `numbers.Real` deliberately excludes,
   and `Fraction` and numpy scalars come along with it. `bool` stays refused. The
   message also names a remedy now, which it was alone in not doing.
+
 - **`columns=` accepts the column an `INSERT` actually lists.** The refusal that
   sends a reader there says "the select's columns are what the insert lists", and
   what an insert lists for a foreign key is `event_id` -- which was then refused
@@ -87,7 +92,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   are accepted and resolve to the same column, the messages say so, and the same
   dict is read for `statistics=` so the two cannot disagree about what a column
   is called.
-
 
 ## [0.13.0] — 2026-09-03
 
@@ -963,7 +967,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   into `COPY FROM STDIN`, which psycopg 2 cannot do without materialising them
   first.
 
-[Unreleased]: https://github.com/Artui/django-data-shape/compare/v0.13.0...HEAD
+[Unreleased]: https://github.com/Artui/django-data-shape/compare/v0.14.0...HEAD
+[0.14.0]: https://github.com/Artui/django-data-shape/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/Artui/django-data-shape/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/Artui/django-data-shape/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/Artui/django-data-shape/compare/v0.10.0...v0.11.0
