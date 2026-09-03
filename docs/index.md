@@ -74,6 +74,11 @@ print(result.rows)
   `save()`, and nothing here calls `save()`, so a `NOT NULL` column with a
   Python-level default has nothing behind it in the database. The value `save()`
   would have written is used instead.
+- **Except on a foreign key, where it is refused.** A key that did not come out
+  of the parent's own table is a key drawn from nothing, so a `default=` cannot
+  stand in for a fan-out the way it stands in for a scalar. A required relation
+  carrying one is refused by name, like any other undeclared required relation.
+  A real `db_default` is DDL, so a column carrying one is left to the database.
 - **A callable default is refused.** `uuid4` varies per row and `dict` does not,
   and nothing on the field distinguishes them. Declare a distribution instead.
 - **A declaration is read-only once built.** Every rule runs in the constructor,

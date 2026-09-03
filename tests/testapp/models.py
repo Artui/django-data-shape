@@ -461,13 +461,17 @@ class Seat(models.Model):
 class Booking(models.Model):
     """A model carrying every conditional constraint the pre-check cannot read.
 
-    One model rather than seven, because what is being tested is a set of
-    skips: a condition that is not a single equality, one written over an
-    expression rather than fields, one grouped by a column no fan-out
-    partitions, one joining two clauses, one whose single clause is itself a
-    nested Q, one comparing rather than equating, and a check constraint, which
-    is not a unique constraint at all. A declaration naming this model has to be
-    accepted whole.
+    One model rather than six, because what is being tested is a set of skips:
+    a condition written over an expression rather than fields, one grouped by a
+    column no fan-out partitions, one joining two clauses, one whose single
+    clause is itself a nested Q, one comparing rather than equating, and a check
+    constraint, which is not a unique constraint at all. A declaration naming
+    this model has to be accepted whole.
+
+    ``state__in`` used to be here as a seventh, standing for "not a single
+    equality". It moved to :class:`Review` when it stopped being a skip: a set
+    the caller wrote out is a list of values, and deciding membership in it
+    needs nothing this package should not do.
 
     ``seats`` is what makes the comparison bite: declared as ``Constant(0)`` a
     condition read as ``seats == 0`` would be refused, so a suffix check that
@@ -482,11 +486,6 @@ class Booking(models.Model):
 
     class Meta:
         constraints = [
-            models.UniqueConstraint(
-                fields=["company"],
-                condition=models.Q(state__in=["HELD", "PAID"]),
-                name="booking_state_in_is_not_an_equality",
-            ),
             models.UniqueConstraint(
                 models.functions.Lower("room"),
                 condition=models.Q(state="HELD"),
@@ -677,3 +676,60 @@ class Memo(Timestamped):
     """
 
     body = models.CharField(max_length=100)
+
+
+class Review(models.Model):
+    """A partial unique whose condition names a **set** of values, not one.
+
+    "One open review per project" is spelled with ``__in`` far more often than
+    with ``=``, because open-ness is a handful of statuses rather than a single
+    one. The arithmetic that refuses the ``=`` form has to reach this one too:
+    a column that provably holds a value from the set in every row breaks the
+    constraint exactly as a column pinned to one of them does.
+    """
+
+    company = models.ForeignKey(Company, on_delete=models.CASCADE)
+    status = models.CharField(max_length=20, default="DRAFT")
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["company"],
+                condition=models.Q(status__in=["DRAFT", "IN_REVIEW", "APPROVED"]),
+                name="one_open_review_per_company",
+            ),
+        ]
+
+
+class Assigned(models.Model):
+    """A required foreign key carrying a Python-level ``default=``.
+
+    The gap the required-relation refusal left open: a ``default`` on a foreign
+    key is applied by ``save()``, which this package never calls, so the column
+    is neither refused nor filled and the load dies on a not-null violation --
+    the exact failure that refusal exists to replace.
+    """
+
+    company = models.ForeignKey(Company, on_delete=models.CASCADE, default=1)
+    label = models.CharField(max_length=20)
+
+
+class Escalation(models.Model):
+    """A set condition written as a ``set``, which has no order of its own.
+
+    Separate from :class:`Review` because the two spellings take different
+    routes: a list or tuple keeps the order the caller wrote, and a set has to
+    be given one, or the refusal message it lands in changes between runs.
+    """
+
+    company = models.ForeignKey(Company, on_delete=models.CASCADE)
+    status = models.CharField(max_length=20, default="RAISED")
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["company"],
+                condition=models.Q(status__in={"RAISED", "ACKNOWLEDGED"}),
+                name="one_live_escalation_per_company",
+            ),
+        ]

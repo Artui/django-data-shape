@@ -107,15 +107,15 @@ def _check_one(table: Table, constraint: UniqueConstraint, rows_of: dict[type[Mo
         _check_independent_fan_outs(table, constraint.name, fields, rows_of)
         _check_a_fan_out_beside_a_draw(table, constraint.name, fields, capacity, rows_of)
         return
-    decoded = _equality(constraint.condition)
+    decoded = _condition(constraint.condition)
     if decoded is None:
         return
-    column, value = decoded
+    column, values = decoded
     declared = table.fields.get(column)
     grouped_by_fan_out = any(isinstance(table.fields.get(name), FanOut) for name in fields)
     if declared is None or not grouped_by_fan_out:
         return
-    _check_conditional(table, constraint.name, fields, capacity, column, value, declared)
+    _check_conditional(table, constraint.name, fields, capacity, column, values, declared)
 
 
 def _check_unconditional(
@@ -366,58 +366,78 @@ def _check_conditional(
     fields: tuple[str, ...],
     capacity: int | None,
     column: str,
-    value: object,
+    values: tuple[object, ...],
     declared: object,
 ) -> None:
-    """One row per group may carry the condition's value. Who is filling it?"""
+    """One row per group may sit inside the condition. Who is filling it?
+
+    ``values`` is what satisfies the condition -- one member for an equality,
+    several for an ``__in``. Nothing below distinguishes the two, because
+    nothing below needs to: a row is inside the condition if its value is any
+    of them, and the constraint permits one such row per group either way.
+    """
     where = f"{table.model.__name__}.{column}"
     group = ", ".join(fields)
+    matching = _matching(column, values)
     if isinstance(declared, PerParent):
         if declared.relation not in fields:
             raise InvalidShape(
                 f"{where} is decided per group of {declared.relation!r}, but {name} groups by "
                 f"({group}). A rule kept once per {declared.relation} says nothing about how "
-                f"many rows with {column}={value!r} a ({group}) ends up with. Group the "
+                f"many rows with {matching} a ({group}) ends up with. Group the "
                 "PerParent by one of the constraint's own fields."
             )
-        if declared.special == value:
-            if declared.count > 1:
-                raise InvalidShape(
-                    f"{where} puts {value!r} on {declared.count} rows of every group, and {name} "
-                    "permits one. count= is what N-winners-per-contest is for, and a unique "
-                    "constraint is the case it is not."
-                )
+        if declared.special in values and declared.count > 1:
+            raise InvalidShape(
+                f"{where} puts {declared.special!r} on {declared.count} rows of every group, and "
+                f"{name} permits one. count= is what N-winners-per-contest is for, and a unique "
+                "constraint is the case it is not."
+            )
+        # What decides this is the *rest* of the group, whichever side of the
+        # condition the special row falls: one special row inside it is exactly
+        # what the constraint permits, and none at all is fewer. A set makes the
+        # case reachable that an equality made hard to write -- `last` and
+        # `rest` can both be inside the condition, so the declaration that
+        # answers the equality form breaks this one. PerParent has already
+        # narrowed `rest` to a plain value or a distribution that enumerates
+        # itself, so this is decidable rather than merely unproven.
+        if _produces_any(declared.rest, values) is False:
             return
-        # The special value is a different one, so the constraint's value can
-        # only arrive through the rest of the group -- which PerParent has
-        # already narrowed to a plain value or a distribution that enumerates
-        # itself, so this is decidable either way.
-        if not _produces(declared.rest, value):
-            return
-    elif _produces(declared, value) is False:
+    elif _produces_any(declared, values) is False:
         return
 
     permits = (
-        f"at most {capacity} rows with {column}={value!r}, one per ({group})"
+        f"at most {capacity} rows with {matching}, one per ({group})"
         if capacity is not None
-        else f"at most one row with {column}={value!r} per ({group})"
+        else f"at most one row with {matching} per ({group})"
     )
-    asks = _asks(table, declared, value)
+    asks = _asks(table, declared, values)
     raise InvalidShape(
         f"{name} permits {permits}; {where} is filled by {declared!r}, which {asks}. A rule about "
         "a group cannot be kept by a draw made per row, at any weight -- a smaller share only "
         "moves the collision later into the load. Declare the column with "
-        f"PerParent({fields[0]!r}, last={value!r}, rest=...), which puts it on one row of each "
-        "group and makes the count derived from the fan-out rather than chosen beside it."
+        f"PerParent({fields[0]!r}, last={values[0]!r}, rest=...), which puts it on one row of "
+        "each group and makes the count derived from the fan-out rather than chosen beside it. "
+        "rest= has to sit outside the condition, which is the whole of what makes the group's "
+        "other rows invisible to it."
     )
 
 
-def _asks(table: Table, declared: object, value: object) -> str:
-    """The declaration's own arithmetic, quoted back at it when it has any."""
+def _asks(table: Table, declared: object, values: tuple[object, ...]) -> str:
+    """The declaration's own arithmetic, quoted back at it when it has any.
+
+    The shares of **every** member are totalled, because any of them puts the
+    row inside the condition. Quoting one member's share against a set would
+    understate the ask, and understating it in a refusal is how a caller
+    concludes the refusal is wrong.
+    """
     if isinstance(declared, Categorical):
-        share = next((s for v, s in declared.shares().items() if v == value), 0.0)
+        shares = declared.shares()
+        share = sum(weight for value, weight in shares.items() if value in values)
         return f"asks for {round(table.rows * share)} of them"
-    return f"draws {value!r} independently per row"
+    if len(values) == 1:
+        return f"draws {values[0]!r} independently per row"
+    return f"draws one of ({', '.join(repr(value) for value in values)}) independently per row"
 
 
 def _capacity(table: Table, fields: tuple[str, ...], rows_of: dict[type[Model], int]) -> int | None:
@@ -446,6 +466,21 @@ def _capacity(table: Table, fields: tuple[str, ...], rows_of: dict[type[Model], 
         else:
             return None
     return total
+
+
+def _produces_any(declared: object, values: tuple[object, ...]) -> bool | None:
+    """Whether this declaration can put **any** of these in a row.
+
+    The three-valued answer of :func:`_produces`, lifted over a set the same way
+    the constraint reads it. One provable yes is a yes; every member provably
+    absent is the only no, because a single unreadable member leaves the row
+    able to land inside the condition. Unknown stays unknown and is read as a
+    yes by the caller, which is the direction a refusal must never get wrong.
+    """
+    answers = [_produces(declared, value) for value in values]
+    if any(answer is True for answer in answers):
+        return True
+    return False if all(answer is False for answer in answers) else None
 
 
 def _produces(declared: object, value: object) -> bool | None:
@@ -500,13 +535,27 @@ def _is_declaration(declared: object) -> bool:
     return callable(getattr(type(declared), "value", None))
 
 
-def _equality(condition: Q) -> tuple[str, object] | None:
-    """A condition of the form ``Q(column=value)``, or None for anything else.
+def _condition(condition: Q) -> tuple[str, tuple[object, ...]] | None:
+    """The column a condition tests and the values that satisfy it, or None.
 
-    Only the single, un-negated equality is read. Everything else -- ``__in``, a
-    negation, two clauses joined -- would mean this package deciding which rows
-    an arbitrary predicate matches, which is the database's job and not a job
-    worth half-doing.
+    ``Q(column=value)`` and ``Q(column__in=[...])``, both un-negated and alone.
+    An equality is returned as a set of one, because it *is* one and the
+    arithmetic downstream does not care how many members it has: what decides
+    the refusal is whether a row can land inside the condition, and membership
+    answers that for both spellings.
+
+    **The set form is the commoner one in real schemas**, which is why reading
+    only the equality was a gap rather than a simplification. "One open review
+    per project" is open-ness across three statuses far more often than one, and
+    a consumer met exactly that -- their shape was accepted, and the identical
+    declaration spelled with ``=`` was refused with the arithmetic in it.
+
+    Everything past these two is still declined: a negation, two clauses joined,
+    a lookup like ``__gt``, or an ``__in`` over a queryset rather than a literal
+    sequence. Those would mean this package deciding which rows an arbitrary
+    predicate matches, which is the database's job and not one worth half-doing.
+    A set the caller wrote out is not that -- it is a list of values, and
+    checking membership in it needs no query planner.
     """
     if condition.negated or len(condition.children) != 1:
         return None
@@ -515,6 +564,24 @@ def _equality(condition: Q) -> tuple[str, object] | None:
         return None
     lookup, value = child
     column, _, suffix = str(lookup).partition("__")
-    if suffix not in ("", "exact"):
+    if suffix in ("", "exact"):
+        return column, (value,)
+    if suffix != "in" or not isinstance(value, (list, tuple, set, frozenset)):
         return None
-    return column, value
+    # A set has no order of its own, and this tuple reaches the caller's screen
+    # in a refusal message. Ordering it by repr keeps that message the same
+    # between runs, which a test asserting on it has to be able to rely on.
+    # An empty set needs no special case and deliberately does not get one: it
+    # matches no row, and `_produces_any` answers "provably never" for it
+    # already, because every member being absent is vacuously true of no
+    # members. A branch here would say the same thing twice and have to be
+    # covered twice.
+    members = tuple(value) if isinstance(value, (list, tuple)) else tuple(sorted(value, key=repr))
+    return column, members
+
+
+def _matching(column: str, values: tuple[object, ...]) -> str:
+    """The condition written the way the caller wrote it, for the message."""
+    if len(values) == 1:
+        return f"{column}={values[0]!r}"
+    return f"{column} in ({', '.join(repr(value) for value in values)})"
