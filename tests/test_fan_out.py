@@ -40,3 +40,40 @@ def test_any_positive_distribution_can_size_the_partition() -> None:
     # legitimate declaration for a table that genuinely has one.
     assert FanOut(Uniform(1, 10)).sizes is not None
     assert FanOut(Constant(1)).childless == 0.0
+
+
+def test_parents_narrows_the_partition_to_the_keys_it_names() -> None:
+    fan_out = FanOut(Zipf(), parents=[7, 9])
+
+    assert fan_out.parents == (7, 9)
+
+
+def test_no_parents_declared_is_every_parent_there_is() -> None:
+    assert FanOut(Zipf()).parents is None
+
+
+def test_an_empty_parent_list_is_refused_rather_than_read_as_all_of_them() -> None:
+    # The dangerous reading. An empty sequence is falsy, so treating it as "not
+    # declared" would spread the table over every parent -- the opposite of what
+    # was asked, silently, in the one declaration whose whole point is narrowing.
+    with pytest.raises(InvalidShape, match="parents= names no parent"):
+        FanOut(Zipf(), parents=[])
+
+
+def test_a_parent_named_twice_is_refused() -> None:
+    # Not deduplicated. A key named twice would weigh that parent twice, so the
+    # partition would not be the one the caller wrote -- and the likeliest cause
+    # is a list built by a loop that ran once too often.
+    with pytest.raises(InvalidShape, match="names 7 more than once"):
+        FanOut(Zipf(), parents=[7, 9, 7])
+
+
+def test_parents_are_part_of_what_the_declaration_says() -> None:
+    # The template-database cache keys on canonical(), and two shapes differing
+    # only in which parents they spread over are two different worlds.
+    assert FanOut(Zipf(), parents=[1]).canonical() != FanOut(Zipf(), parents=[2]).canonical()
+    assert FanOut(Zipf(), parents=[1]).canonical() != FanOut(Zipf()).canonical()
+
+
+def test_parents_reads_back_in_the_repr() -> None:
+    assert "parents=(7, 9)" in repr(FanOut(Zipf(), parents=[7, 9]))

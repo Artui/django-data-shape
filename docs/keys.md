@@ -48,6 +48,45 @@ UUID-keyed project unable to use this package at all.
 key would make the primary key -- and every foreign key pointing at it -- differ
 between two builds of the same shape.
 
+### `Md5Keys`, for a UUID table a projection fills
+
+A [projection](projections.md) has no declared row count, so its rows never pass
+through Python and its keys are written by the statement that inserts them. That
+needs the same rule on both sides, and `blake2b` has no PostgreSQL equivalent --
+so `UuidKeys` cannot fill one, and used to be where a UUID-keyed projection
+stopped.
+
+`keys=Md5Keys()` is the same idea over `md5`, which exists in both places:
+
+```python
+Projection(Submission, per=Request, copying=Template, keys=Md5Keys())
+```
+
+**A different strategy, never a second meaning for `UuidKeys`.** The two draw
+different keys for the same row, so one silently becoming the other where a SQL
+twin was needed would change every key in every world already built. Declare it
+where you need it.
+
+The two halves are checked against each other rather than argued about: a test
+computes fifty keys in Python and fifty in PostgreSQL and compares them.
+
+`md5` here is **not** a security choice. Nothing authenticates anything, the
+input is a table's own seed and row index, and md5's weakness is collision
+resistance against someone who picks the input. Nobody picks these.
+
+### Building beside rows your own code made
+
+Both UUID strategies say they cannot collide with rows already in the table, so
+building into one that already has some is allowed -- which is what makes
+"parents from your factory, children from here" work. `SequentialKeys` assigns
+from 1 and does collide, so that stays refused, and `KeyFunction` is read the
+same way because this package cannot know what your function returns.
+
+It is a claim about **keys and nothing else**. A unique constraint on another
+column can still meet a row that was already there, and an invariant can still
+be broken by rows this package did not write -- both are checked after the load,
+against the table as it then stands.
+
 ## Declaring your own
 
 `KeyFunction` takes any deterministic function of the row index:

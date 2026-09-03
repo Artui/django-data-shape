@@ -58,6 +58,46 @@ Reading the keys is also what makes referential integrity hold **by
 construction**: every key written came out of the parent table, so there is
 nothing to validate afterwards.
 
+## Narrowing which parents
+
+`parents=` spreads the table over the keys it names and no others:
+
+```python
+Table(Session, rows=50, company=FanOut(Constant(1), parents=[tenant.pk]), label=Constant("s"))
+```
+
+Real keys, read out of the parent table like any other fan-out — a key that
+matches no row is refused by name rather than quietly taking a smaller share.
+A **list of keys, never a queryset**: a declaration needs no connection, and
+evaluating a queryset here would give it one. Build the list yourself, which is
+the query you were going to run anyway.
+
+`childless=` is then a share of the parents *named*. A parent outside the list
+has no children because it is not in this declaration, which is a different
+statement from one weighed at zero.
+
+### It is planner-visible, and pinning everything to one tenant is a lie
+
+This is the argument against the obvious use. A column pinned to a single parent
+has `n_distinct = 1`, and a planner that knows a tenant filter matches every row
+will price it at nothing — so a tenant-scoped query looks free in the test
+database and does not in production. That is the flattering, unreal shape this
+library exists to remove, arrived at through the library.
+
+Declare several tenants and make yours one of the heavy ones instead. The head
+of the distribution is reachable through
+[`fan_out_sizes`](#reading-the-fan-out-back), so a test can ask which parent got
+the most rows rather than pinning to be sure:
+
+```python
+counts = fan_out_sizes(shape, Session, "company")
+busiest, _ = counts.ranked()[0]
+```
+
+Pin when the shape of the tenant column is genuinely not what is under test —
+a fixture for one screen, say — and know that you have given up any assertion
+about how a tenant filter is planned.
+
 ## The childless tail
 
 `childless=0.35` gives 35% of parents no children at all.

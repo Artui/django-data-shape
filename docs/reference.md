@@ -80,9 +80,13 @@
 
 ::: django_data_shape.keys.uuid_keys.UuidKeys
 
+::: django_data_shape.keys.md5_keys.Md5Keys
+
 ::: django_data_shape.keys.key_function.KeyFunction
 
 ::: django_data_shape.keys.sql_keys.SqlKeys
+
+::: django_data_shape.keys.disjoint.Disjoint
 
 ## Distributions
 

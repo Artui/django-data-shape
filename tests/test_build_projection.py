@@ -10,6 +10,7 @@ from django_data_shape import (
     Constant,
     FanOut,
     InvalidShape,
+    Md5Keys,
     Projection,
     Sequential,
     Shape,
@@ -20,6 +21,7 @@ from django_data_shape import (
     Zipf,
 )
 from django_data_shape import build as build_shape
+from django_data_shape.utils import field_stream
 from tests.testapp.models import (
     Attendance,
     AuditedSession,
@@ -27,6 +29,7 @@ from tests.testapp.models import (
     EventSession,
     Template,
     TemplateSession,
+    UuidSession,
 )
 
 pytestmark = [
@@ -423,3 +426,45 @@ def test_the_same_statement_without_reads_is_told_what_is_missing() -> None:
         )
 
     assert "name its inputs with reads=" in str(raised.value)
+
+
+def test_a_uuid_keyed_table_can_be_projected_once_its_keys_have_a_sql_form() -> None:
+    """The case the refusal used to end, built end to end.
+
+    A projection's rows never pass through Python, so its keys are written by
+    the statement that inserts them -- and ``UuidKeys`` derives from ``blake2b``,
+    which PostgreSQL has no equivalent for. That refused every UUID-keyed
+    projection, which is most of them in a modern schema, while
+    ``Projection(columns=, sql=)`` remained the only way through.
+
+    ``Md5Keys`` is the same rule on both sides, so this builds. What is asserted
+    is not that rows appeared but that the **keys are the ones the strategy
+    says**: a SQL half that merely produced well-formed UUIDs would pass a row
+    count and still be a different rule from the Python half.
+    """
+    shape = Shape(
+        Projection(UuidSession, per=Event, copying=TemplateSession, keys=Md5Keys()),
+        Table(Template, rows=5, name=Constant("t")),
+        Table(
+            TemplateSession,
+            rows=20,
+            template=FanOut(Constant(1)),
+            title=Constant("s"),
+            minutes=Sequential(15, 1),
+        ),
+        Table(Event, rows=12, template=FanOut(Uniform(1, 3)), name=Constant("e")),
+        seed=3,
+    )
+
+    build_shape(shape)
+
+    keys = list(UuidSession.objects.order_by("id").values_list("id", flat=True))
+    assert keys
+    assert all(key.version == 4 for key in keys)
+    # The keys the strategy would have produced for the same row indices, in the
+    # same order -- so the two halves are compared rather than merely both run.
+    # Compared as sets: the rows come back ordered by a UUID, which is not the
+    # order they were assigned in, so an order-sensitive assertion here would be
+    # asserting on the sort and not on the keys.
+    stream = field_stream(shape.seed, UuidSession._meta.db_table, ":key")
+    assert set(keys) == {Md5Keys().key_for(row, stream) for row in range(len(keys))}

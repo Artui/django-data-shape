@@ -114,7 +114,14 @@ def fan_out_sizes(
     )
     keys = plan.parent_keys()
 
-    parent_declaration = declared.get(parent._meta.db_table)
+    # A narrowed fan-out covers the keys it named and no others, so the parent
+    # table holding more rows than the partition covers is the declaration
+    # working rather than the world moving. The failure WorldChanged exists for
+    # is still caught, and caught earlier: a named key that is no longer a row is
+    # refused by name when the partition is resolved, above.
+    parent_declaration = (
+        None if fan_out.parents is not None else declared.get(parent._meta.db_table)
+    )
     if isinstance(parent_declaration, Table) and len(keys) != parent_declaration.rows:
         raise WorldChanged(
             f"{parent.__name__} holds {len(keys)} rows and this shape declares "

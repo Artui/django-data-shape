@@ -9,6 +9,7 @@ from django.db import connection, models
 from django_data_shape import (
     InvalidShape,
     KeyFunction,
+    Md5Keys,
     Projection,
     SequentialKeys,
     SqlKeys,
@@ -184,8 +185,19 @@ def test_a_key_strategy_with_no_sql_form_is_refused_by_name() -> None:
     with pytest.raises(InvalidShape, match="cannot assign its keys") as raised:
         Projection(UuidSession, per=Event, copying=TemplateSession)
 
-    assert "UuidKeys()" in str(raised.value)
+    message = str(raised.value)
+    assert "UuidKeys()" in message
     assert not isinstance(UuidKeys(), SqlKeys)
+    # A refusal that names no remedy leaves a UUID-keyed projection looking
+    # unsupported, when it is one declaration away. Md5Keys is that declaration,
+    # and the message says why it is a different strategy rather than this one
+    # gaining a SQL half.
+    assert "keys=Md5Keys()" in message
+
+
+def test_the_remedy_the_refusal_names_is_accepted() -> None:
+    """The refusal above is a signpost, so what it points at has to be reachable."""
+    Projection(UuidSession, per=Event, copying=TemplateSession, keys=Md5Keys())
 
 
 def test_a_declared_strategy_with_no_sql_form_is_refused_too() -> None:

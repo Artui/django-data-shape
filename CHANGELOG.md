@@ -7,6 +7,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`FanOut(parents=[...])` narrows a fan-out to the parents it names**, which
+  is the only gap two independent consumers reached separately: a tenant-scoped
+  schema could not pin a foreign key to one pre-existing company, and a
+  `GenericForeignKey` fanned out over every row of `django_content_type`. Real
+  keys, narrowed by the database rather than filtered afterwards, and a named
+  key that matches no row is refused **by key** rather than quietly taking a
+  smaller share -- that failure is silent otherwise, because the rows that would
+  have gone to it go to the others instead, or nowhere if it was the only one.
+  A list of keys and never a queryset: a declaration needs no connection, and
+  evaluating one here would give it one.
+  - It reaches the arithmetic as well as the load. Capacity for a narrowed
+    column is the **named** count, so the pigeonhole no longer overstates the
+    room by the ratio of the two, and the same substitution makes the
+    no-collision exemption read the named count. `fan_out_sizes` no longer
+    reports `WorldChanged` for a narrowed partition, because a parent table
+    holding more rows than the partition covers is the declaration working --
+    and a named key that has since gone is refused earlier, by name.
+  - **The documentation argues against the obvious use**, because the obvious
+    use is against this package's own thesis: a column pinned to a single parent
+    has `n_distinct = 1`, so a tenant filter is priced at nothing and looks free
+    in a test database and does not in production. The recipe is several tenants
+    with yours among the heavy ones, reached through `fan_out_sizes`.
+- **`Md5Keys` is a UUID key strategy with a SQL twin**, so a projection can fill
+  a UUID-keyed table. A projection has no declared row count, so its rows never
+  pass through Python and its keys are written by the statement that inserts
+  them -- and `blake2b` has no PostgreSQL equivalent, which is where every
+  UUID-keyed projection used to stop. `md5` exists on both sides. **A separate
+  strategy, never a second meaning for `UuidKeys`**: the two draw different keys
+  for the same row, so substituting one for the other would change every key in
+  every world already built. The two halves are compared against a real server
+  rather than against a checked-in fixture, which would only prove the generator
+  had not changed. The projection refusal now names it as the remedy.
+- **`Disjoint`, the seventh opt-in protocol**, which is how a key strategy says
+  its keys cannot collide with rows already in the table.
+
+### Fixed
+- **A UUID-keyed table can be built beside rows your own code made.** Building
+  over a non-empty table is refused because this package assigns keys from 1 and
+  a second build collides -- and that sentence is about integer keys, where the
+  refusal was not. Both UUID strategies derive a 128-bit digest per row and
+  cannot land on a factory's row, so the refusal blocked the hybrid this package
+  documents in exactly the schemas where UUID primary keys are the norm.
+  `SequentialKeys` still collides and is still refused, and `KeyFunction` is
+  read as able to collide because this package cannot read your function.
+
+
 ## [0.12.0] — 2026-09-03
 
 ### Fixed

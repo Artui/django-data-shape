@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 from django_data_shape.distributions.distribution import Distribution
 from django_data_shape.invalid_shape import InvalidShape
 
@@ -52,6 +54,7 @@ class FanOut:
         self,
         sizes: Distribution,
         *,
+        parents: Sequence[object] | None = None,
         childless: float = 0.0,
         null: float = 0.0,
         placement: str = "arrival",
@@ -65,7 +68,32 @@ class FanOut:
             raise InvalidShape(
                 f"FanOut placement must be one of {', '.join(PLACEMENTS)}, got {placement!r}."
             )
+        narrowed = None if parents is None else tuple(parents)
+        if narrowed is not None:
+            # An empty sequence is falsy, and reading it as "not declared" would
+            # spread the table over every parent there is -- the opposite of what
+            # was asked, silently, in the one argument whose whole purpose is
+            # narrowing. So the two are told apart by `is None` and this is a
+            # refusal rather than a default.
+            if not narrowed:
+                raise InvalidShape(
+                    "FanOut parents= names no parent, so there is nothing to spread these rows "
+                    "over. Leave it out to use every parent in the table, or name at least one."
+                )
+            # Not deduplicated: a key named twice weighs that parent twice, so
+            # the partition would not be the one written down, and the likeliest
+            # cause is a list built by a loop that ran once too often.
+            seen: set[object] = set()
+            for key in narrowed:
+                if key in seen:
+                    raise InvalidShape(
+                        f"FanOut parents= names {key!r} more than once. A repeated key weighs "
+                        "that parent twice, which is a different partition from the one this "
+                        "declaration reads as."
+                    )
+                seen.add(key)
         self._sizes = sizes
+        self._parents = narrowed
         self._childless = childless
         self._null = null
         self._placement = placement
@@ -73,6 +101,10 @@ class FanOut:
     @property
     def sizes(self) -> Distribution:
         return self._sizes
+
+    @property
+    def parents(self) -> tuple[object, ...] | None:
+        return self._parents
 
     @property
     def childless(self) -> float:
@@ -87,11 +119,19 @@ class FanOut:
         return self._placement
 
     def canonical(self) -> object:
-        """The size distribution and the three shares that shape it. See ``Canonical``."""
-        return (self._sizes, self._childless, self._null, self._placement)
+        """The size distribution, the parents it spreads over, and the shares. See ``Canonical``.
+
+        ``parents`` belongs here rather than being read as a filter applied
+        afterwards: two shapes differing only in which parents they cover are
+        two different worlds, and the template-database cache keys on this. A
+        clone built for one tenant handed to a test asking for another would be
+        the cache serving a world nobody declared.
+        """
+        return (self._sizes, self._parents, self._childless, self._null, self._placement)
 
     def __repr__(self) -> str:
+        narrowed = "" if self._parents is None else f"parents={self._parents!r}, "
         return (
-            f"FanOut({self._sizes!r}, childless={self._childless!r}, "
+            f"FanOut({self._sizes!r}, {narrowed}childless={self._childless!r}, "
             f"null={self._null!r}, placement={self._placement!r})"
         )
