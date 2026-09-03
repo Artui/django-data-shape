@@ -710,6 +710,34 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#django_data_shape.paired.Paired" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Paired
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Paired">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#django_data_shape.paired.Paired.canonical" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        canonical
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#django_data_shape.fan_out_sizes.fan_out_sizes" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -781,6 +809,17 @@
   
     <nav class="md-nav" aria-label="Projection">
       <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#django_data_shape.projection.Projection.through" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        through
+      
+    </span>
+  </a>
+  
+</li>
         
           <li class="md-nav__item">
   <a href="#django_data_shape.projection.Projection.statistics" class="md-nav__link">
@@ -2112,6 +2151,34 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#django_data_shape.paired.Paired" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Paired
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Paired">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#django_data_shape.paired.Paired.canonical" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        canonical
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#django_data_shape.fan_out_sizes.fan_out_sizes" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2183,6 +2250,17 @@
   
     <nav class="md-nav" aria-label="Projection">
       <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#django_data_shape.projection.Projection.through" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        through
+      
+    </span>
+  </a>
+  
+</li>
         
           <li class="md-nav__item">
   <a href="#django_data_shape.projection.Projection.statistics" class="md-nav__link">
@@ -3852,6 +3930,112 @@ the cache serving a world nobody declared.</p>
 
 </div>
 
+<div class="doc doc-object doc-class">
+
+
+
+<h2 id="django_data_shape.paired.Paired" class="doc doc-heading">
+            <span class="doc doc-object-name doc-class-name">Paired</span>
+
+
+<a href="#django_data_shape.paired.Paired" class="headerlink" title="Permanent link">&para;</a></h2>
+
+
+    <div class="doc doc-contents first">
+
+
+
+        <p>A relation filled with the opposite end of an edge, never repeating a pair.</p>
+<p>The declaration a through table needs, and the reason two
+:class:<code>~django_data_shape.fan_out.FanOut</code> declarations are refused beside
+one another. Two fan-outs partition the same rows without either seeing the
+other, so nothing enumerates the pairs and whether two rows collide is a
+matter of the seed. <code>Paired</code> is the half that looks:</p>
+<p>.. code-block:: python</p>
+<div class="language-text highlight"><pre><span></span><code>Table(
+    Membership,
+    rows=50_000,
+    company=FanOut(Zipf()),
+    person=Paired("company", Zipf()),
+    role=Constant("member"),
+)
+</code></pre></div>
+<p><code>company</code> partitions the rows as any fan-out does -- that is the <strong>declared</strong>
+degree distribution, and it is exact. Within each of its groups, <code>person</code>
+takes that many <strong>distinct</strong> partners, so a duplicate pair is impossible by
+construction rather than removed afterwards: the same company implies a
+different person, and a different company implies a different pair. The edge
+count is therefore exactly <code>rows</code>, which is the rule this package holds to
+everywhere else and which a deduplicating generator would have given up.</p>
+<p><code>relation</code> names the fan-out this one is paired with, spelled the way
+:class:<code>~django_data_shape.derivations.per_parent.PerParent</code> names the
+relation it groups by, and for the same reason: a table with three foreign
+keys should not make a reader guess which one the grouping is over.</p>
+<p><code>weights</code> decides which partners are popular. It is a
+:class:<code>~django_data_shape.distributions.distribution.Distribution</code> over the
+partner table the same way a fan-out's <code>sizes</code> is over the parent table,
+so <code>Zipf()</code> gives the realistic heavy tail and a flat one gives the
+uniform shape this package exists to argue against.</p>
+<p><strong>The second side's marginal is derived, not declared, and that is on
+purpose.</strong> Both marginals plus the edge count is over-determined: fixing all
+three is a constraint satisfaction problem, and a CSP cannot stream into
+<code>COPY</code>. So the edge count and one side's distribution are declared and the
+other side follows -- and what follows <em>approximates</em> <code>weights</code> rather than
+reproducing it. Measured against exact weighted sampling without
+replacement, the busiest partner comes out about 1.1 times as busy, the 99th
+percentile about 30% high, and about 7% fewer partners are touched at all.
+Those numbers are in the documentation rather than only here, because a
+derived shape nobody quotes is a shape nobody can check.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="django_data_shape.paired.Paired.canonical" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">canonical</span>
+
+
+<a href="#django_data_shape.paired.Paired.canonical" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">canonical</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">object</span>
+</span></code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>The fan-out it pairs with and the weights over partners. See <code>Canonical</code>.</p>
+
+
+    </div>
+
+</div>
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
 <div class="doc doc-object doc-function">
 
 
@@ -4232,6 +4416,30 @@ it.</p>
 
 
 
+
+<div class="doc doc-object doc-attribute">
+
+
+
+<h3 id="django_data_shape.projection.Projection.through" class="doc doc-heading">
+            <span class="doc doc-object-name doc-attribute-name">through</span>
+
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-property"><code>property</code></small>
+  </span>
+
+<a href="#django_data_shape.projection.Projection.through" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="n">through</span><span class="p">:</span> <span class="nb">type</span><span class="p">[</span><span class="n">Model</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span>
+</span></code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>The model the derived join runs on, where the caller had to say.</p>
+
+    </div>
+
+</div>
 
 <div class="doc doc-object doc-attribute">
 

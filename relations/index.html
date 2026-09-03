@@ -484,6 +484,45 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#many-to-many-and-the-second-key-of-an-edge-table" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Many-to-many, and the second key of an edge table
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Many-to-many, and the second key of an edge table">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#what-binds-is-the-busiest-group-not-the-product" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What binds is the busiest group, not the product
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-second-side-is-derived-and-approximate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The second side is derived, and approximate
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#placement-where-the-children-physically-sit" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -873,6 +912,45 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#many-to-many-and-the-second-key-of-an-edge-table" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Many-to-many, and the second key of an edge table
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Many-to-many, and the second key of an edge table">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#what-binds-is-the-busiest-group-not-the-product" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What binds is the busiest group, not the product
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-second-side-is-derived-and-approximate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The second side is derived, and approximate
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#placement-where-the-children-physically-sit" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -959,6 +1037,10 @@ rows against an actual 251,178 — a 65-fold under-estimate that picks a nested 
 over 193,000 heap blocks.</p>
 <p>That defect cannot be reproduced against a fixture with even fan-out. Declaring
 the distribution is what makes it reproducible.</p>
+<p>The weights are <strong>numbers</strong>, and they are normalised, so their scale does not
+matter: <code>Zipf()</code> for a realistic heavy tail, <code>Uniform(1, 10)</code> for something
+flatter, <code>Uniform(1, 10, places=0)</code> if you would rather say a count is a whole
+number. <code>int</code>, <code>float</code>, <code>Decimal</code> and <code>Fraction</code> all work.</p>
 <h2 id="the-parents-do-not-have-to-be-ours">The parents do not have to be ours<a class="headerlink" href="#the-parents-do-not-have-to-be-ours" title="Permanent link">&para;</a></h2>
 <p><code>FanOut</code> reads the parent table's <strong>real keys</strong>. It does not assume the dense
 <code>1..N</code> range this package assigns when it builds a table itself.</p>
@@ -1097,6 +1179,78 @@ the counts are the partition and the rows pointing at each parent are fewer —
 uniformly in expectation, not exactly. <code>counts.null_share</code> is the share it was
 thinned by, and it is <code>0.0</code> whenever these numbers are row counts. The ranking is
 unaffected either way, which is what the head and the tail are read for.</p>
+<h2 id="many-to-many-and-the-second-key-of-an-edge-table">Many-to-many, and the second key of an edge table<a class="headerlink" href="#many-to-many-and-the-second-key-of-an-edge-table" title="Permanent link">&para;</a></h2>
+<p>Two fan-outs on one through table are refused, and the reason is the reason a
+pairing exists: a fan-out is a partition computed from the row index alone, so
+two of them partition the same rows without either seeing the other. Nothing
+enumerates the pairs, and whether two rows collide is a matter of the seed.</p>
+<p><code>Paired</code> is the half that looks:</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="n">Table</span><span class="p">(</span>
+</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>    <span class="n">Membership</span><span class="p">,</span>
+</span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>    <span class="n">rows</span><span class="o">=</span><span class="mi">50_000</span><span class="p">,</span>
+</span><span id="__span-7-4"><a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>    <span class="n">company</span><span class="o">=</span><span class="n">FanOut</span><span class="p">(</span><span class="n">Zipf</span><span class="p">()),</span>
+</span><span id="__span-7-5"><a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>    <span class="n">person</span><span class="o">=</span><span class="n">Paired</span><span class="p">(</span><span class="s2">"company"</span><span class="p">,</span> <span class="n">Zipf</span><span class="p">()),</span>
+</span><span id="__span-7-6"><a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a>    <span class="n">role</span><span class="o">=</span><span class="n">Constant</span><span class="p">(</span><span class="s2">"member"</span><span class="p">),</span>
+</span><span id="__span-7-7"><a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="p">)</span>
+</span></code></pre></div>
+<p><code>company</code> partitions the rows as any fan-out does — that is the <strong>declared</strong>
+degree distribution, and it is exact. Within each of its groups, <code>person</code> takes
+that many <strong>distinct</strong> partners, so a duplicate pair is impossible by
+construction rather than removed afterwards. The edge count is therefore exactly
+<code>rows</code>: nothing is deduplicated, and the build never reports an achieved count
+against a requested one.</p>
+<h3 id="what-binds-is-the-busiest-group-not-the-product">What binds is the busiest group, not the product<a class="headerlink" href="#what-binds-is-the-busiest-group-not-the-product" title="Permanent link">&para;</a></h3>
+<p>Every row of one group needs a different partner, so the constraint is
+<strong><code>largest group ≤ partners</code></strong> — not <code>rows ≤ companies × people</code>, which is far
+larger and would let impossible shapes through.</p>
+<p>A heavy tail puts a large share of every edge on one group: <code>Zipf(1.2)</code> over
+5,000 companies puts <strong>21% of the edges on the top one</strong>. So 50,000 edges over
+20,000 people means one company needs 10,681 distinct people, and a declaration
+that looks sparse against the product is still refused. It cannot be known until
+the partition is resolved, so this is the one structural refusal that waits for
+the build rather than firing at declaration time.</p>
+<h3 id="the-second-side-is-derived-and-approximate">The second side is derived, and approximate<a class="headerlink" href="#the-second-side-is-derived-and-approximate" title="Permanent link">&para;</a></h3>
+<p>Both marginals plus the edge count is over-determined — fixing all three is a
+constraint satisfaction problem, and a CSP cannot stream into <code>COPY</code>. So the
+edge count and one side's distribution are declared, and the other follows.</p>
+<p>What follows <em>approximates</em> <code>weights</code> rather than reproducing it. Measured
+against exact weighted sampling without replacement, over 200,000 edges:</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>exact sampling</th>
+<th>what this builds</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>busiest partner</td>
+<td>4,774</td>
+<td>5,223 (1.09×)</td>
+</tr>
+<tr>
+<td>99th percentile</td>
+<td>37</td>
+<td>48</td>
+</tr>
+<tr>
+<td>partners touched</td>
+<td>44,758</td>
+<td>41,571</td>
+</tr>
+</tbody>
+</table>
+<p>It concentrates somewhat more than exact sampling, consistently and boundedly.
+The numbers are here rather than only in the code because a derived shape nobody
+quotes is a shape nobody can check.</p>
+<p>It is an approximation with <strong>no tuning parameter</strong>, which is the bar the
+alternatives failed: choosing partners one at a time and rejecting duplicates
+costs 245 probes per row on that world, and the usual fix — sampling the ones to
+leave out when a group wants more than half — is ten times faster and <em>a
+different sampling rule</em>, so a group one row over the halfway mark would get a
+materially different membership from one row under. A cliff at an arbitrary size
+that no declaration mentions is not something this package will build.</p>
 <h2 id="placement-where-the-children-physically-sit">Placement — where the children physically sit<a class="headerlink" href="#placement-where-the-children-physically-sit" title="Permanent link">&para;</a></h2>
 <p><code>placement</code> decides the order children are written in, and it is not cosmetic.</p>
 <table>

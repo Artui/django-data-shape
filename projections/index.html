@@ -435,6 +435,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="What gets derived">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#through-which-model-the-join-runs-on" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        through= — which model the join runs on
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -720,6 +737,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="What gets derived">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#through-which-model-the-join-runs-on" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        through= — which model the join runs on
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -894,6 +928,29 @@ one step — here both have a foreign key to <code>Template</code>. <code>per</c
 counts as a step of length zero, so a source that points straight at <code>per</code> is the
 same case. Exactly one such link has to exist; zero and several are both refused
 by name.</p>
+<h3 id="through-which-model-the-join-runs-on"><code>through=</code> — which model the join runs on<a class="headerlink" href="#through-which-model-the-join-runs-on" title="Permanent link">&para;</a></h3>
+<p>Several links is the common case, not the exception, and the reason is a pattern
+most Django schemas have:</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="k">class</span><span class="w"> </span><span class="nc">BaseModel</span><span class="p">(</span><span class="n">models</span><span class="o">.</span><span class="n">Model</span><span class="p">):</span>
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>    <span class="n">created_by</span> <span class="o">=</span> <span class="n">models</span><span class="o">.</span><span class="n">ForeignKey</span><span class="p">(</span><span class="n">User</span><span class="p">,</span> <span class="o">...</span><span class="p">)</span>
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>    <span class="n">updated_by</span> <span class="o">=</span> <span class="n">models</span><span class="o">.</span><span class="n">ForeignKey</span><span class="p">(</span><span class="n">User</span><span class="p">,</span> <span class="o">...</span><span class="p">)</span>
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>
+</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>    <span class="k">class</span><span class="w"> </span><span class="nc">Meta</span><span class="p">:</span>
+</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>        <span class="n">abstract</span> <span class="o">=</span> <span class="kc">True</span>
+</span></code></pre></div>
+<p>An abstract base like that makes <strong>any two models in the schema joinable</strong>, so
+the derivation has candidates everywhere and can settle nothing — not for one
+pair, for every pair. <code>through=</code> says which model the join is on:</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="n">Projection</span><span class="p">(</span><span class="n">RunStage</span><span class="p">,</span> <span class="n">per</span><span class="o">=</span><span class="n">PlanRun</span><span class="p">,</span> <span class="n">copying</span><span class="o">=</span><span class="n">PlanStage</span><span class="p">,</span> <span class="n">through</span><span class="o">=</span><span class="n">Plan</span><span class="p">)</span>
+</span></code></pre></div>
+<p>The refusal names it, and names a model that can actually resolve the join
+rather than the first one alphabetically — an audit model is reached by two
+edges from each side, so it is never a usable answer even though it is a real
+candidate.</p>
+<p>Where a model is reached by more than one edge from a side, <code>through=</code> cannot
+help: both edges satisfy it, so naming it leaves the same choice. The refusal
+says so and sends you to <code>sql=</code>, which is the only place a specific pair of
+columns can be written.</p>
 <p><strong>The columns</strong>, in this order, for every column but the primary key:</p>
 <table>
 <thead>
@@ -961,20 +1018,22 @@ the statement.</p>
 <h2 id="the-escape-hatch">The escape hatch<a class="headerlink" href="#the-escape-hatch" title="Permanent link">&para;</a></h2>
 <p>For anything shaped oddly — a filter, an aggregate, a three-way join, a window —
 supply the <code>SELECT</code> yourself and name the columns it produces.</p>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="n">Projection</span><span class="p">(</span>
-</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>    <span class="n">EventSession</span><span class="p">,</span>
-</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>    <span class="n">columns</span><span class="o">=</span><span class="p">(</span><span class="s2">"id"</span><span class="p">,</span> <span class="s2">"event"</span><span class="p">,</span> <span class="s2">"title"</span><span class="p">,</span> <span class="s2">"minutes"</span><span class="p">,</span> <span class="s2">"channel"</span><span class="p">),</span>
-</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>    <span class="n">sql</span><span class="o">=</span><span class="p">(</span>
-</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>        <span class="s2">"SELECT row_number() OVER (ORDER BY e.id, t.id), e.id, t.title, t.minutes, </span><span class="si">%s</span><span class="s2"> "</span>
-</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>        <span class="s2">"FROM app_event e "</span>
-</span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>        <span class="s2">"JOIN app_templatesession t ON t.template_id = e.template_id "</span>
-</span><span id="__span-2-8"><a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>        <span class="s2">"WHERE t.title &lt;&gt; </span><span class="si">%s</span><span class="s2">"</span>
-</span><span id="__span-2-9"><a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>    <span class="p">),</span>
-</span><span id="__span-2-10"><a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>    <span class="n">params</span><span class="o">=</span><span class="p">(</span><span class="s2">"web"</span><span class="p">,</span> <span class="s2">"hidden"</span><span class="p">),</span>
-</span><span id="__span-2-11"><a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="p">)</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="n">Projection</span><span class="p">(</span>
+</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>    <span class="n">EventSession</span><span class="p">,</span>
+</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>    <span class="n">columns</span><span class="o">=</span><span class="p">(</span><span class="s2">"id"</span><span class="p">,</span> <span class="s2">"event"</span><span class="p">,</span> <span class="s2">"title"</span><span class="p">,</span> <span class="s2">"minutes"</span><span class="p">,</span> <span class="s2">"channel"</span><span class="p">),</span>
+</span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>    <span class="n">sql</span><span class="o">=</span><span class="p">(</span>
+</span><span id="__span-4-5"><a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>        <span class="s2">"SELECT row_number() OVER (ORDER BY e.id, t.id), e.id, t.title, t.minutes, </span><span class="si">%s</span><span class="s2"> "</span>
+</span><span id="__span-4-6"><a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>        <span class="s2">"FROM app_event e "</span>
+</span><span id="__span-4-7"><a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>        <span class="s2">"JOIN app_templatesession t ON t.template_id = e.template_id "</span>
+</span><span id="__span-4-8"><a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a>        <span class="s2">"WHERE t.title &lt;&gt; </span><span class="si">%s</span><span class="s2">"</span>
+</span><span id="__span-4-9"><a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a>    <span class="p">),</span>
+</span><span id="__span-4-10"><a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a>    <span class="n">params</span><span class="o">=</span><span class="p">(</span><span class="s2">"web"</span><span class="p">,</span> <span class="s2">"hidden"</span><span class="p">),</span>
+</span><span id="__span-4-11"><a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a><span class="p">)</span>
 </span></code></pre></div>
 <p>The columns are <strong>field names</strong>, checked against the model, so a typo is refused
-here rather than by the database. The primary key has to be among them: this
+here rather than by the database. A relation may be spelled either way —
+<code>event</code> and <code>event_id</code> name the same column — because what an <code>INSERT</code> lists is
+the second, and that is what the refusal asking for <code>columns=</code> describes. The primary key has to be among them: this
 package owns the keys, and a statement it did not write has to say what they are
 rather than leave them to a sequence whose current value is not part of any
 declaration.</p>
@@ -988,13 +1047,13 @@ something fans out over the table it fills: the projection then has to run
 <em>before</em> that table, and may find the tables it selects from still empty.
 <code>reads=</code> says what it needs, and puts it back in the graph precisely — after
 what it reads, before what reads it.</p>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="n">Projection</span><span class="p">(</span>
-</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>    <span class="n">EventSession</span><span class="p">,</span>
-</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>    <span class="n">columns</span><span class="o">=</span><span class="p">(</span><span class="s2">"id"</span><span class="p">,</span> <span class="s2">"event"</span><span class="p">,</span> <span class="s2">"title"</span><span class="p">,</span> <span class="s2">"minutes"</span><span class="p">,</span> <span class="s2">"channel"</span><span class="p">),</span>
-</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>    <span class="n">sql</span><span class="o">=</span><span class="s2">"SELECT row_number() OVER (ORDER BY e.id), e.id, e.name, 1, </span><span class="si">%s</span><span class="s2"> FROM app_event e"</span><span class="p">,</span>
-</span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>    <span class="n">params</span><span class="o">=</span><span class="p">(</span><span class="s2">"web"</span><span class="p">,),</span>
-</span><span id="__span-3-6"><a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>    <span class="n">reads</span><span class="o">=</span><span class="p">(</span><span class="n">Event</span><span class="p">,),</span>
-</span><span id="__span-3-7"><a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="p">)</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="n">Projection</span><span class="p">(</span>
+</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>    <span class="n">EventSession</span><span class="p">,</span>
+</span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>    <span class="n">columns</span><span class="o">=</span><span class="p">(</span><span class="s2">"id"</span><span class="p">,</span> <span class="s2">"event"</span><span class="p">,</span> <span class="s2">"title"</span><span class="p">,</span> <span class="s2">"minutes"</span><span class="p">,</span> <span class="s2">"channel"</span><span class="p">),</span>
+</span><span id="__span-5-4"><a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>    <span class="n">sql</span><span class="o">=</span><span class="s2">"SELECT row_number() OVER (ORDER BY e.id), e.id, e.name, 1, </span><span class="si">%s</span><span class="s2"> FROM app_event e"</span><span class="p">,</span>
+</span><span id="__span-5-5"><a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>    <span class="n">params</span><span class="o">=</span><span class="p">(</span><span class="s2">"web"</span><span class="p">,),</span>
+</span><span id="__span-5-6"><a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>    <span class="n">reads</span><span class="o">=</span><span class="p">(</span><span class="n">Event</span><span class="p">,),</span>
+</span><span id="__span-5-7"><a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="p">)</span>
 </span></code></pre></div>
 <p>It is part of the declaration the template-database cache keys on, because the
 same statement run before and after a table selects different rows. A derived
@@ -1004,11 +1063,11 @@ already are the answer.</p>
 <p>A projection is ordered like everything else: after the tables it reads, before
 anything that reads it. So the order the declarations are written in does not
 matter, and <strong>a projected table may itself be a fan-out parent</strong>.</p>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="n">Shape</span><span class="p">(</span>
-</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>    <span class="n">Table</span><span class="p">(</span><span class="n">Attendance</span><span class="p">,</span> <span class="n">rows</span><span class="o">=</span><span class="mi">1_000_000</span><span class="p">,</span> <span class="n">session</span><span class="o">=</span><span class="n">FanOut</span><span class="p">(</span><span class="n">Zipf</span><span class="p">()),</span> <span class="n">name</span><span class="o">=</span><span class="n">Constant</span><span class="p">(</span><span class="s2">"a"</span><span class="p">)),</span>
-</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>    <span class="n">Projection</span><span class="p">(</span><span class="n">EventSession</span><span class="p">,</span> <span class="n">per</span><span class="o">=</span><span class="n">Event</span><span class="p">,</span> <span class="n">copying</span><span class="o">=</span><span class="n">TemplateSession</span><span class="p">),</span>
-</span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>    <span class="o">...</span><span class="p">,</span>
-</span><span id="__span-4-5"><a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="p">)</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="n">Shape</span><span class="p">(</span>
+</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>    <span class="n">Table</span><span class="p">(</span><span class="n">Attendance</span><span class="p">,</span> <span class="n">rows</span><span class="o">=</span><span class="mi">1_000_000</span><span class="p">,</span> <span class="n">session</span><span class="o">=</span><span class="n">FanOut</span><span class="p">(</span><span class="n">Zipf</span><span class="p">()),</span> <span class="n">name</span><span class="o">=</span><span class="n">Constant</span><span class="p">(</span><span class="s2">"a"</span><span class="p">)),</span>
+</span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>    <span class="n">Projection</span><span class="p">(</span><span class="n">EventSession</span><span class="p">,</span> <span class="n">per</span><span class="o">=</span><span class="n">Event</span><span class="p">,</span> <span class="n">copying</span><span class="o">=</span><span class="n">TemplateSession</span><span class="p">),</span>
+</span><span id="__span-6-4"><a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>    <span class="o">...</span><span class="p">,</span>
+</span><span id="__span-6-5"><a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="p">)</span>
 </span></code></pre></div>
 <p>A raw <code>sql=</code> projection without <code>reads=</code> is the exception: it names nothing, so
 "run it last" is a <strong>preference</strong> rather than an edge. It goes after everything
