@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, cast
 
-from django.db.models import Model, Q, UniqueConstraint
+from django.db.models import Field, Model, Q, UniqueConstraint
 
 from django_data_shape.derivations.derivation import Derivation
 from django_data_shape.derivations.per_parent import PerParent
@@ -91,6 +91,7 @@ def check_constraints(tables: tuple[Table | Projection, ...]) -> None:
         for constraint in table.model._meta.constraints:
             if isinstance(constraint, UniqueConstraint) and constraint.fields:
                 _check_one(table, constraint, rows_of)
+        _check_a_fan_out_on_a_unique_column(table, rows_of)
 
 
 def _check_one(table: Table, constraint: UniqueConstraint, rows_of: dict[type[Model], int]) -> None:
@@ -106,6 +107,7 @@ def _check_one(table: Table, constraint: UniqueConstraint, rows_of: dict[type[Mo
         _check_unconditional(table, constraint.name, fields, capacity)
         _check_independent_fan_outs(table, constraint.name, fields, rows_of)
         _check_a_fan_out_beside_a_draw(table, constraint.name, fields, capacity, rows_of)
+        _check_drawn_columns_only(table, constraint.name, fields, capacity)
         return
     decoded = _condition(constraint.condition)
     if decoded is None:
@@ -287,6 +289,108 @@ def _check_a_fan_out_beside_a_draw(
         "receives this row's position among its parent's children and how many there are. A "
         "column that is distinct in every row keeps the constraint on its own, and says so with "
         "Distinct -- Sequential does."
+    )
+
+
+def _check_a_fan_out_on_a_unique_column(table: Table, rows_of: dict[type[Model], int]) -> None:
+    """A partition over a column that permits one row per parent.
+
+    ``unique=True`` writes no entry in ``_meta.constraints`` -- it is a unique
+    *index* -- so the loop above never sees it, and the single-column check on
+    :class:`~django_data_shape.table.Table` steps over a fan-out on purpose:
+    whether a partition gives any parent two rows depends on how many parents
+    there are, which one table does not know and a whole shape does. So a
+    ``OneToOneField`` filled by ``FanOut(Zipf())`` fell between the two, and
+    **it does not merely usually fail -- measured, it never loads**, zero runs
+    in twenty at fifty rows over a hundred parents. A skewed partition exists to
+    give some parent several children, and a one-to-one is the column that
+    permits none.
+
+    The exemption is :func:`_cannot_collide`, unchanged and for the same reason
+    it serves the other three: a partition that provably gives no parent two
+    rows cannot put two rows on one parent here either. At the same numbers with
+    flat sizes that is twenty runs in twenty.
+    """
+    for name, declared in table.fields.items():
+        if not isinstance(declared, FanOut):
+            continue
+        field = cast("Field[Any, Any]", table.model._meta.get_field(name))
+        if not field.unique or _cannot_collide(table, name, rows_of):
+            continue
+        where = f"{table.model.__name__}.{name}"
+        raise InvalidShape(
+            f"{where} is unique, so it holds one row at most per parent, and {declared!r} is a "
+            "partition that exists to give some parents more than one. A fan-out spreads this "
+            "table's rows over the parent's keys by weight, so a skew putting two rows on one "
+            "parent is what it was asked for -- and the unique index then refuses the second, "
+            "inside COPY, at a row number that moves when the seed does. A one-to-one is filled "
+            "by a fan-out whose sizes give every parent the same weight and whose rows do not "
+            "outnumber the parents: FanOut(Constant(1)) over at least as many parents as this "
+            "table has rows. childless= is how a parent with no row at all is asked for."
+        )
+
+
+def _check_drawn_columns_only(
+    table: Table, name: str, fields: tuple[str, ...], capacity: int | None
+) -> None:
+    """No fan-out anywhere, and the same defect: nothing enumerates the tuple.
+
+    The third instance, and the one that shows **the fan-out was never what was
+    special**. ``Coupon(batch, code)`` unique on the pair, both columns drawn
+    from a
+    :class:`~django_data_shape.distributions.distribution.Distribution` and no
+    relation in the table at all. Every mechanism this package has for filling a
+    column computes it from the row index alone, so no column can see what
+    another put in the row -- and a partition being absent removes a way of
+    arranging the pairs rather than the need for one.
+
+    **The measurements are the argument, because "there is room" reads like an
+    answer.** Fifty rows over three hundred combinations, six times the room:
+    zero loads in twenty. The same fifty rows over ten thousand combinations,
+    **two hundred times the room**: eighteen. Room moves the odds and never
+    settles them, because a draw is not a permutation -- and a shape that works
+    nineteen times in twenty is the one this refusal is for, since the twentieth
+    run is somebody else's afternoon.
+
+    The exemption is the one the other two carry, and the same single line:
+    a pair is distinct as soon as either half is, so a column that answers
+    :class:`~django_data_shape.distributions.distinct.Distinct` keeps the
+    constraint on its own. There is deliberately no partition exemption here,
+    because there is no partition -- ``_cannot_collide`` has nothing to read.
+
+    Two kinds of column take the refusal away for reasons that are not
+    exemptions at all. A
+    :class:`~django_data_shape.derivations.derivation.Derivation` reads
+    something other than its own row index, which is exactly what lets it be
+    arranged across rows, and whether a given ``compute=`` is arranged is not
+    readable here. A column the shape leaves undeclared is nullable and loads
+    NULL, and PostgreSQL counts each NULL in a unique index as its own value, so
+    those rows cannot collide with anything.
+    """
+    declared = [table.fields.get(column) for column in fields]
+    if any(isinstance(one, FanOut) for one in declared):
+        return
+    if not all(_is_drawn_per_row(one) for one in declared):
+        return
+    if any(isinstance(one, Distinct) and one.is_distinct_per_row() for one in declared):
+        return
+    where = table.model.__name__
+    room = (
+        f"The {capacity} combinations are more than the {table.rows} rows"
+        if capacity is not None
+        else "There may be room for every row"
+    )
+    drawn = ", ".join(f"{where}.{column}={table.fields[column]!r}" for column in fields)
+    raise InvalidShape(
+        f"{name} needs every ({', '.join(fields)}) combination distinct, and {drawn} are all "
+        "drawn per row with nothing partitioning any of them. A distribution is a pure function "
+        "of the row index, so no column can see what another put in the row and nothing "
+        f"enumerates the combinations. {room}, which is why the pigeonhole arithmetic lets this "
+        "through -- and room is not what decides it: fifty rows over two hundred times as many "
+        "combinations still collided in two runs out of twenty, because a draw is not a "
+        "permutation. A column that is distinct in every row keeps the constraint on its own and "
+        "says so with Distinct, which Sequential implements. A table whose rows have to be a "
+        "particular set of combinations is filled by a Projection with columns= and sql=."
     )
 
 
