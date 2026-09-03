@@ -1023,6 +1023,22 @@ this case. <code>_meta.constraints</code> is read directly.</p>
   million rows needing distinct <code>(company, label)</code> pairs cannot be built from
   fifty thousand companies and three labels, whatever the seed. This is the
   multi-column analysis a single <code>Table</code> declines to attempt.</li>
+<li><strong>Enough room is never a way to fill it, and that holds with no fan-out
+  anywhere.</strong> Every mechanism this package has for filling a column computes it
+  from the row index alone, so nothing enumerates a tuple and nothing keeps a
+  single unique column distinct. Measured: fifty rows over three hundred
+  combinations loaded <strong>0 times in 20</strong>; the same fifty rows over <strong>ten
+  thousand</strong> combinations -- two hundred times the room -- still failed two. A
+  single <code>unique=True</code> column drawn from fifty values for five rows loaded 17,
+  and from a hundred values for ten rows, 10. Room moves the odds and never
+  settles them, because a draw is not a permutation. All of these are refused at
+  declaration time, and the exemption in every case is <code>Distinct</code>.</li>
+<li><strong>A <code>FanOut</code> on a <code>unique=True</code> column is refused</strong>, because a partition
+  exists to give some parent more than one row and a one-to-one permits none.
+  It never loads -- 0 in 20 -- and it used to fall between the two checks:
+  <code>unique=True</code> writes no entry in <code>_meta.constraints</code>, and a single table
+  cannot see how many parents there are. The exemption is the same proof the
+  others carry: flat sizes, no <code>childless</code> share, and rows no more than parents.</li>
 <li><strong>Enough room is not a way to fill it.</strong> An unconditional constraint over
   <strong>two fan-outs</strong> — the through table of a many-to-many — passes the pigeonhole
   comfortably, because the product of two parent counts dwarfs the row count,
@@ -1079,17 +1095,36 @@ cannot be built when it demonstrably can.</p>
   keep a per-group rule <em>at any weight</em> -- 2.5% is as broken as 10%, just later
   in the load -- so the refusal does not depend on the arithmetic, only the
   message does.</li>
-<li>A <code>PerParent</code> over one of the constraint's own fields, with <code>count=1</code> and the
-  constrained value, is accepted. Grouped by something else, or with <code>count</code>
-  above one, or with a <code>rest</code> that writes the value too, it is refused by name.</li>
-<li>A declaration that provably never writes the value -- a <code>Constant</code> of
-  something else, a <code>Skew</code> that does not list it -- is accepted.</li>
+<li><strong>The condition may name a set as well as a single value, however it is
+  spelled.</strong> <code>Q(status="DRAFT")</code>, <code>Q(status__in=[...])</code> and an OR of equalities
+  over one column -- <code>Q(status="DRAFT") | Q(status="IN_REVIEW")</code> -- are read the
+  same way,
+  because what decides the refusal is whether a row can land <em>inside</em> the
+  condition and membership answers that for both. The set form is the commoner
+  one in real schemas -- "one open review per project" is usually several
+  statuses rather than one -- so reading only the equality left the likelier
+  spelling unchecked. An ORM offers no reason to prefer <code>__in</code> to the OR-tree,
+  so making the arithmetic depend on which one a caller happened to write would
+  be the same gap with an extra step.</li>
+<li>A <code>PerParent</code> over one of the constraint's own fields, with <code>count=1</code> and a
+  <code>rest</code> that stays <strong>outside</strong> the condition, is accepted. Grouped by something
+  else, or with <code>count</code> above one, or with a <code>rest</code> that also lands inside, it
+  is refused by name. The set form is what makes that last case easy to write by
+  accident: <code>last="DRAFT", rest="IN_REVIEW"</code> puts every row of every group
+  inside a three-status condition, and it is the declaration that answers the
+  equality form.</li>
+<li>A declaration that provably never lands inside the condition -- a <code>Constant</code>
+  of something else, a <code>Skew</code> listing none of the members -- is accepted.</li>
 </ul>
 <h3 id="what-it-cannot-decide-and-leaves-to-the-other-two-nets">What it cannot decide, and leaves to the other two nets<a class="headerlink" href="#what-it-cannot-decide-and-leaves-to-the-other-two-nets" title="Permanent link">&para;</a></h3>
 <ul>
-<li>A condition that is not a single equality: <code>Q(status__in=[...])</code>, a negation,
-  two clauses joined. Reading one would mean this package deciding what an
-  arbitrary predicate matches.</li>
+<li>A condition that describes no set of values for one column: a negation, two
+  clauses joined by AND, a comparison like <code>__gt</code> (written either as a keyword
+  argument or as a bare lookup expression), an <code>__in</code> over a queryset, or an OR
+  whose branches name <strong>different columns</strong>. Reading one would mean this package deciding what
+  an arbitrary predicate matches, which is the database's job. A set the caller
+  wrote out is not that -- it is a list of values, and deciding membership in it
+  needs no planner.</li>
 <li>A constraint written over <code>expressions</code> rather than <code>fields</code>.</li>
 <li>A conditional constraint whose grouping columns include no declared <code>FanOut</code>,
   because there is no partition here to satisfy it with and a refusal would name

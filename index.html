@@ -884,6 +884,11 @@ library rather than left to the caller to remember.</p>
   <code>save()</code>, and nothing here calls <code>save()</code>, so a <code>NOT NULL</code> column with a
   Python-level default has nothing behind it in the database. The value <code>save()</code>
   would have written is used instead.</li>
+<li><strong>Except on a foreign key, where it is refused.</strong> A key that did not come out
+  of the parent's own table is a key drawn from nothing, so a <code>default=</code> cannot
+  stand in for a fan-out the way it stands in for a scalar. A required relation
+  carrying one is refused by name, like any other undeclared required relation.
+  A real <code>db_default</code> is DDL, so a column carrying one is left to the database.</li>
 <li><strong>A callable default is refused.</strong> <code>uuid4</code> varies per row and <code>dict</code> does not,
   and nothing on the field distinguishes them. Declare a distribution instead.</li>
 <li><strong>A declaration is read-only once built.</strong> Every rule runs in the constructor,

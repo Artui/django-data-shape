@@ -384,6 +384,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#one-to-one" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        One-to-one
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#nullable-keys" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -734,6 +745,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#one-to-one" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        One-to-one
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#nullable-keys" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -909,6 +931,21 @@ where the small factors are deliberately tiny.</p>
 hand-written fixtures always omit, and the one that changes what a query returns:
 a parent nobody references is the difference between an inner join and an outer
 join giving the same answer and giving different ones.</p>
+<h2 id="one-to-one">One-to-one<a class="headerlink" href="#one-to-one" title="Permanent link">&para;</a></h2>
+<p>A <code>OneToOneField</code> is a fan-out whose partition never gives a parent two rows,
+and the spelling is a flat distribution over at least as many parents as this
+table has rows:</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># over a Table(User, rows=50) or more</span>
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="n">Table</span><span class="p">(</span><span class="n">Profile</span><span class="p">,</span> <span class="n">rows</span><span class="o">=</span><span class="mi">50</span><span class="p">,</span> <span class="n">user</span><span class="o">=</span><span class="n">FanOut</span><span class="p">(</span><span class="n">Constant</span><span class="p">(</span><span class="mi">1</span><span class="p">)),</span> <span class="n">headline</span><span class="o">=</span><span class="n">Constant</span><span class="p">(</span><span class="s2">"hi"</span><span class="p">))</span>
+</span></code></pre></div>
+<p><code>Constant(1)</code> rather than <code>Uniform(1, 1)</code>, which is refused: an inclusive range
+of one value is a range that says nothing, and a distribution asked for
+variation it cannot supply is more likely a typo than an intention.</p>
+<p>Anything skewed is refused here, and the refusal is not conservative. A skew
+exists to give some parent several children and a one-to-one permits none, so
+<code>FanOut(Zipf())</code> on a unique column does not merely usually fail -- measured at
+fifty rows over a hundred parents, it loaded <strong>zero times in twenty</strong>.
+<code>childless=</code> still asks for parents with no row at all.</p>
 <h2 id="nullable-keys">Nullable keys<a class="headerlink" href="#nullable-keys" title="Permanent link">&para;</a></h2>
 <p><code>null=0.25</code> leaves a quarter of the children with a <code>NULL</code> foreign key. Only
 meaningful on a nullable column, and worth declaring because <code>null_frac</code> is
@@ -922,14 +959,14 @@ assertion about the head or the tail, and that needs to know <em>which</em> pare
 the head — which, without help, means a <code>GROUP BY</code> over the child table before
 the measurement has started.</p>
 <p><code>fan_out_sizes</code> answers it from the declaration instead:</p>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">django_data_shape</span><span class="w"> </span><span class="kn">import</span> <span class="n">fan_out_sizes</span>
-</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>
-</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="n">counts</span> <span class="o">=</span> <span class="n">fan_out_sizes</span><span class="p">(</span><span class="n">shape</span><span class="p">,</span> <span class="n">Order</span><span class="p">,</span> <span class="s2">"company"</span><span class="p">)</span>
-</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>
-</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="n">whale</span><span class="p">,</span> <span class="n">orders</span> <span class="o">=</span> <span class="n">counts</span><span class="o">.</span><span class="n">ranked</span><span class="p">()[</span><span class="mi">0</span><span class="p">]</span>  <span class="c1"># the head</span>
-</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="n">quiet</span> <span class="o">=</span> <span class="n">counts</span><span class="o">.</span><span class="n">ranked</span><span class="p">()[</span><span class="o">-</span><span class="mi">5</span><span class="p">:]</span>  <span class="c1"># the tail</span>
-</span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="n">nobody</span> <span class="o">=</span> <span class="n">counts</span><span class="o">.</span><span class="n">childless</span><span class="p">()</span>  <span class="c1"># the parents with no children at all</span>
-</span><span id="__span-2-8"><a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="k">assert</span> <span class="n">counts</span><span class="p">[</span><span class="n">whale</span><span class="p">]</span> <span class="o">==</span> <span class="n">orders</span>  <span class="c1"># and it is an ordinary mapping</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">django_data_shape</span><span class="w"> </span><span class="kn">import</span> <span class="n">fan_out_sizes</span>
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="n">counts</span> <span class="o">=</span> <span class="n">fan_out_sizes</span><span class="p">(</span><span class="n">shape</span><span class="p">,</span> <span class="n">Order</span><span class="p">,</span> <span class="s2">"company"</span><span class="p">)</span>
+</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>
+</span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="n">whale</span><span class="p">,</span> <span class="n">orders</span> <span class="o">=</span> <span class="n">counts</span><span class="o">.</span><span class="n">ranked</span><span class="p">()[</span><span class="mi">0</span><span class="p">]</span>  <span class="c1"># the head</span>
+</span><span id="__span-3-6"><a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="n">quiet</span> <span class="o">=</span> <span class="n">counts</span><span class="o">.</span><span class="n">ranked</span><span class="p">()[</span><span class="o">-</span><span class="mi">5</span><span class="p">:]</span>  <span class="c1"># the tail</span>
+</span><span id="__span-3-7"><a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="n">nobody</span> <span class="o">=</span> <span class="n">counts</span><span class="o">.</span><span class="n">childless</span><span class="p">()</span>  <span class="c1"># the parents with no children at all</span>
+</span><span id="__span-3-8"><a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="k">assert</span> <span class="n">counts</span><span class="p">[</span><span class="n">whale</span><span class="p">]</span> <span class="o">==</span> <span class="n">orders</span>  <span class="c1"># and it is an ordinary mapping</span>
 </span></code></pre></div>
 <p>It costs one <code>SELECT</code> over the <strong>parent</strong> table. That is the asymmetry worth
 having: fifty thousand parents against two million children, and an aggregate
@@ -951,9 +988,9 @@ same shape — which every cacheable shape is, since a template is built into a
 freshly migrated database — that is checked, and a mismatch raises
 <code>WorldChanged</code> rather than returning a plausible partition of a world nobody
 built:</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>Company holds 41 rows and this shape declares 40, so the fan-out for
-</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>Session.company would be spread over parents the children were never spread
-</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>across.
+<div class="language-text highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>Company holds 41 rows and this shape declares 40, so the fan-out for
+</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>Session.company would be spread over parents the children were never spread
+</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>across.
 </span></code></pre></div>
 <p>Where the parents came from the ORM instead, there is nothing to check against
 and nothing is claimed: the answer describes the parents that are there. Ask
