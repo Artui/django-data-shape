@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] — 2026-09-03
+
 ### Fixed
 - **`scaled_shape` no longer drops the rules and targets the shape declared.**
   It rebuilt each `Table` without `statistics` and the `Shape` without
@@ -627,7 +629,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   into `COPY FROM STDIN`, which psycopg 2 cannot do without materialising them
   first.
 
-[Unreleased]: https://github.com/Artui/django-data-shape/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/Artui/django-data-shape/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/Artui/django-data-shape/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/Artui/django-data-shape/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/Artui/django-data-shape/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/Artui/django-data-shape/compare/v0.6.0...v0.7.0
