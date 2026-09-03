@@ -32,8 +32,10 @@ from django_data_shape.fan_out_sizes import fan_out_sizes
 from django_data_shape.invalid_shape import InvalidShape
 from django_data_shape.invariant import Invariant
 from django_data_shape.invariant_violated import InvariantViolated
+from django_data_shape.keys.disjoint import Disjoint
 from django_data_shape.keys.key_function import KeyFunction
 from django_data_shape.keys.key_strategy import KeyStrategy
+from django_data_shape.keys.md5_keys import Md5Keys
 from django_data_shape.keys.sequential_keys import SequentialKeys
 from django_data_shape.keys.sql_keys import SqlKeys
 from django_data_shape.keys.uuid_keys import UuidKeys
@@ -66,6 +68,7 @@ __all__ = [
     "Derivation",
     "DerivationQueriedDatabase",
     "Derived",
+    "Disjoint",
     "Distinct",
     "Distribution",
     "FanOut",
@@ -74,6 +77,7 @@ __all__ = [
     "Invariant",
     "InvariantViolated",
     "KeyFunction",
+    "Md5Keys",
     "KeyStrategy",
     "PerParent",
     "Projection",

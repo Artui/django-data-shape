@@ -19,6 +19,7 @@ from django_data_shape.fan_out import FanOut
 from django_data_shape.fan_out_plan import FanOutPlan
 from django_data_shape.generate_rows import generate_rows
 from django_data_shape.invalid_shape import InvalidShape
+from django_data_shape.keys.disjoint import Disjoint
 from django_data_shape.order_tables import order_tables
 from django_data_shape.projection import Projection
 from django_data_shape.refuse_queries import refuse_queries
@@ -98,7 +99,7 @@ def build(
         # its parent's real keys and a projection selects from whole tables, and
         # a table with no rows yet has neither.
         for table in order_tables(shape.tables):
-            _require_empty(connection, table.db_table)
+            _require_empty(connection, table)
             # Before the rows rather than beside the ANALYZE, for two reasons
             # that point the same way. A target changed after ANALYZE has run
             # does nothing until the next one, so it has to be in place before
@@ -180,13 +181,24 @@ def _resolve(connection: Any, table: Table, seed: int) -> dict[str, FanOutPlan]:
     return plans
 
 
-def _require_empty(connection: Any, db_table: str) -> None:
+def _require_empty(connection: Any, table: Table | Projection) -> None:
     """Refuse to build on top of rows that are already there.
 
     The keys this package assigns start at 1 every time, so a second build over
     the same table collides on the primary key. That surfaced as a bare
     UniqueViolation naming an index, which tells the reader nothing about what
     they did or what to do instead.
+
+    **Unless the key strategy says it cannot collide**, which is
+    :class:`~django_data_shape.keys.disjoint.Disjoint` and is why the refusal is
+    asked rather than assumed. The sentence above is about integer keys and the
+    refusal was not, so a ``UuidKeys`` table -- a 128-bit digest per row, unable
+    to land on a caller's row -- was refused for a collision it cannot have.
+    That blocked the hybrid this package documents, parents made by your code
+    and children made here, in exactly the schemas where UUID keys are the norm.
+
+    A ``Projection`` has no key strategy of its own to ask, and its rows come
+    from a statement rather than from generated keys, so it takes the refusal.
 
     The message names the likely cause and not only the remedy, because the
     first consumer met this from a direction the remedy does not fit: a
@@ -195,6 +207,10 @@ def _require_empty(connection: Any, db_table: str) -> None:
     never mentions -- so "empty the table first" reads as advice about somebody
     else's data.
     """
+    keys = getattr(table, "keys", None)
+    if isinstance(keys, Disjoint) and keys.is_disjoint_from_existing_rows():
+        return
+    db_table = table.db_table
     with connection.cursor() as cursor:
         cursor.execute(f"SELECT EXISTS (SELECT 1 FROM {connection.ops.quote_name(db_table)})")
         row = cursor.fetchone()

@@ -9,6 +9,7 @@ from django.db import DatabaseError, connection
 
 from django_data_shape import (
     Constant,
+    KeyFunction,
     Sequential,
     Shape,
     ShapeNotEmpty,
@@ -18,7 +19,7 @@ from django_data_shape import (
     UnsupportedBackend,
 )
 from django_data_shape import build as build_shape
-from tests.testapp.models import Company, Order, Prepared
+from tests.testapp.models import Company, Order, Prepared, Tenant
 
 # Skipped with a reason on any other backend rather than silently passing. This
 # module is the package's own claim under test -- COPY, a reset sequence, real
@@ -229,3 +230,47 @@ def test_the_result_counts_what_the_database_took() -> None:
     result = build_shape(Shape(_orders(rows=250)))
 
     assert result.rows == Order.objects.count() == 250
+
+
+def test_a_uuid_keyed_table_may_be_built_beside_rows_the_caller_made() -> None:
+    """The hybrid the documentation advertises, for the schemas that use UUIDs.
+
+    ``_require_empty`` refuses a build over existing rows because this package
+    assigns keys from 1 and a second build collides -- and that reasoning is
+    about integer keys, where the refusal was not. A UuidKeys table derives a
+    128-bit digest per row and cannot land on a factory's row, so refusing it
+    blocked "parents your code made, children this package made" in exactly the
+    schemas where UUID primary keys are the norm.
+    """
+    theirs = Tenant.objects.create(name="made by the caller's own factory")
+
+    build_shape(Shape(Table(Tenant, rows=10, name=Constant("t")), seed=1))
+
+    assert Tenant.objects.count() == 11
+    assert Tenant.objects.filter(pk=theirs.pk).exists()
+
+
+def test_an_integer_keyed_table_is_still_refused_and_says_why() -> None:
+    """The half the gate must not widen: keys from 1 do collide."""
+    Company.objects.create(name="already here")
+
+    with pytest.raises(ShapeNotEmpty, match="assigns primary keys from 1"):
+        build_shape(Shape(Table(Company, rows=10, name=Constant("c")), seed=1))
+
+
+def test_a_key_function_is_read_as_able_to_collide() -> None:
+    """The case that decides the protocol is opt-in rather than a default.
+
+    A caller's own function could return anything, this package cannot read it,
+    and guessing "probably fine" would trade a clear refusal for a load that
+    dies partway through.
+    """
+    Company.objects.create(name="already here")
+
+    with pytest.raises(ShapeNotEmpty):
+        build_shape(
+            Shape(
+                Table(Company, rows=3, name=Constant("c"), keys=KeyFunction(lambda row: row + 500)),
+                seed=1,
+            )
+        )

@@ -521,8 +521,11 @@ def _projectable_keys(
             "copies along -- so the rows never pass through Python and the keys have to be "
             "written by the statement that inserts them. A strategy that can do that implements "
             "key_sql; this one does not, and computing a different value in SQL from the one it "
-            "computes in Python would give it two meanings. Use an integer primary key, or "
-            "write the statement with sql= and produce the keys in it."
+            "computes in Python would give it two meanings. For a UUID primary key that is "
+            "keys=Md5Keys(), whose two halves are the same digest because md5 exists on both "
+            "sides -- UuidKeys derives from blake2b, which PostgreSQL has no equivalent for, and "
+            "the two draw different keys so one is never quietly the other. An integer primary "
+            "key needs nothing declared, and sql= produces the keys in the statement itself."
         )
     return strategy
 

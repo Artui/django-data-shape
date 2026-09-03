@@ -33,6 +33,17 @@ class UuidKeys:
         raw[8] = (raw[8] & 0x3F) | 0x80
         return uuid.UUID(bytes=bytes(raw))
 
+    def is_disjoint_from_existing_rows(self) -> bool:
+        """Always. A 128-bit digest cannot land on a caller's row. See ``Disjoint``.
+
+        The full digest is what makes this a statement rather than a hope. A
+        draw carries 53 bits, where birthday collisions arrive around ninety
+        million rows; these are 122 bits after the version and variant are
+        stamped, which is the space a version 4 UUID has and the space every
+        application storing one is already relying on.
+        """
+        return True
+
     def canonical(self) -> object:
         """Nothing to say: the digest is a function of the seed and the row. See ``Canonical``."""
         return ()
