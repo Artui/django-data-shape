@@ -104,7 +104,7 @@ def _check_one(table: Table, constraint: UniqueConstraint, rows_of: dict[type[Mo
         # above it would answer the wrong question first and, under a 100%
         # branch gate with no pragma, would take the 0.8.0 message down with it.
         _check_unconditional(table, constraint.name, fields, capacity)
-        _check_independent_fan_outs(table, constraint.name, fields)
+        _check_independent_fan_outs(table, constraint.name, fields, rows_of)
         _check_a_fan_out_beside_a_draw(table, constraint.name, fields, capacity, rows_of)
         return
     decoded = _equality(constraint.condition)
@@ -132,7 +132,9 @@ def _check_unconditional(
     )
 
 
-def _check_independent_fan_outs(table: Table, name: str, fields: tuple[str, ...]) -> None:
+def _check_independent_fan_outs(
+    table: Table, name: str, fields: tuple[str, ...], rows_of: dict[type[Model], int]
+) -> None:
     """Two fan-outs over one constraint: enough room, and nothing to arrange it.
 
     The through table of a many-to-many, which is the shape this reaches first
@@ -150,9 +152,14 @@ def _check_independent_fan_outs(table: Table, name: str, fields: tuple[str, ...]
     matter of the seed, and the load dies inside ``COPY`` at a row number that
     moves when the seed does.
 
-    That is why this is a refusal and not a wider capacity calculation: no
-    arithmetic over the two marginals decides it, because the failure is that
-    nothing enumerates the combinations at all. Deduplicated edges are a
+    **Unless one of the two partitions has no group of two**, which is the
+    exemption below and is a proof rather than a probability: such a fan-out
+    never repeats a parent key, so no two rows share that column and the pair is
+    distinct on that half alone. See :func:`_cannot_collide`.
+
+    That is why this is otherwise a refusal and not a wider capacity
+    calculation: no arithmetic over the two marginals decides it, because the
+    failure is that nothing enumerates the combinations at all. Deduplicated edges are a
     different algorithm rather than a bigger loop, and until they arrive the
     thing that works is a statement --
     :class:`~django_data_shape.projection.Projection` with ``columns=`` and
@@ -160,6 +167,17 @@ def _check_independent_fan_outs(table: Table, name: str, fields: tuple[str, ...]
     """
     fanned = sorted(name for name in fields if isinstance(table.fields.get(name), FanOut))
     if len(fanned) < 2:
+        return
+    # **One** of them is enough, not both, and that is the whole of the
+    # exemption here. A fan-out that gives no parent two rows never repeats a
+    # key, so no two rows share that column at all -- and a pair is distinct as
+    # soon as either half is, whatever the other fan-out does with it. Measured
+    # rather than reasoned into: twenty rows over twenty companies partitioned
+    # flat, beside a Zipf over five people, loads twenty times out of twenty,
+    # and the person fan-out cannot possibly satisfy the proof at those numbers.
+    # Asking both to satisfy it would refuse that shape, which is the wrongness
+    # this exemption exists to remove rather than a stricter version of it.
+    if any(_cannot_collide(table, column, rows_of) for column in fanned):
         return
     where = table.model.__name__
     raise InvalidShape(
@@ -308,6 +326,27 @@ def _cannot_collide(table: Table, column: str, rows_of: dict[type[Model], int]) 
     is the one database in which join misestimation cannot occur. That is a
     reason to say so in the documentation. It is never a reason for a refusal to
     tell a caller their shape cannot be built when it demonstrably can.
+
+    .. warning::
+
+       **The coverage gate cannot see these four conditions, and the tests are
+       what hold them.** They are one boolean expression, so they are one branch
+       arc: drop any single conjunct and the suite still reports 100% line and
+       branch, because the surviving expression is still taken both ways. The
+       guard against that is one test per condition, and each has been falsified
+       against a tree with that condition removed. If you edit this expression,
+       edit those with it -- they are, in order:
+
+       - ``Bounded`` with one value -- ``test_sizes_that_are_not_provably_flat_are_not_exempt``,
+         which uses ``Uniform(1, 10)`` sizes because they give a largest group of
+         two where ``Constant(1)`` gives one, at identical numbers.
+       - ``childless`` -- ``test_a_childless_share_takes_the_proof_away``. A
+         childless parent is weighed at zero and its rows go to the others.
+       - the parent being declared here --
+         ``test_a_parent_this_shape_does_not_build_takes_the_proof_away_too``.
+       - ``rows <= parent_rows`` --
+         ``test_the_boundary_is_where_the_proof_stops_and_the_refusal_starts``,
+         and the two-fan-out pair beside it.
     """
     fan_out = cast("FanOut", table.fields[column])
     parent = cast("type[Model]", table.model._meta.get_field(column).related_model)

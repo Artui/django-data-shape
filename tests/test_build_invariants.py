@@ -36,7 +36,9 @@ from tests.testapp.models import (
     Company,
     Contest,
     Entry,
+    Membership,
     Period,
+    Person,
     Project,
     Seat,
     Vendor,
@@ -311,6 +313,36 @@ def test_a_partition_with_no_group_of_two_really_does_load_under_the_index() -> 
         Seat.objects.values("company_id")
         .annotate(seats=Count("id"))
         .values_list("seats", flat=True)
+    )
+    assert largest == 1
+
+
+def test_one_flat_fan_out_carries_a_two_fan_out_uniqueness_under_the_index() -> None:
+    # The asymmetric exemption against the database. Five people cannot hold
+    # twenty rows one apiece, so only the company fan-out satisfies the proof --
+    # and only one has to, because a company that owns one row cannot own the
+    # second half of a duplicate pair.
+    build_shape(
+        Shape(
+            _companies(20),
+            Table(Person, rows=5, name=Constant("p")),
+            Table(
+                Membership,
+                rows=20,
+                company=FanOut(Constant(1)),
+                person=FanOut(Zipf()),
+                role=Constant("member"),
+            ),
+        )
+    )
+
+    assert Membership.objects.count() == 20
+    # The claim the exemption rests on, asserted rather than assumed: every row
+    # has its own company, so no pair can repeat whatever the people do.
+    largest = max(
+        Membership.objects.values("company_id")
+        .annotate(rows=Count("id"))
+        .values_list("rows", flat=True)
     )
     assert largest == 1
 

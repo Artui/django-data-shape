@@ -162,6 +162,9 @@ how many companies there are.
   It used to be accepted and then die inside `COPY` at a row number that moved
   when the seed did. A deduplicated edge table is filled by a statement instead
   — `Projection(Membership, columns=(...), sql=...)` — which the refusal says.
+  **One** of the two fan-outs having no group of two is enough to exempt it, by
+  the same proof as below: such a fan-out never repeats a parent key, so no two
+  rows share that column and the pair is distinct on that half alone.
 - **The second column does not have to be a partition for that to be true.**
   One fan-out beside a drawn column is refused on the same proof:
   `Seat(company=FanOut(Zipf()), label=Skew({"a": 1, "b": 1}))` over fifty

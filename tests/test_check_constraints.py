@@ -5,6 +5,16 @@ unique index failing at row N of a load that has already run for a minute. So
 what is being tested is not that the data is impossible -- PostgreSQL settles
 that -- but that it is said so before a row is generated, and said with the
 arithmetic in it.
+
+**The two unconditional checks interact, and that has broken a test here
+already.** The pigeonhole answers first by design -- "this shape does not fit at
+all" is a more useful instruction than "it fits and nothing arranges it" -- so a
+declaration can be refused by the arithmetic while the arrangement check it was
+written for is never reached. A test asserting an *arrangement* refusal has to be
+sized so the arithmetic cannot answer: give the drawn column enough distinct
+values that the capacity clears the row count, and assert which message came
+back. ``Constant`` is the trap, because its capacity is the parent count exactly.
+The boundary tests below carry that reasoning inline where they depend on it.
 """
 
 from __future__ import annotations
@@ -502,6 +512,84 @@ def test_a_single_fan_out_under_a_uniqueness_says_which_columns_it_means() -> No
     message = str(raised.value)
     assert "are fan-outs" not in message
     assert "Projection(Seat" not in message
+
+
+def test_one_partition_with_no_group_of_two_is_enough_for_both_fan_outs() -> None:
+    # Both flat, and neither can repeat a parent key: twenty rows over twenty
+    # companies is one membership each, so no two rows share a company and the
+    # pair is distinct on that half alone.
+    Shape(
+        _companies(20),
+        Table(Person, rows=20, name=Constant("p")),
+        Table(
+            Membership,
+            rows=20,
+            company=FanOut(Constant(1)),
+            person=FanOut(Constant(1)),
+            role=Constant("member"),
+        ),
+    )
+
+
+def test_the_second_fan_out_does_not_have_to_be_flat_as_well() -> None:
+    # The asymmetric case, and the reason the exemption asks for one fan-out
+    # rather than both. Five people cannot hold twenty rows one apiece, so the
+    # person fan-out could never satisfy the proof at these numbers -- and it
+    # does not have to. Twenty companies partitioned flat already make every
+    # row's company unique, and this loads twenty times out of twenty.
+    Shape(
+        _companies(20),
+        Table(Person, rows=5, name=Constant("p")),
+        Table(
+            Membership,
+            rows=20,
+            company=FanOut(Constant(1)),
+            person=FanOut(Zipf()),
+            role=Constant("member"),
+        ),
+    )
+
+
+def test_two_fan_outs_one_row_past_the_boundary_are_refused_again() -> None:
+    # The same boundary as the single-fan-out case. Twenty-one rows over twenty
+    # companies gives some company two, and those two rows pick their people
+    # independently. Twenty companies and twenty people leave four hundred
+    # pairs, so the pigeonhole cannot answer here -- which is what makes this a
+    # test of the bound rather than of the arithmetic.
+    with pytest.raises(InvalidShape, match="one_membership_per_company_person") as raised:
+        Shape(
+            _companies(20),
+            Table(Person, rows=20, name=Constant("p")),
+            Table(
+                Membership,
+                rows=21,
+                company=FanOut(Constant(1)),
+                person=FanOut(Zipf()),
+                role=Constant("member"),
+            ),
+        )
+
+    assert "are fan-outs" in str(raised.value)
+    assert "can produce" not in str(raised.value)
+
+
+def test_a_childless_share_takes_the_proof_away_from_two_fan_outs_too() -> None:
+    # Flat weights and a childless share is not a flat partition: the childless
+    # parents are weighed at zero and their rows go to the others, so some
+    # company gets two after all. Measured at twelve loads out of twenty, which
+    # is the lottery this refuses rather than a shape that works.
+    with pytest.raises(InvalidShape, match="one_membership_per_company_person"):
+        Shape(
+            _companies(20),
+            Table(Person, rows=20, name=Constant("p")),
+            Table(
+                Membership,
+                rows=20,
+                company=FanOut(Constant(1), childless=0.1),
+                person=FanOut(Zipf()),
+                role=Constant("member"),
+            ),
+        )
 
 
 def test_the_pigeonhole_arithmetic_is_still_what_answers_first() -> None:
