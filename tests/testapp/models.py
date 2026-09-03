@@ -875,3 +875,64 @@ class Approval(models.Model):
                 name="one_open_approval_per_company",
             ),
         ]
+
+
+class Auditor(models.Model):
+    """Stands in for the ``User`` an audit base points every model at."""
+
+    name = models.CharField(max_length=50)
+
+
+class Plan(models.Model):
+    """The legitimate shared parent: the model a projection's join runs through."""
+
+    name = models.CharField(max_length=50)
+
+
+class Portfolio(models.Model):
+    """A second legitimate shared parent, so ``through=`` has a real choice.
+
+    Two defensible ones is when ``through=`` is needed even with no audit base
+    anywhere: the join could honestly run either way, and only the caller knows
+    which collection they meant to copy.
+    """
+
+    name = models.CharField(max_length=50)
+
+
+class PlanStage(models.Model):
+    """The collection being copied, carrying audit columns like everything else."""
+
+    plan = models.ForeignKey(Plan, on_delete=models.CASCADE, related_name="stages")
+    portfolio = models.ForeignKey(Portfolio, on_delete=models.CASCADE, related_name="stages")
+    title = models.CharField(max_length=50)
+    created_by = models.ForeignKey(Auditor, null=True, on_delete=models.SET_NULL, related_name="+")
+    updated_by = models.ForeignKey(Auditor, null=True, on_delete=models.SET_NULL, related_name="+")
+
+
+class PlanRun(models.Model):
+    """What the projected rows hang off, carrying the same audit columns."""
+
+    plan = models.ForeignKey(Plan, on_delete=models.CASCADE, related_name="runs")
+    portfolio = models.ForeignKey(Portfolio, on_delete=models.CASCADE, related_name="runs")
+    name = models.CharField(max_length=50)
+    created_by = models.ForeignKey(Auditor, null=True, on_delete=models.SET_NULL, related_name="+")
+    updated_by = models.ForeignKey(Auditor, null=True, on_delete=models.SET_NULL, related_name="+")
+
+
+class RunStage(models.Model):
+    """A projection whose derived join an audit base makes ambiguous.
+
+    ``PlanRun`` and ``PlanStage`` are joinable through ``Plan``, which is the
+    whole point, **and** through ``Auditor`` twice over, because an abstract base
+    puts ``created_by`` and ``updated_by`` on every model in the schema. So any
+    two models are joinable, the derivation has four candidates instead of one,
+    and a consumer with that very common base could not reach the derived form
+    for any pair at all.
+    """
+
+    run = models.ForeignKey(PlanRun, on_delete=models.CASCADE, related_name="stages")
+    source = models.ForeignKey(PlanStage, null=True, on_delete=models.SET_NULL, related_name="+")
+    title = models.CharField(max_length=50)
+    created_by = models.ForeignKey(Auditor, null=True, on_delete=models.SET_NULL, related_name="+")
+    updated_by = models.ForeignKey(Auditor, null=True, on_delete=models.SET_NULL, related_name="+")

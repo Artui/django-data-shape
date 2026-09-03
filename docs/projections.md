@@ -81,6 +81,38 @@ counts as a step of length zero, so a source that points straight at `per` is th
 same case. Exactly one such link has to exist; zero and several are both refused
 by name.
 
+### `through=` — which model the join runs on
+
+Several links is the common case, not the exception, and the reason is a pattern
+most Django schemas have:
+
+```python
+class BaseModel(models.Model):
+    created_by = models.ForeignKey(User, ...)
+    updated_by = models.ForeignKey(User, ...)
+
+    class Meta:
+        abstract = True
+```
+
+An abstract base like that makes **any two models in the schema joinable**, so
+the derivation has candidates everywhere and can settle nothing — not for one
+pair, for every pair. `through=` says which model the join is on:
+
+```python
+Projection(RunStage, per=PlanRun, copying=PlanStage, through=Plan)
+```
+
+The refusal names it, and names a model that can actually resolve the join
+rather than the first one alphabetically — an audit model is reached by two
+edges from each side, so it is never a usable answer even though it is a real
+candidate.
+
+Where a model is reached by more than one edge from a side, `through=` cannot
+help: both edges satisfy it, so naming it leaves the same choice. The refusal
+says so and sends you to `sql=`, which is the only place a specific pair of
+columns can be written.
+
 **The columns**, in this order, for every column but the primary key:
 
 | The column | Gets |
@@ -150,7 +182,9 @@ Projection(
 ```
 
 The columns are **field names**, checked against the model, so a typo is refused
-here rather than by the database. The primary key has to be among them: this
+here rather than by the database. A relation may be spelled either way —
+`event` and `event_id` name the same column — because what an `INSERT` lists is
+the second, and that is what the refusal asking for `columns=` describes. The primary key has to be among them: this
 package owns the keys, and a statement it did not write has to say what they are
 rather than leave them to a sequence whose current value is not part of any
 declaration.

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import numbers
+from decimal import Decimal
 from typing import Any
 
 from django.db.models import Model
@@ -208,10 +210,29 @@ def _sizes(
         # something that is not a number is a declaration mistake, and the
         # alternative is a TypeError from inside the partition arithmetic that
         # names neither the table nor the field.
-        if not isinstance(weight, (int, float)) or isinstance(weight, bool):
+        #
+        # The test is a numeric *tower* and not a list of types, because the
+        # narrow version refused the spelling this package recommends:
+        # `Uniform(1, 10, places=0)` rounds through Decimal, and `places=0` is
+        # the natural way to say that a fan-out size is a count. It was refused
+        # by `isinstance(weight, (int, float))` while the next line already did
+        # `float(weight)` -- stricter than the arithmetic it was protecting.
+        #
+        # `numbers.Real` alone does not reach it: Decimal is `numbers.Number`
+        # and deliberately not `Real`, because mixing it with float is not
+        # something the tower wants to promise. So Decimal is named beside it,
+        # and Fraction and numpy scalars come along for free.
+        #
+        # `bool` stays out. It is an int and it is `Real`, and a distribution
+        # handing back True has almost certainly been written for a different
+        # column.
+        if isinstance(weight, bool) or not isinstance(weight, (numbers.Real, Decimal)):
             raise InvalidShape(
                 f"{table}.{field} needs numeric fan-out sizes, but "
-                f"{fan_out.sizes!r} produced {weight!r}."
+                f"{fan_out.sizes!r} produced {weight!r}. A fan-out size is a count of children "
+                "per parent, so the distribution weighing it has to produce numbers -- int, "
+                "float, Decimal and Fraction all work, and the weights are normalised so their "
+                "scale does not matter."
             )
         weights.append(float(weight))
 

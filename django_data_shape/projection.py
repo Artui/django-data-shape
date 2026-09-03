@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from collections.abc import Mapping, Sequence
 from types import MappingProxyType
 from typing import Any, cast
@@ -169,6 +170,7 @@ class Projection:
         *,
         per: type[Model] | None = None,
         copying: type[Model] | None = None,
+        through: type[Model] | None = None,
         columns: Sequence[str] | None = None,
         sql: str | None = None,
         params: Sequence[object] = (),
@@ -179,6 +181,7 @@ class Projection:
         self._model = model
         self._per = per
         self._copying = copying
+        self._through = through
         self._sql = sql
         self._params = tuple(params)
         self._reads: tuple[type[Model], ...] = tuple(reads)
@@ -212,6 +215,11 @@ class Projection:
     @property
     def db_table(self) -> str:
         return str(self.model._meta.db_table)
+
+    @property
+    def through(self) -> type[Model] | None:
+        """The model the derived join runs on, where the caller had to say."""
+        return self._through
 
     @property
     def statistics(self) -> Mapping[str, int]:
@@ -322,7 +330,7 @@ class Projection:
                 "nothing and fills nothing."
             )
         self._keys = _projectable_keys(self._model, pk_field, keys)
-        self._join = _link(self._model, self._per, self._copying)
+        self._join = _link(self._model, self._per, self._copying, self._through)
         self._plan_columns(pk_field)
 
     def _plan_columns(self, pk_field: Field[Any, Any]) -> None:
@@ -393,6 +401,13 @@ class Projection:
                 "form or the other: either this package derives the statement from the model "
                 "graph, or you supply it."
             )
+        if self._through is not None:
+            raise InvalidShape(
+                f"{self._model.__name__} declares through= together with sql=. through= names "
+                "the model a *derived* join runs on, and a statement you wrote says its own "
+                "joins -- so one of the two is not being read. Drop through=, or drop sql= and "
+                "let the join be derived."
+            )
         if keys is not None:
             raise InvalidShape(
                 f"{self._model.__name__} declares sql= together with keys=. A key strategy is "
@@ -403,7 +418,9 @@ class Projection:
             raise InvalidShape(
                 f"{self._model.__name__} declares sql= without columns=. The select's columns "
                 "are what the insert lists, and this package will not guess at the order they "
-                "come out in."
+                "come out in. Name them as fields of this model, in the order the select "
+                "produces them -- a relation may be spelled either way, so event and event_id "
+                "both name the same column."
             )
         if self._model in self._reads:
             raise InvalidShape(
@@ -412,12 +429,13 @@ class Projection:
                 "nothing -- and load order has no answer for a declaration that has to come "
                 "after itself."
             )
-        known = {field.name: field for field in self._model._meta.concrete_fields}
+        known = _addressable(self._model)
         unknown = sorted(name for name in columns if name not in known)
         if unknown:
             raise InvalidShape(
                 f"{self._model.__name__} has no field named {', '.join(unknown)}. "
-                f"Its concrete fields are: {', '.join(sorted(known))}."
+                f"Its concrete fields are: {', '.join(sorted(known))} -- a relation appears "
+                "twice there because either spelling names the same column."
             )
         if pk_field.name not in columns:
             raise InvalidShape(
@@ -436,7 +454,7 @@ class Projection:
         database default, and a bigger sample of it describes nothing more
         precisely.
         """
-        known = {field.name: field for field in self._model._meta.concrete_fields}
+        known = _addressable(self._model)
         for name in sorted(self._statistics):
             where = f"{self._model.__name__}.{name}"
             if name not in known:
@@ -467,6 +485,11 @@ class Projection:
             self.db_table,
             None if self._per is None else str(self._per._meta.label),
             None if self._copying is None else str(self._copying._meta.label),
+            # The resolved join below already differs between two through
+            # models, but this is stated rather than inferred: a digest that
+            # depended on two columns happening to be named differently would
+            # be one edit away from calling two declarations the same.
+            None if self._through is None else str(self._through._meta.label),
             self._columns,
             self._sql,
             self._params,
@@ -489,6 +512,28 @@ class Projection:
             f"per={cast('type[Model]', self._per).__name__}, "
             f"copying={cast('type[Model]', self._copying).__name__})"
         )
+
+
+def _addressable(model: type[Model]) -> dict[str, Field[Any, Any]]:
+    """Every concrete field under both names a caller might reasonably use.
+
+    ``name`` and ``attname`` are the same string for everything but a relation,
+    where they are ``event`` and ``event_id``. Both are accepted because the
+    refusal that sends a reader to ``columns=`` says "the select's columns are
+    what the insert lists" -- and what an insert lists for a foreign key is
+    ``event_id``. A consumer followed that sentence and was told there is no
+    field named ``event_id``, which is a contradiction rather than a
+    correction, and the surrounding documentation reinforced the wrong reading.
+
+    ``name`` wins a collision, which needs a model carrying a plain field named
+    exactly some relation's ``attname``. Django's own checks reject that
+    (``models.E006``), so the tie-break is there to be deterministic rather than
+    because it is reachable.
+    """
+    fields = list(model._meta.concrete_fields)
+    known: dict[str, Field[Any, Any]] = {field.attname: field for field in fields}
+    known.update({field.name: field for field in fields})
+    return known
 
 
 def _column(field: Field[Any, Any]) -> str:
@@ -553,7 +598,12 @@ def _single_relation(model: type[Model], target: type[Model]) -> Field[Any, Any]
     return found[0]
 
 
-def _link(model: type[Model], per: type[Model], copying: type[Model]) -> tuple[str, str]:
+def _link(
+    model: type[Model],
+    per: type[Model],
+    copying: type[Model],
+    through: type[Model] | None = None,
+) -> tuple[str, str]:
     """The pair of columns ``per`` and ``copying`` are joined on.
 
     A model they both reach in one step: ``Event`` and ``TemplateSession`` both
@@ -562,19 +612,9 @@ def _link(model: type[Model], per: type[Model], copying: type[Model]) -> tuple[s
     makes a source pointing straight at ``per`` the same case rather than a
     special one.
     """
-    reachable: list[tuple[type[Model], str]] = [(per, _column(primary_key_field(per)))]
-    reachable.extend(
-        (cast("type[Model]", field.related_model), _column(field))
-        for field in per._meta.concrete_fields
-        if field.is_relation
-    )
-    pairs = sorted(
-        (per_column, _column(source_field), target.__name__)
-        for target, per_column in reachable
-        for source_field in copying._meta.concrete_fields
-        if source_field.is_relation and source_field.related_model is target
-    )
-    if not pairs:
+    every = _every(per, copying)
+    candidates = list(every)
+    if not candidates:
         raise InvalidShape(
             f"{model.__name__} is projected per {per.__name__} copying {copying.__name__}, but "
             f"this package cannot see how those two are joined: nothing {per.__name__} points "
@@ -582,12 +622,110 @@ def _link(model: type[Model], per: type[Model], copying: type[Model]) -> tuple[s
             "copies a collection along an edge both sides share. Write the statement with sql= "
             "if the join is not one edge wide."
         )
-    if len(pairs) > 1:
-        through = ", ".join(sorted({target for _per, _source, target in pairs}))
-        raise InvalidShape(
-            f"{model.__name__} is projected per {per.__name__} copying {copying.__name__}, and "
-            f"they are joinable through more than one model ({through}), so which collection is "
-            "being copied is ambiguous. Write the statement with sql= and say which."
-        )
-    per_column, source_column, _target = pairs[0]
+    if through is not None:
+        candidates = [one for one in candidates if one[2] == through.__name__]
+        if not candidates:
+            offered = ", ".join(sorted({one[2] for one in every}))
+            raise InvalidShape(
+                f"{model.__name__} declares through={through.__name__}, and {per.__name__} and "
+                f"{copying.__name__} are not both joinable through it. What they do share is: "
+                f"{offered}."
+            )
+    if len(candidates) > 1:
+        raise InvalidShape(_ambiguous(model, per, copying, candidates))
+    per_column, source_column, _target, _per_name, _source_name = candidates[0]
     return per_column, source_column
+
+
+def _ambiguous(
+    model: type[Model],
+    per: type[Model],
+    copying: type[Model],
+    candidates: list[tuple[str, str, str, str, str]],
+) -> str:
+    """Why the join could not be derived, and which correction actually applies.
+
+    **Two shapes of ambiguity, and they take different corrections**, so telling
+    them apart is most of this function. Several *models* means naming one with
+    ``through=``. Several *edges to one model* means ``through=`` cannot narrow
+    it at all, because both edges satisfy it -- and that is what an abstract
+    base produces, since ``created_by`` and ``updated_by`` both reach ``User``.
+
+    A model reached by exactly one edge from each side is the only kind
+    ``through=`` can resolve, so only those are offered. Naming the
+    alphabetically first candidate instead would have suggested
+    ``through=Auditor`` on the schema this was written for, which is the one
+    answer that cannot work -- the audit model is reached twice from both
+    sides, and is never the collection being copied.
+    """
+    counts = Counter(one[2] for one in candidates)
+    resolvable = sorted(name for name, seen in counts.items() if seen == 1)
+    repeated = sorted(name for name, seen in counts.items() if seen > 1)
+    # What gets listed depends on what has to be chosen between, and bounding
+    # it matters: two audit columns on each side is already four edges through
+    # one model, and four would be sixteen. Where several models are candidates,
+    # the models are the choice and through= is spelled with one of them.
+    # Where only one is, the edges are the choice and through= cannot express
+    # it, so those are named in full.
+    if len(counts) > 1:
+        edges = ", ".join(
+            f"{name} ({seen} way{'' if seen == 1 else 's'})"
+            for name, seen in sorted(counts.items())
+        )
+    else:
+        edges = ", ".join(
+            f"{per.__name__}.{per_name} to {copying.__name__}.{source_name}"
+            for _pc, _sc, _target, per_name, source_name in candidates
+        )
+    if resolvable:
+        remedy = (
+            f"Name the one you mean with through={resolvable[0]}, or write the statement with sql=."
+        )
+    else:
+        remedy = (
+            "through= cannot narrow this: every candidate is reached by more than one edge, so "
+            "naming the model leaves the same choice. Write the statement with sql= and say "
+            "which pair of columns the join is on."
+        )
+    if repeated:
+        aside = (
+            f" {', '.join(repeated)} is reached by more than one edge from each side, which is "
+            "what an abstract base carrying created_by/updated_by does to every pair of models "
+            "in a schema -- an audit column is never the collection being copied."
+        )
+    else:
+        aside = ""
+    return (
+        f"{model.__name__} is projected per {per.__name__} copying {copying.__name__}, and this "
+        f"package can see {len(candidates)} ways to join them ({edges}), so which collection is "
+        f"being copied is ambiguous. {remedy}{aside}"
+    )
+
+
+def _every(per: type[Model], copying: type[Model]) -> list[tuple[str, str, str, str, str]]:
+    """Every join this package can see between the two: how, and through what.
+
+    Its own function because two callers need it and they need different halves
+    of it. ``_link`` narrows the list to what ``through=`` allows, and a refusal
+    has to quote the list *before* that narrowing -- otherwise a caller who
+    named the wrong model is told there is nothing, and left to guess both the
+    correction and the spelling of it.
+
+    Each entry is the join column on each side, the model it goes through, and
+    the two field names, because the field names are what a refusal has to say
+    when several edges reach one model and ``through=`` therefore cannot help.
+    """
+    reachable: list[tuple[type[Model], str, str]] = [
+        (per, _column(primary_key_field(per)), primary_key_field(per).name)
+    ]
+    reachable.extend(
+        (cast("type[Model]", field.related_model), _column(field), field.name)
+        for field in per._meta.concrete_fields
+        if field.is_relation
+    )
+    return sorted(
+        (per_column, _column(source_field), target.__name__, per_name, source_field.name)
+        for target, per_column, per_name in reachable
+        for source_field in copying._meta.concrete_fields
+        if source_field.is_relation and source_field.related_model is target
+    )

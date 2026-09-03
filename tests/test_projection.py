@@ -16,18 +16,25 @@ from django_data_shape import (
     UuidKeys,
 )
 from tests.testapp.models import (
+    Auditor,
     Company,
     DeliveryDocument,
     DualSession,
     Event,
     EventSession,
     Order,
+    Plan,
+    PlanRun,
+    PlanStage,
+    Portfolio,
     Rehearsal,
+    RunStage,
     Session,
     SparseSession,
     TemplateSession,
     TokenSession,
     UuidSession,
+    Venue,
 )
 
 
@@ -158,11 +165,18 @@ def test_an_unjoinable_pair_is_refused() -> None:
 def test_an_ambiguous_join_is_refused_and_names_both_models() -> None:
     # Rehearsal shares both a template and a venue with Event, so which
     # collection is being copied is genuinely undecidable.
-    with pytest.raises(InvalidShape, match="more than one model") as raised:
+    with pytest.raises(InvalidShape, match="ways to join them") as raised:
         Projection(EventSession, per=Event, copying=Rehearsal)
 
-    assert "Template" in str(raised.value)
-    assert "Venue" in str(raised.value)
+    message = str(raised.value)
+    assert "Template" in message
+    assert "Venue" in message
+    # Both are reachable exactly once, so through= resolves this one and the
+    # message says so rather than sending the reader to raw SQL.
+    assert "through=Template" in message
+    # And it does not offer the audit aside here, because there is nothing
+    # reached twice: that sentence is diagnosis, not decoration.
+    assert "abstract base" not in message
 
 
 def test_a_column_nothing_can_fill_is_refused_by_name() -> None:
@@ -325,6 +339,127 @@ def test_a_statistics_target_is_checked_against_a_statement_the_caller_wrote_too
             sql="SELECT 1, 1, 'x', 1",
             statistics={"channel": 250},
         )
+
+
+def test_an_audit_base_makes_every_pair_joinable_and_the_refusal_says_so() -> None:
+    """The case that put the derived form out of reach for a whole schema.
+
+    An abstract base carrying ``created_by``/``updated_by`` to ``User`` is a
+    very common Django pattern, and it makes **any** two models joinable -- so
+    ``per=``/``copying=`` derives for no pair at all, not just this one. The
+    consumer who found it was projecting the README's own motivating example.
+
+    The refusal was honest and its remedy was a sledgehammer: drop to raw SQL.
+    It now names ``through=`` first, which keeps the derived form.
+    """
+    with pytest.raises(InvalidShape) as raised:
+        Projection(RunStage, per=PlanRun, copying=PlanStage)
+
+    message = str(raised.value)
+    assert "Auditor" in message
+    assert "Plan" in message
+    assert "through=Plan" in message
+
+
+def test_through_names_the_model_the_join_runs_on() -> None:
+    projection = Projection(RunStage, per=PlanRun, copying=PlanStage, through=Plan)
+
+    assert projection.through is Plan
+
+
+def test_through_is_part_of_what_the_declaration_says() -> None:
+    # Two shapes joining the same pair through different models copy different
+    # collections, so they are different declarations and the cache has to know.
+    assert (
+        Projection(RunStage, per=PlanRun, copying=PlanStage, through=Plan).canonical()
+        != Projection(RunStage, per=PlanRun, copying=PlanStage, through=Portfolio).canonical()
+    )
+
+
+def test_a_through_model_the_two_do_not_share_is_refused() -> None:
+    with pytest.raises(InvalidShape) as raised:
+        Projection(RunStage, per=PlanRun, copying=PlanStage, through=Venue)
+
+    message = str(raised.value)
+    assert "through=Venue" in message
+    # The candidates it could have been, so the correction is one read away.
+    assert "Plan" in message
+
+
+def test_a_through_model_reached_twice_from_one_side_is_still_refused_by_field() -> None:
+    # through=Auditor is reachable, and reachable *twice* from each side --
+    # created_by and updated_by. Naming the model is not enough there, and a
+    # refusal that named no fields would leave the reader where they started.
+    with pytest.raises(InvalidShape) as raised:
+        Projection(RunStage, per=PlanRun, copying=PlanStage, through=Auditor)
+
+    message = str(raised.value)
+    assert "created_by" in message
+    assert "updated_by" in message
+    # The other shape of the same refusal, and it takes the other correction:
+    # every remaining candidate is reached more than once, so naming the model
+    # satisfies both edges and narrows nothing.
+    assert "through= cannot narrow this" in message
+    assert "an audit column is never the collection being copied" in message
+
+
+def test_through_is_only_meaningful_on_the_derived_form() -> None:
+    with pytest.raises(InvalidShape, match="through= together with sql="):
+        Projection(RunStage, through=Plan, columns=("id",), sql="SELECT 1")
+
+
+def test_columns_accepts_the_column_an_insert_actually_lists() -> None:
+    """Both spellings, because the message that sends you here says the other.
+
+    The refusal for a missing ``columns=`` reads "the select's columns are what
+    the insert lists", and what an insert lists for a foreign key is
+    ``event_id`` -- which was then refused as "no field named event_id". A
+    consumer followed the message and met the contradiction; the surrounding
+    documentation said "the COPY column list" and reinforced it.
+
+    ``event_id`` genuinely is that column, so it is accepted rather than
+    argued with, and both spellings resolve to the same one.
+    """
+    written = Projection(
+        EventSession,
+        columns=("id", "event_id", "title", "minutes"),
+        sql="SELECT 1, 1, 'x', 1",
+    )
+
+    # canonical(), not object equality: the claim is that the two spellings are
+    # one declaration, which is exactly what the template-database cache keys
+    # on. Two digests here would mean one shape built twice.
+    assert (
+        written.canonical()
+        == Projection(
+            EventSession,
+            columns=("id", "event", "title", "minutes"),
+            sql="SELECT 1, 1, 'x', 1",
+        ).canonical()
+    )
+    assert "event_id" in repr(written)
+
+
+def test_a_statistics_target_may_be_spelled_either_way_too() -> None:
+    # The same dict is read for the statistics check, so the two have to agree
+    # about what a column is called or one would accept what the other refuses.
+    Projection(
+        EventSession,
+        columns=("id", "event_id", "title", "minutes"),
+        sql="SELECT 1, 1, 'x', 1",
+        statistics={"title": 250},
+    )
+
+
+def test_a_name_that_is_neither_spelling_still_says_what_is_available() -> None:
+    with pytest.raises(InvalidShape) as raised:
+        Projection(EventSession, columns=("id", "nope"), sql="SELECT 1, 2")
+
+    message = str(raised.value)
+    assert "no field named nope" in message
+    # Both spellings offered, since the reader arrived here having guessed one.
+    assert "event" in message
+    assert "event_id" in message
 
 
 def test_a_target_outside_postgres_own_range_is_refused_here_as_well() -> None:
