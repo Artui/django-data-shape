@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **A partial `UniqueConstraint` whose condition names a set is checked, not
+  skipped.** `Q(status__in=["DRAFT", "IN_REVIEW", "APPROVED"])` was read as a
+  predicate this package should not interpret, so the constraint was passed over
+  in silence -- while the identical declaration spelled `Q(status="DRAFT")` was
+  refused at declaration time with the arithmetic in it. The set form is the
+  commoner one in real schemas, because "one open review per project" is
+  open-ness across several statuses far more often than one, so the spelling
+  that went unchecked was the likelier spelling. An equality is now read as a
+  set of one and nothing downstream distinguishes them: what decides the
+  refusal is whether a row can land inside the condition, and membership answers
+  that either way. A set the caller wrote out is a list of values -- deciding
+  membership in it needs no query planner, which is the line the original
+  refusal was drawn on and the reason it drew it in the wrong place. A negation,
+  two clauses joined, a comparison and an `__in` over a queryset are all still
+  declined.
+- **`PerParent`'s `rest` has to sit outside the condition, and now says so.**
+  The set form makes reachable a case the equality form made hard to write:
+  `last="DRAFT", rest="IN_REVIEW"` puts *every* row of every group inside a
+  three-status condition, so the declaration that answers the equality form
+  breaks this one. The remedy in the message names the requirement rather than
+  leaving `rest=` an ellipsis.
+- **A required foreign key carrying a Python-level `default=` is refused with
+  the other undeclared required relations.** It fell between the two halves that
+  should have caught it: the refusal skipped any column with a default, and the
+  fill that would have supplied one skips any column that is a relation. So it
+  was neither refused nor filled, and the load died inside `COPY` on the
+  not-null violation the refusal exists to replace. Folding the default into a
+  `Constant` would have been the wrong repair -- a key that did not come out of
+  the parent's table is a key drawn from nothing, which is what declaring a
+  value distribution on a relation is refused for. A real `db_default` is DDL
+  and is still left to the database.
+
+
 ## [0.11.0] — 2026-09-03
 
 ### Added

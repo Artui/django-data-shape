@@ -31,6 +31,7 @@ from django_data_shape import (
     Zipf,
 )
 from tests.testapp.models import (
+    Assigned,
     Company,
     CompanyProxy,
     Defaulted,
@@ -232,6 +233,32 @@ def test_a_forgotten_foreign_key_is_told_how_to_declare_one() -> None:
     assert "company=FanOut(Zipf())" in message
     assert "not supported" not in message
     assert "next release" not in message
+
+
+def test_a_required_relation_carrying_a_python_default_is_refused_too() -> None:
+    # The hole the first version of this refusal left open, and it fails exactly
+    # the way the refusal exists to prevent. A `default=` on a foreign key is
+    # applied by save(), which this package never calls, so the column was
+    # neither refused (the check skipped anything with a default) nor filled
+    # (the fill loop skipped anything that is a relation) -- and the load died
+    # inside COPY on "null value in column company_id".
+    #
+    # Reported by a consumer against the release before the refusal existed, so
+    # their case is fixed; this narrower one survived it.
+    with pytest.raises(InvalidShape, match="Assigned.company cannot be null"):
+        Table(Assigned, rows=1, label=Constant("x"))
+
+
+def test_a_relation_default_is_not_folded_into_a_constant() -> None:
+    # The reading that would have been wrong: filling company_id with the
+    # default's value is what _resolve_defaults does for a scalar, and doing it
+    # here would emit a key drawn from nothing -- the very thing declaring a
+    # value distribution on a relation is refused for. A parent's keys come from
+    # the parent's table, so a default cannot stand in for a fan-out.
+    with pytest.raises(InvalidShape) as raised:
+        Table(Assigned, rows=1, label=Constant("x"))
+
+    assert "company=FanOut(Zipf())" in str(raised.value)
 
 
 def test_a_nullable_relation_may_be_omitted_and_loads_null() -> None:

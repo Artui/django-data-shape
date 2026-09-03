@@ -522,10 +522,24 @@ class Table:
         # Forgetting one foreign key is the commonest possible mistake, so this
         # is the first thing many readers ever see the package say -- and what
         # it said was that the package could not do the thing it is for.
+        # `has_db_default` rather than `has_default`, and the difference is the
+        # whole of the second fix here. A Python-level `default=` on a foreign
+        # key is applied by save(), which this package never calls, so it puts
+        # nothing behind the column -- and it used to exempt the column from
+        # this refusal *and* from the fill below, which skips relations. Neither
+        # half noticed it, and the load died inside COPY on the not-null
+        # violation this refusal exists to replace. A real db_default is DDL, so
+        # a column carrying one can be left out of the COPY and still be filled.
+        #
+        # Folding the default into a Constant, which is what happens to a scalar
+        # a few lines down, would be the wrong repair: a key that did not come
+        # out of the parent's table is a key drawn from nothing, which is
+        # exactly what declaring a value distribution on a relation is refused
+        # for.
         required_relations = sorted(
             name
             for name, field in undeclared
-            if field.is_relation and not field.null and not field.has_default()
+            if field.is_relation and not field.null and not has_db_default(field)
         )
         if required_relations:
             raise InvalidShape(

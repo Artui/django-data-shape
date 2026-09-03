@@ -43,12 +43,14 @@ from tests.testapp.models import (
     Booking,
     Company,
     Contest,
+    Escalation,
     Event,
     EventSession,
     Invitation,
     Membership,
     Person,
     Project,
+    Review,
     Seat,
     Template,
     TemplateSession,
@@ -416,10 +418,11 @@ def test_a_column_derived_from_the_group_is_left_to_the_other_two_nets() -> None
 
 
 def test_every_constraint_this_cannot_read_is_left_to_the_other_two_nets() -> None:
-    # Six skips in one model: a condition that is not a single equality, one
-    # written over an expression rather than fields, one grouped by a column no
-    # fan-out partitions, one joining two clauses, one whose single clause is a
-    # nested Q, and a check constraint, which is not a unique constraint at all.
+    # Five skips in one model: a condition written over an expression rather
+    # than fields, one grouped by a column no fan-out partitions, one joining
+    # two clauses, one whose single clause is a nested Q, and a check
+    # constraint, which is not a unique constraint at all. A sixth used to live
+    # here -- state__in -- and moved to Review when it stopped being a skip.
     #
     # seats is Constant(0) against a `seats__gt=0` condition on purpose: read as
     # an equality that condition would be decided, and decided as a refusal, so
@@ -436,6 +439,95 @@ def test_every_constraint_this_cannot_read_is_left_to_the_other_two_nets() -> No
             seats=Constant(0),
         ),
     )
+
+
+def test_a_condition_spelled_as_a_set_is_read_like_an_equality() -> None:
+    # "One open review per company", where open-ness is three statuses rather
+    # than one. status is undeclared and comes from the model default, which
+    # Table folds into Constant('DRAFT') -- a value inside the set, so every row
+    # matches the condition and fifty of them land in one company's group.
+    #
+    # This was reported by a consumer as the arithmetic only seeing columns the
+    # caller declared. It sees the folded default perfectly well; what it could
+    # not read was the __in, and the identical shape spelled with = was refused.
+    with pytest.raises(InvalidShape) as raised:
+        Shape(_companies(50), Table(Review, rows=2000, company=FanOut(Zipf())))
+
+    message = str(raised.value)
+    assert "status in ('DRAFT', 'IN_REVIEW', 'APPROVED')" in message
+    assert "at most 50 rows" in message
+    assert "PerParent('company', last='DRAFT'" in message
+
+
+def test_a_set_condition_no_declared_value_can_match_is_accepted() -> None:
+    # The direction that must not become a refusal: Constant enumerates itself,
+    # 'ARCHIVED' is in none of the three, so no row the shape builds is even
+    # inside the constraint's condition.
+    Shape(
+        _companies(50),
+        Table(Review, rows=2000, company=FanOut(Zipf()), status=Constant("ARCHIVED")),
+    )
+
+
+def test_a_set_condition_is_refused_on_the_share_of_any_one_member() -> None:
+    # A draw that lands inside the set only sometimes is still refused, for the
+    # reason the equality form is: a rule about a group cannot be kept by a
+    # draw made per row. The quoted arithmetic totals every member of the set,
+    # because any of them puts the row inside the condition.
+    with pytest.raises(InvalidShape) as raised:
+        Shape(
+            _companies(50),
+            Table(
+                Review,
+                rows=2000,
+                company=FanOut(Zipf()),
+                status=Skew({"DRAFT": 0.1, "IN_REVIEW": 0.2, "ARCHIVED": 0.7}),
+            ),
+        )
+
+    assert "asks for 600 of them" in str(raised.value)
+
+
+def test_a_per_parent_whose_special_value_is_inside_the_set_is_accepted() -> None:
+    # The remedy the message names, spelled against a set condition: one row of
+    # each group inside the set, the rest outside it.
+    Shape(
+        _companies(50),
+        Table(
+            Review,
+            rows=2000,
+            company=FanOut(Zipf()),
+            status=PerParent("company", last="DRAFT", rest="ARCHIVED"),
+        ),
+    )
+
+
+def test_a_per_parent_whose_rest_is_also_inside_the_set_is_refused() -> None:
+    # The trap the set form adds: `last` is inside the condition and so is
+    # `rest`, so every row of every group matches and the constraint is broken
+    # by the declaration that fixes the equality form.
+    with pytest.raises(InvalidShape) as raised:
+        Shape(
+            _companies(50),
+            Table(
+                Review,
+                rows=2000,
+                company=FanOut(Zipf()),
+                status=PerParent("company", last="DRAFT", rest="IN_REVIEW"),
+            ),
+        )
+
+    assert "status in ('DRAFT', 'IN_REVIEW', 'APPROVED')" in str(raised.value)
+
+
+def test_a_set_condition_written_as_a_set_is_ordered_before_it_is_quoted() -> None:
+    # A set literal reaches the message too, and a message that reordered
+    # itself between runs would be one no test could assert on and no reader
+    # could compare across two failures.
+    with pytest.raises(InvalidShape) as raised:
+        Shape(_companies(50), Table(Escalation, rows=2000, company=FanOut(Zipf())))
+
+    assert "status in ('ACKNOWLEDGED', 'RAISED')" in str(raised.value)
 
 
 def test_a_condition_on_a_column_this_shape_leaves_undeclared_is_skipped() -> None:
