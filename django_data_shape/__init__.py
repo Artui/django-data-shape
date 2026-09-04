@@ -47,6 +47,7 @@ from django_data_shape.scaled_shape import scaled_shape
 from django_data_shape.scaled_world import scaled_world
 from django_data_shape.shape import Shape
 from django_data_shape.shape_digest import shape_digest
+from django_data_shape.shape_from_factory import shape_from_factory
 from django_data_shape.shape_not_empty import ShapeNotEmpty
 from django_data_shape.table import Table
 from django_data_shape.table_result import TableResult
@@ -108,6 +109,7 @@ __all__ = [
     "fan_out_sizes",
     "require_clone_strategy",
     "scaled_shape",
+    "shape_from_factory",
     "scaled_world",
     "shape_digest",
     "template_database",
