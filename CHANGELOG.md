@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **`Md5Keys` could not fill a projection on about half of all tables.**
+  `key_sql` wrote `to_hex(<stream>::bigint)`, asking PostgreSQL to re-derive a
+  number Python produced as **unsigned** -- and `bigint` is signed, so any
+  stream above 2^63 raised `NumericValueOutOfRange` before a row was written.
+  The stream is a hash of the table and field names, so it is a coin flip per
+  table rather than anything about a schema or a seed: measured, 49% of table
+  names land above the limit. The stream is a constant by the time the statement
+  is built, so the sixteen hex digits are embedded and nothing is re-derived.
+  - **Reported by a consumer, and it had never executed for them.** In 0.13.0
+    the join-ambiguity refusal answered first, so `key_sql` was unreachable;
+    fixing that in 0.14.0 with `through=` is what exposed a feature 0.13.0 had
+    shipped and nobody could run.
+  - **The test that was supposed to prove the two halves agree used
+    `stream=12345`** -- a number chosen for a test rather than one the producer
+    makes. It now uses a pair `field_stream` actually produced, one either side
+    of the limit, and asserts that the pair straddles it so a later change to
+    how streams are derived cannot quietly make both tests vacuous.
+
+
 ## [0.14.0] — 2026-09-03
 
 ### Added

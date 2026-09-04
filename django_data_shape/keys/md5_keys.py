@@ -47,17 +47,26 @@ class Md5Keys:
         a test computes both for the same rows and compares them, which is the
         only form of agreement that means anything here.
 
-        ``md5`` takes the same eight-byte big-endian pair Python hashes, built
-        with ``to_hex``/``lpad`` and turned back into bytes by ``decode``, so
-        neither side is hashing a rendering of the other's input. The stamp is
-        two ``overlay`` calls on the hex digest: nibble 13 is the version and is
-        always ``4``, and nibble 17 is the variant, which keeps its low two bits
-        and takes ``8`` in the high two.
+        ``md5`` takes the same eight-byte big-endian pair Python hashes, turned
+        back into bytes by ``decode``, so neither side is hashing a rendering of
+        the other's input. The stamp is two ``overlay`` calls on the hex digest:
+        nibble 13 is the version and is always ``4``, and nibble 17 is the
+        variant, which keeps its low two bits and takes ``8`` in the high two.
+
+        **The stream is embedded as hex rather than converted by the server**,
+        and that is a fix rather than a preference. It used to be written
+        ``to_hex(<stream>::bigint)``, which asks PostgreSQL to re-derive a
+        number Python produced as *unsigned* -- and ``bigint`` is signed, so any
+        stream above 2^63 raised ``NumericValueOutOfRange`` before a row was
+        written. That is a coin flip per table, not a property of any schema:
+        the stream is a hash of the table and field names, so roughly half of
+        all table names land above the limit. It is a constant by the time this
+        statement is built, so nothing about it needs deriving at all.
+
+        ``row`` stays a conversion because it is genuinely an expression the
+        server evaluates, and a row index is far below the limit.
         """
-        digest = (
-            f"md5(decode(lpad(to_hex({stream}::bigint), 16, '0') || "
-            f"lpad(to_hex(({row})::bigint), 16, '0'), 'hex'))"
-        )
+        digest = f"md5(decode('{stream:016x}' || lpad(to_hex(({row})::bigint), 16, '0'), 'hex'))"
         variant = f"to_hex((('x' || substr({digest}, 17, 1))::bit(4)::int & 3) | 8)"
         return (
             f"(overlay(overlay({digest} placing '4' from 13 for 1) "

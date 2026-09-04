@@ -356,6 +356,24 @@ class TokenSession(models.Model):
     token = models.UUIDField(default=uuid.uuid4)
 
 
+class KeyedSession(models.Model):
+    """A UUID-keyed projection target whose table name hashes above 2^63.
+
+    Not an arbitrary name. A key stream is a hash of the table and field names,
+    and PostgreSQL's ``bigint`` is signed, so roughly **half of all table names**
+    put the stream above the limit -- a coin flip per table rather than anything
+    about a schema. ``UuidSession`` happens to land below it, which is why the
+    projection built there for four releases while a consumer's own table could
+    not be built at all. This one lands above, so the end-to-end path covers the
+    half that used to fail.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    event = models.ForeignKey(Event, on_delete=models.CASCADE, related_name="+")
+    title = models.CharField(max_length=50)
+    minutes = models.IntegerField()
+
+
 class UuidSession(models.Model):
     """A projected model whose keys cannot be written in SQL."""
 
