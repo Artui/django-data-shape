@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.0] — 2026-09-04
+
 ### Fixed
 - **A `FanOut(parents=[...])` partition no longer depends on what the keys are.**
   Keys are read back ordered by primary key and the sizes are assigned by
@@ -1048,7 +1050,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   into `COPY FROM STDIN`, which psycopg 2 cannot do without materialising them
   first.
 
-[Unreleased]: https://github.com/Artui/django-data-shape/compare/v0.15.0...HEAD
+[Unreleased]: https://github.com/Artui/django-data-shape/compare/v0.16.0...HEAD
+[0.16.0]: https://github.com/Artui/django-data-shape/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/Artui/django-data-shape/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/Artui/django-data-shape/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/Artui/django-data-shape/compare/v0.12.0...v0.13.0
