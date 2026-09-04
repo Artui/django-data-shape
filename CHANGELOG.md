@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **A `FanOut(parents=[...])` partition no longer depends on what the keys are.**
+  Keys are read back ordered by primary key and the sizes are assigned by
+  position, so the weights followed the *sort order of the values* rather than
+  the declaration. With integer keys that is merely surprising; with the UUID
+  primary keys a factory row has on a modern schema it means **the same shape
+  builds differently every run** -- measured, one declaration gave the
+  first-named parent 5, 11 or 79 rows across twelve builds. That is the promise
+  the package rests on, and the same reason `UuidKeys` derives rather than
+  draws, so a narrowing that broke it was a defect and not a preference. Named
+  parents are put back in the order they were named before anything is weighed.
+  - **Reversing the list is now a different declaration**, which is what a
+    reader writing one would expect and was the symptom reported.
+  - **Weights are still scattered across positions**, so the reasoning that
+    argued for scattering survives: a caller's *order* decides which key lands
+    where, and nothing correlates a parent's key with its child count.
+  - Worth knowing for anyone testing near this: a test written over
+    **integer** parents passes against the broken behaviour, because the
+    database's sort order matches insertion order there. Only UUID parents show
+    it.
+- **`shape_from_factory` takes `defaults=`, and names a factory that cannot be
+  called.** Most factories in a real codebase take arguments and need them; a
+  `TeamFactory` wanting a `permission_role`, called with nothing, left a
+  required column empty and failed as a raw `IntegrityError` naming a
+  constraint. That said nothing about what the caller ran, which is the one
+  thing every other refusal here avoids. Anything the factory raises is now
+  named with the call number, because "it failed" and "it failed after three"
+  are different bugs.
+
+
 ## [0.15.0] — 2026-09-04
 
 ### Added

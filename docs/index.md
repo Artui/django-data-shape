@@ -185,6 +185,18 @@ from django_data_shape import shape_from_factory
 print(shape_from_factory(ProjectFactory, samples=200))
 ```
 
+**Most factories in a real codebase take arguments and need them.** `defaults=`
+is handed to every call:
+
+```python
+print(shape_from_factory(TeamFactory, samples=200, defaults={"permission_role": role}))
+```
+
+Called without them, a factory leaves a required column empty and the database
+answers with a constraint name. That failure is caught and named here instead,
+with the call number — because "it failed" and "it failed after three" are
+different bugs.
+
 It runs the factory, measures what the calls wrote, rolls the transaction back
 and returns **source**. Not a `Shape` — text, for you to read, edit and check
 in.

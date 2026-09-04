@@ -73,6 +73,16 @@ Table(Session, rows=50, company=FanOut(Constant(1), parents=[tenant.pk]), label=
 
 Real keys, read out of the parent table like any other fan-out — a key that
 matches no row is refused by name rather than quietly taking a smaller share.
+
+**The order you name them in is part of the declaration.** Keys come back from
+the database sorted by primary key, and the weights are assigned by position, so
+they are put back into the order you wrote before anything is weighed. Without
+that the partition followed the *values* of the keys: with the UUID primary keys
+a factory row has, one declaration gave the first-named parent 5, 11 or 79 rows
+across twelve builds. Two builds of one shape have to agree, which is the same
+reason `UuidKeys` derives rather than draws. Reversing the list is therefore a
+different declaration, and weights are still scattered across positions — so
+nothing correlates a parent's key with its child count.
 A **list of keys, never a queryset**: a declaration needs no connection, and
 evaluating a queryset here would give it one. Build the list yourself, which is
 the query you were going to run anyway.

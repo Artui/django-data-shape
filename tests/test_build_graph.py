@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections import Counter
+
 import pytest
 from django.db import connection
 
@@ -15,7 +17,7 @@ from django_data_shape import (
     Zipf,
 )
 from django_data_shape import build as build_shape
-from tests.testapp.models import Company, OptionalChild, Session
+from tests.testapp.models import Company, OptionalChild, Session, Tenant, TenantRecord
 
 pytestmark = [
     pytest.mark.django_db(transaction=True),
@@ -204,6 +206,45 @@ def test_every_row_can_be_pinned_to_one_pre_existing_parent() -> None:
 
     assert Session.objects.count() == 50
     assert set(Session.objects.values_list("company_id", flat=True)) == {ours.pk}
+
+
+def test_a_narrowed_shape_builds_the_same_over_parents_whose_keys_differ() -> None:
+    """The promise this package rests on, checked where it was being broken.
+
+    Parents named with ``parents=`` are usually rows somebody's factory made,
+    which on a modern schema means UUID primary keys -- different every run. The
+    keys are read back ordered by primary key and the sizes were assigned by
+    position in that order, so the partition followed values nobody declared.
+    Measured before the fix: the first-named parent got 5, 11 or 79 rows across
+    twelve builds of one declaration.
+    """
+    # UUID parents on purpose, and this is the whole test. With integer keys the
+    # database's sort order matches insertion order, so the defect cannot bite
+    # and a test written over them passes against the broken tree -- proving
+    # nothing. A factory row on a modern schema has a UUID, which sorts
+    # differently every run, which is where the harm was.
+    shapes = []
+    for _ in range(6):
+        TenantRecord.objects.all().delete()
+        Tenant.objects.all().delete()
+        tenants = [Tenant.objects.create(name=f"t{index}") for index in range(4)]
+        named = [tenant.pk for tenant in tenants]
+        build_shape(
+            Shape(
+                Table(
+                    TenantRecord,
+                    rows=100,
+                    tenant=FanOut(Zipf(), parents=named),
+                    label=Constant("s"),
+                ),
+                seed=5,
+            )
+        )
+        counts = Counter(TenantRecord.objects.values_list("tenant_id", flat=True))
+        # Keyed by the caller's position, which is what the declaration names.
+        shapes.append([counts[key] for key in named])
+
+    assert len(set(map(tuple, shapes))) == 1, shapes
 
 
 def test_pinning_leaves_the_other_parents_alone_rather_than_childless() -> None:
