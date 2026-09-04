@@ -45,6 +45,7 @@ def resolve_fan_out(
     """
     keys, parent_values = _read_parents(parent, parent_fields, connection, fan_out.parents)
     _require_every_named_parent(fan_out.parents, keys, parent, table, field)
+    keys, parent_values = _in_declared_order(fan_out.parents, keys, parent_values)
 
     if not keys and rows:
         raise InvalidShape(
@@ -68,6 +69,51 @@ def resolve_fan_out(
         null_share=fan_out.null,
         interleave=fan_out.placement == "arrival",
         parent_values=parent_values,
+    )
+
+
+def _in_declared_order(
+    named: tuple[object, ...] | None,
+    keys: list[int],
+    parent_values: dict[str, list[object]],
+) -> tuple[list[int], dict[str, list[object]]]:
+    """Put named parents back in the order the declaration named them.
+
+    **The partition has to be a function of the declaration, and this is what
+    makes it one.** Keys arrive ordered by primary key because that is how they
+    are read, and the sizes below are assigned by *position* -- so without this
+    the weights followed the sort order of values nobody wrote down. With
+    integer keys that is merely surprising; with the UUID keys a factory row has
+    on a modern schema it means **the same shape builds differently every run**.
+    Measured before this existed: one declaration gave the first-named parent 5,
+    11 or 79 rows across twelve builds, because the sort order moved with the
+    keys.
+
+    That is the promise the whole package rests on -- two builds of one shape
+    agree, which is why ``UuidKeys`` derives rather than draws -- so a narrowing
+    that broke it was a defect rather than a preference.
+
+    **The weights are still scattered across positions**, and the reasoning for
+    that survives unchanged: it is a caller's *order* that decides which key
+    lands where, not their key values, so nothing here correlates a parent's key
+    with its child count. What it does mean is that reversing the list is a
+    different declaration, which is what a reader writing one would expect.
+
+    Parent values move with their keys, or a derivation would read the right
+    column off the wrong row.
+    """
+    if named is None:
+        return keys, parent_values
+    # `dict[object, int]` rather than the `list[int]` this module annotates its
+    # keys with, because that annotation is not true: a primary key is whatever
+    # the model declares, and the UUID case is exactly the one this function
+    # exists for. Widening it everywhere is a change of its own; narrowing here
+    # would be a lie that type-checks.
+    position: dict[object, int] = {key: index for index, key in enumerate(keys)}
+    order = [position[key] for key in named]
+    return (
+        [keys[index] for index in order],
+        {name: [values[index] for index in order] for name, values in parent_values.items()},
     )
 
 

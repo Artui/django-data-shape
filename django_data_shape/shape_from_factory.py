@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import Counter
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Any
 
 from django.apps import apps
@@ -16,9 +16,10 @@ _MANY_VALUES = 12
 
 
 def shape_from_factory(
-    factory: Callable[[], Model],
+    factory: Callable[..., Model],
     *,
     samples: int = 200,
+    defaults: Mapping[str, object] | None = None,
     using: str = DEFAULT_DB_ALIAS,
 ) -> str:
     """Run a factory, measure what it made, and return a declaration **as source**.
@@ -46,6 +47,14 @@ def shape_from_factory(
     source, so it is detected by watching which other tables grew and by how
     much.
 
+    ``defaults`` is passed to every call, because **most factories in a mature
+    codebase need arguments**. A ``TeamFactory`` wanting a ``permission_role``,
+    called with nothing, leaves a required column empty and fails as a raw
+    ``IntegrityError`` naming a constraint -- which says nothing about what the
+    caller did. Anything the factory raises is caught and named here instead,
+    with the call number, because "it failed" and "it failed after three" are
+    different bugs.
+
     Nothing is left behind: the calls run inside a transaction that is rolled
     back, so this can be pointed at a development database without writing to it.
 
@@ -62,9 +71,24 @@ def shape_from_factory(
         )
     before = _counts(using)
     made: list[Model] = []
+    arguments = dict(defaults or {})
     with transaction.atomic(using=using):
-        for _ in range(samples):
-            row = factory()
+        for index in range(samples):
+            try:
+                row = factory(**arguments)
+            except Exception as error:
+                # Re-raised rather than propagated, because the failure a caller
+                # sees otherwise is a database constraint naming a column, which
+                # describes neither what they ran nor what to do about it. The
+                # driver's own words are kept: unlike a refusal about a
+                # declaration, the column their factory left empty is the whole
+                # of the information, and nothing here retains a generated value.
+                raise InvalidShape(
+                    f"the factory could not be called on call {index + 1} of {samples}: "
+                    f"{type(error).__name__}: {error}. Most factories in a real codebase take "
+                    "arguments and need them -- pass them with defaults={...}, which is handed "
+                    "to every call."
+                ) from error
             if not isinstance(row, Model):
                 raise InvalidShape(
                     f"shape_from_factory expects the factory to return a model instance, got "

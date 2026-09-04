@@ -192,3 +192,57 @@ def test_a_factory_that_varies_everything_gets_a_declaration_and_no_findings() -
 
     assert "What your factory does not vary" not in report
     assert "Table(Session, rows=..." in report
+
+
+def test_a_factory_needing_arguments_is_told_so_rather_than_failing_in_the_database() -> None:
+    """A mature codebase's factories take arguments, and most need them.
+
+    Called with none, they leave a required column empty and the failure arrives
+    as a raw `IntegrityError` naming a constraint -- which says nothing about
+    what the caller did or what to do instead, and is the one thing every other
+    refusal in this package avoids.
+    """
+
+    def needs_a_parent(company=None) -> Session:
+        return Session.objects.create(company=company, label="s")
+
+    with pytest.raises(InvalidShape) as raised:
+        shape_from_factory(needs_a_parent, samples=5)
+
+    message = str(raised.value)
+    assert "could not be called" in message
+    assert "defaults=" in message
+    # The driver's own words are quoted here on purpose: unlike a refusal about
+    # a declaration, the caller needs to see which column their factory left
+    # empty, and nothing here retains a value this package generated.
+    assert "IntegrityError" in message
+
+
+def test_defaults_are_passed_to_every_call() -> None:
+    company = Company.objects.create(name="acme")
+
+    def needs_a_parent(company=None) -> Session:
+        return Session.objects.create(company=company, label="s")
+
+    report = shape_from_factory(needs_a_parent, samples=6, defaults={"company": company})
+
+    assert "Table(Session, rows=..." in report
+    assert "every row pointed at the same parent" in report
+
+
+def test_a_factory_that_fails_for_its_own_reasons_says_which_call_it_was() -> None:
+    # Not every failure is a missing argument. A factory that works and then
+    # stops -- a unique constraint met on the fourth call, say -- needs the call
+    # number, because "it failed" and "it failed after three" are different bugs.
+    calls = {"n": 0}
+
+    def eventually_fails() -> Session:
+        calls["n"] += 1
+        if calls["n"] > 3:
+            raise RuntimeError("no more room")
+        return Session.objects.create(company=Company.objects.create(name="c"), label="s")
+
+    with pytest.raises(InvalidShape) as raised:
+        shape_from_factory(eventually_fails, samples=10)
+
+    assert "call 4 of 10" in str(raised.value)

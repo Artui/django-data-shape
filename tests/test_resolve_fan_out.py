@@ -284,3 +284,60 @@ def test_a_boolean_size_is_refused_rather_than_counted_as_one() -> None:
     # different column.
     with pytest.raises(InvalidShape, match="True"):
         _resolve(list(range(4)), rows=40, fan_out=FanOut(Constant(True)))
+
+
+def test_a_narrowed_partition_does_not_depend_on_what_the_keys_are() -> None:
+    """The central promise, which ``parents=`` was breaking.
+
+    Keys come back from the database ordered by primary key, and the weights
+    were assigned by position in *that* order -- so with UUID parents, which is
+    what a factory row on a modern schema has, the partition was a function of
+    values nobody declared. Measured before the fix: one declaration gave the
+    first-named parent 5, 11 or 79 rows across twelve runs, because the sort
+    order moved. Two builds of one shape have to agree, and that is the reason
+    ``UuidKeys`` derives rather than draws.
+    """
+    named = [900, 100, 500]
+    # The database hands these back sorted; the declaration says otherwise.
+    plan = resolve_paired_keys(named, sorted(named))
+
+    assert plan == named
+
+
+def test_reversing_the_named_parents_reverses_the_partition() -> None:
+    # The symptom that was reported: reversing the list produced an identical
+    # partition, because the list order reached nothing.
+    forward = _resolve_named([10, 20, 30])
+    backward = _resolve_named([30, 20, 10])
+
+    assert forward != backward
+    assert sorted(forward.values()) == sorted(backward.values())
+    # The same key gets a different share, because it sits at a different
+    # position in what the caller wrote.
+    assert forward[10] == backward[30]
+
+
+def _resolve_named(named: list[int]) -> dict[int, int]:
+    plan = resolve_fan_out(
+        FanOut(Zipf(1.2), parents=named),
+        Company,
+        60,
+        seed=5,
+        table="testapp_session",
+        field="company",
+        connection=_Connection(sorted(named)),
+    )
+    return dict(zip(plan.parent_keys(), plan.sizes(), strict=True))
+
+
+def resolve_paired_keys(named: list[int], returned: list[int]) -> list[object]:
+    plan = resolve_fan_out(
+        FanOut(Constant(1), parents=named),
+        Company,
+        len(named),
+        seed=1,
+        table="t",
+        field="company",
+        connection=_Connection(returned),
+    )
+    return list(plan.parent_keys())
