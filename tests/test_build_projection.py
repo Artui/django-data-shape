@@ -27,6 +27,7 @@ from tests.testapp.models import (
     AuditedSession,
     Event,
     EventSession,
+    KeyedSession,
     Plan,
     PlanRun,
     PlanStage,
@@ -431,6 +432,46 @@ def test_the_same_statement_without_reads_is_told_what_is_missing() -> None:
         )
 
     assert "name its inputs with reads=" in str(raised.value)
+
+
+def test_a_uuid_keyed_projection_works_where_the_key_stream_exceeds_a_bigint() -> None:
+    """The half of all tables that could not be projected at all.
+
+    ``key_sql`` used to write ``to_hex(<stream>::bigint)``, asking PostgreSQL to
+    re-derive a number Python produced as unsigned -- and ``bigint`` is signed,
+    so the statement raised before a row was written. It is a property of the
+    table's *name*, not of a seed: about half of them hash above 2^63, and the
+    model this suite already projected happens to hash below.
+
+    A consumer found it, and it had never executed for them: in 0.13.0 the join
+    ambiguity refused their declaration first, so fixing that in 0.14.0 is what
+    exposed a feature 0.13.0 had shipped and nobody could reach.
+    """
+    from django_data_shape.utils import field_stream
+
+    seed = 3
+    assert field_stream(seed, KeyedSession._meta.db_table, ":key") > 2**63 - 1
+
+    shape = Shape(
+        Projection(KeyedSession, per=Event, copying=TemplateSession, keys=Md5Keys()),
+        Table(Template, rows=5, name=Constant("t")),
+        Table(
+            TemplateSession,
+            rows=20,
+            template=FanOut(Constant(1)),
+            title=Constant("s"),
+            minutes=Sequential(15, 1),
+        ),
+        Table(Event, rows=12, template=FanOut(Uniform(1, 3)), name=Constant("e")),
+        seed=seed,
+    )
+
+    build_shape(shape)
+
+    keys = list(KeyedSession.objects.values_list("id", flat=True))
+    assert keys
+    stream = field_stream(seed, KeyedSession._meta.db_table, ":key")
+    assert set(keys) == {Md5Keys().key_for(row, stream) for row in range(len(keys))}
 
 
 def test_a_uuid_keyed_table_can_be_projected_once_its_keys_have_a_sql_form() -> None:

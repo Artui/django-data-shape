@@ -10,6 +10,7 @@ from django.db import connection
 from django_data_shape import Md5Keys, UuidKeys
 from django_data_shape.keys.disjoint import Disjoint
 from django_data_shape.keys.sql_keys import SqlKeys
+from django_data_shape.utils import field_stream
 
 
 def test_it_produces_well_formed_version_four_uuids() -> None:
@@ -48,6 +49,51 @@ def test_only_this_one_can_fill_a_projection() -> None:
 def test_its_keys_cannot_collide_with_rows_the_caller_made() -> None:
     assert isinstance(Md5Keys(), Disjoint)
     assert Md5Keys().is_disjoint_from_existing_rows()
+
+
+# Streams the producer actually makes, not numbers chosen for a test. The first
+# is under PostgreSQL's signed bigint maximum and the second is over it, which
+# is the whole of the bug this pair pins: `field_stream` returns an unsigned
+# 64-bit value, so about half of all table names land above 2^63 -- a coin flip
+# per table rather than anything about a schema. The original test used
+# stream=12345, and a hand-picked small number cannot fail this way.
+_STREAMS = [
+    field_stream(0, "testapp_uuidsession", ":key"),
+    field_stream(0, "projects_milestonesubmit", ":key"),
+]
+
+
+def test_the_pair_of_streams_this_module_uses_straddles_the_bigint_limit() -> None:
+    """The fixture is the assertion, so it is checked rather than trusted.
+
+    A later change to how streams are derived could quietly move both of these
+    below the limit, and the tests below would keep passing while testing
+    nothing about the overflow.
+    """
+    signed_bigint_max = 2**63 - 1
+
+    assert _STREAMS[0] <= signed_bigint_max < _STREAMS[1]
+
+
+@pytest.mark.django_db
+@pytest.mark.skipif(connection.vendor != "postgresql", reason="the SQL half needs PostgreSQL")
+@pytest.mark.parametrize("stream", _STREAMS)
+def test_the_two_halves_agree_for_a_stream_postgres_cannot_hold_as_bigint(stream: int) -> None:
+    """The bug a consumer found, and the reason it was never caught here.
+
+    ``to_hex(<stream>::bigint)`` asks PostgreSQL to re-derive a number Python
+    produced as *unsigned*, and bigint is signed -- so the statement raised
+    ``NumericValueOutOfRange`` for every seed on any table whose name hashes
+    high. The stream is a constant when the statement is built, so nothing has
+    to be re-derived at all: the sixteen hex digits are embedded.
+    """
+    keys = Md5Keys()
+
+    with connection.cursor() as cursor:
+        cursor.execute(f"SELECT {keys.key_sql(stream, 'g')} FROM generate_series(0, 19) AS g")
+        from_sql = [row[0] for row in cursor.fetchall()]
+
+    assert from_sql == [keys.key_for(row, stream) for row in range(20)]
 
 
 @pytest.mark.django_db
