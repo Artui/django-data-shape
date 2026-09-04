@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`shape_from_factory` runs a factory you already have and returns source, not
+  a `Shape`.** That is the design rather than a limitation of it: a shape this
+  package builds is *declared*, which is what makes it reviewable and
+  assertable, and a shape learned from a sample is neither -- one used directly
+  would change whenever the factory did, silently. So it returns text, and a
+  person decides what of it to keep.
+  - **What it finds matters more than what it writes**, because a faithful
+    reading of a typical factory produces the flat world this package exists to
+    argue against. Factories are written for single-object tests, so they fix
+    values and reach foreign keys in the two most unrealistic ways there are.
+    Every such column is a **finding**, and the report leads with them.
+  - **A sub-factory is the sharpest case and the reason to run it.**
+    `company = SubFactory(CompanyFactory)` creates one parent per child, which is
+    a fan-out of degree one: every parent has exactly one row, the average is the
+    truth, and a join over it cannot be misestimated. It is invisible in the
+    factory's own source, so it is detected by watching which other tables grew
+    and by how much. A round-robin over four parents is the same defect with a
+    different number, and is reported too.
+  - A relation is rendered as a `FanOut` and never as a value distribution,
+    because `Table` refuses the second -- emitting it would hand back source that
+    cannot be built, which is worse than a wrong number. A factory that already
+    varies everything gets a declaration and **no findings**: if the quiet case
+    were not quiet, the loud one would stop meaning anything.
+  - Nothing is left behind. The calls run inside a transaction that is rolled
+    back, so it can be pointed at a development database without writing to one.
+    The sample size is stated in the output, because the answer moves with it.
+
+
 ### Fixed
 - **`Md5Keys` could not fill a projection on about half of all tables.**
   `key_sql` wrote `to_hex(<stream>::bigint)`, asking PostgreSQL to re-derive a

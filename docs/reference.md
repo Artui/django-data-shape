@@ -60,6 +60,8 @@
 
 ::: django_data_shape.scaled_shape.scaled_shape
 
+::: django_data_shape.shape_from_factory.shape_from_factory
+
 ## Derivations
 
 ::: django_data_shape.derivations.derivation.Derivation

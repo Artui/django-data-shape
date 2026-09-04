@@ -79,6 +79,11 @@ print(result.rows)
   stand in for a fan-out the way it stands in for a scalar. A required relation
   carrying one is refused by name, like any other undeclared required relation.
   A real `db_default` is DDL, so a column carrying one is left to the database.
+- **A factory you already have can be measured, but never learned from.**
+  `shape_from_factory` runs one and returns **source to read and edit** — see
+  [Reading a factory](#reading-a-factory-you-already-have). It never returns a
+  `Shape`, because a shape this package builds is declared, and a declaration
+  learned from a sample is neither reviewable nor stable.
 - **A callable default is refused.** `uuid4` varies per row and `dict` does not,
   and nothing on the field distinguishes them. Declare a distribution instead.
 - **A declaration is read-only once built.** Every rule runs in the constructor,
@@ -171,3 +176,57 @@ declaration from a database or a factory that already exists. The first two are
 for a through table points at the escape hatch that does build one today: a
 `Projection` with your own `sql=`, which can select the pairs already
 deduplicated.
+
+## Reading a factory you already have
+
+```python
+from django_data_shape import shape_from_factory
+
+print(shape_from_factory(ProjectFactory, samples=200))
+```
+
+It runs the factory, measures what the calls wrote, rolls the transaction back
+and returns **source**. Not a `Shape` — text, for you to read, edit and check
+in.
+
+That is the design and not a limitation of it. A shape this package builds is
+*declared*, which is what makes it reviewable and assertable. A shape learned
+from a sample is neither, and one used directly would change whenever the
+factory did, silently.
+
+### The point is what it finds, not what it writes
+
+Factories are written for single-object tests, so they fix values and they reach
+foreign keys in the two most unrealistic ways there are. Measured faithfully,
+inference would emit `status=Constant('ACTIVE'), company=FanOut(...)` over one
+parent per child — the uniform world this library exists to argue against, now
+with a declaration blessing it. So those are reported as **findings** and the
+report leads with them:
+
+```text
+# What your factory does not vary, which is what this is for:
+#   - Company grew by exactly one per call -- a sub-factory. That is a fan-out of
+#     degree one: every parent has exactly one child, so the average is the truth
+#     and a join over it cannot be misestimated.
+#   - Session.label: every row got 's'. The factory fixes this column, so the
+#     declaration above says the planner will see one value -- decide what the
+#     real spread is.
+```
+
+**A sub-factory is the sharpest case and the reason to run this.**
+`company = SubFactory(CompanyFactory)` creates one parent per child, which is
+invisible in the factory's own source and is the single most unrealistic thing a
+fixture can do. A round-robin over four parents is the same defect wearing a
+different number: every parent gets the same count, so the average is still the
+truth.
+
+A factory that already varies everything gets a declaration and **no findings** —
+if the quiet case were not quiet, the loud one would stop meaning anything.
+
+### What it cannot tell you
+
+The sample size decides how much of the tail is seen, and the answer moves with
+it: fifty runs saw nineteen distinct parents where a thousand saw forty-nine.
+The report says which size produced it. And a column with many distinct values is
+reported as a count and a head share rather than written out — a `Skew` listing
+sixty entries is not a declaration anybody keeps.
