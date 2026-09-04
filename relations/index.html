@@ -1063,7 +1063,16 @@ nothing to validate afterwards.</p>
 <div class="language-python highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="n">Table</span><span class="p">(</span><span class="n">Session</span><span class="p">,</span> <span class="n">rows</span><span class="o">=</span><span class="mi">50</span><span class="p">,</span> <span class="n">company</span><span class="o">=</span><span class="n">FanOut</span><span class="p">(</span><span class="n">Constant</span><span class="p">(</span><span class="mi">1</span><span class="p">),</span> <span class="n">parents</span><span class="o">=</span><span class="p">[</span><span class="n">tenant</span><span class="o">.</span><span class="n">pk</span><span class="p">]),</span> <span class="n">label</span><span class="o">=</span><span class="n">Constant</span><span class="p">(</span><span class="s2">"s"</span><span class="p">))</span>
 </span></code></pre></div>
 <p>Real keys, read out of the parent table like any other fan-out — a key that
-matches no row is refused by name rather than quietly taking a smaller share.
+matches no row is refused by name rather than quietly taking a smaller share.</p>
+<p><strong>The order you name them in is part of the declaration.</strong> Keys come back from
+the database sorted by primary key, and the weights are assigned by position, so
+they are put back into the order you wrote before anything is weighed. Without
+that the partition followed the <em>values</em> of the keys: with the UUID primary keys
+a factory row has, one declaration gave the first-named parent 5, 11 or 79 rows
+across twelve builds. Two builds of one shape have to agree, which is the same
+reason <code>UuidKeys</code> derives rather than draws. Reversing the list is therefore a
+different declaration, and weights are still scattered across positions — so
+nothing correlates a parent's key with its child count.
 A <strong>list of keys, never a queryset</strong>: a declaration needs no connection, and
 evaluating a queryset here would give it one. Build the list yourself, which is
 the query you were going to run anyway.</p>
