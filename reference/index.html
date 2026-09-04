@@ -1274,6 +1274,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#django_data_shape.shape_from_factory.shape_from_factory" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        shape_from_factory
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#derivations" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2708,6 +2719,17 @@
     <span class="md-ellipsis">
       
         scaled_shape
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#django_data_shape.shape_from_factory.shape_from_factory" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        shape_from_factory
       
     </span>
   </a>
@@ -6173,6 +6195,55 @@ the count was derived from.</p>
 
     </div>
 
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h2 id="django_data_shape.shape_from_factory.shape_from_factory" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">shape_from_factory</span>
+
+
+<a href="#django_data_shape.shape_from_factory.shape_from_factory" class="headerlink" title="Permanent link">&para;</a></h2>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">shape_from_factory</span><span class="p">(</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>    <span class="n">factory</span><span class="p">:</span> <span class="n">Callable</span><span class="p">[[],</span> <span class="n">Model</span><span class="p">],</span> <span class="o">*</span><span class="p">,</span> <span class="n">samples</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">200</span><span class="p">,</span> <span class="n">using</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="n">DEFAULT_DB_ALIAS</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span>
+</span></code></pre></div>
+
+    <div class="doc doc-contents first">
+
+        <p>Run a factory, measure what it made, and return a declaration <strong>as source</strong>.</p>
+<p><strong>Source to read, edit and check in -- never a <code>Shape</code> to build from</strong>, and
+that is the whole design rather than a limitation of it. A shape this package
+builds is <em>declared</em>, which is what makes it reviewable and assertable; a
+shape learned from a sample is neither, and one used directly would change
+whenever the factory did, silently. So what comes back is text, and a person
+decides what of it to keep.</p>
+<p><strong>Because the thing it usually finds is that the factory is flat.</strong> Factories
+are written for single-object tests, so they fix values: one status, one
+parent, one count. Measured on exactly that shape, faithful inference emits
+<code>status=Constant('ACTIVE'), company=Constant(1)</code> -- the uniform world this
+package exists to argue against, now with a declaration blessing it. So every
+such column is reported as a <strong>finding</strong> rather than quietly written down,
+and the report leads with them.</p>
+<p><strong>A sub-factory is the sharpest case and the one worth running this for.</strong>
+<code>company = SubFactory(CompanyFactory)</code> creates one parent per child, which
+is a fan-out of degree one: every parent has exactly one row, the average is
+the truth, and the join estimate cannot miss. It is the single most
+unrealistic thing a fixture can do and it is invisible in the factory's own
+source, so it is detected by watching which other tables grew and by how
+much.</p>
+<p>Nothing is left behind: the calls run inside a transaction that is rolled
+back, so this can be pointed at a development database without writing to it.</p>
+<p><code>samples</code> decides how much of the tail is seen, and the answer moves with
+it -- fifty runs saw nineteen distinct parents where a thousand saw
+forty-nine. That is stated in the output rather than hidden, because two
+people running this at different sizes should not be surprised by two
+different declarations.</p>
+
+
+    </div>
+
 </div><h2 id="derivations">Derivations<a class="headerlink" href="#derivations" title="Permanent link">&para;</a></h2>
 
 
@@ -7057,12 +7128,22 @@ would make this strategy unusable on hosts that are otherwise fine.</p>
 <p>The two halves are checked against each other rather than argued about:
 a test computes both for the same rows and compares them, which is the
 only form of agreement that means anything here.</p>
-<p><code>md5</code> takes the same eight-byte big-endian pair Python hashes, built
-with <code>to_hex</code>/<code>lpad</code> and turned back into bytes by <code>decode</code>, so
-neither side is hashing a rendering of the other's input. The stamp is
-two <code>overlay</code> calls on the hex digest: nibble 13 is the version and is
-always <code>4</code>, and nibble 17 is the variant, which keeps its low two bits
-and takes <code>8</code> in the high two.</p>
+<p><code>md5</code> takes the same eight-byte big-endian pair Python hashes, turned
+back into bytes by <code>decode</code>, so neither side is hashing a rendering of
+the other's input. The stamp is two <code>overlay</code> calls on the hex digest:
+nibble 13 is the version and is always <code>4</code>, and nibble 17 is the
+variant, which keeps its low two bits and takes <code>8</code> in the high two.</p>
+<p><strong>The stream is embedded as hex rather than converted by the server</strong>,
+and that is a fix rather than a preference. It used to be written
+<code>to_hex(&lt;stream&gt;::bigint)</code>, which asks PostgreSQL to re-derive a
+number Python produced as <em>unsigned</em> -- and <code>bigint</code> is signed, so any
+stream above 2^63 raised <code>NumericValueOutOfRange</code> before a row was
+written. That is a coin flip per table, not a property of any schema:
+the stream is a hash of the table and field names, so roughly half of
+all table names land above the limit. It is a constant by the time this
+statement is built, so nothing about it needs deriving at all.</p>
+<p><code>row</code> stays a conversion because it is genuinely an expression the
+server evaluates, and a row index is far below the limit.</p>
 
 
     </div>

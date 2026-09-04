@@ -431,6 +431,45 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#reading-a-factory-you-already-have" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reading a factory you already have
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Reading a factory you already have">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-point-is-what-it-finds-not-what-it-writes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The point is what it finds, not what it writes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-it-cannot-tell-you" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What it cannot tell you
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -791,6 +830,45 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#reading-a-factory-you-already-have" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reading a factory you already have
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Reading a factory you already have">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-point-is-what-it-finds-not-what-it-writes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The point is what it finds, not what it writes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-it-cannot-tell-you" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What it cannot tell you
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -889,6 +967,11 @@ library rather than left to the caller to remember.</p>
   stand in for a fan-out the way it stands in for a scalar. A required relation
   carrying one is refused by name, like any other undeclared required relation.
   A real <code>db_default</code> is DDL, so a column carrying one is left to the database.</li>
+<li><strong>A factory you already have can be measured, but never learned from.</strong>
+  <code>shape_from_factory</code> runs one and returns <strong>source to read and edit</strong> — see
+  <a href="#reading-a-factory-you-already-have">Reading a factory</a>. It never returns a
+  <code>Shape</code>, because a shape this package builds is declared, and a declaration
+  learned from a sample is neither reviewable nor stable.</li>
 <li><strong>A callable default is refused.</strong> <code>uuid4</code> varies per row and <code>dict</code> does not,
   and nothing on the field distinguishes them. Declare a distribution instead.</li>
 <li><strong>A declaration is read-only once built.</strong> Every rule runs in the constructor,
@@ -967,6 +1050,47 @@ declaration from a database or a factory that already exists. The first two are
 for a through table points at the escape hatch that does build one today: a
 <code>Projection</code> with your own <code>sql=</code>, which can select the pairs already
 deduplicated.</p>
+<h2 id="reading-a-factory-you-already-have">Reading a factory you already have<a class="headerlink" href="#reading-a-factory-you-already-have" title="Permanent link">&para;</a></h2>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">django_data_shape</span><span class="w"> </span><span class="kn">import</span> <span class="n">shape_from_factory</span>
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="nb">print</span><span class="p">(</span><span class="n">shape_from_factory</span><span class="p">(</span><span class="n">ProjectFactory</span><span class="p">,</span> <span class="n">samples</span><span class="o">=</span><span class="mi">200</span><span class="p">))</span>
+</span></code></pre></div>
+<p>It runs the factory, measures what the calls wrote, rolls the transaction back
+and returns <strong>source</strong>. Not a <code>Shape</code> — text, for you to read, edit and check
+in.</p>
+<p>That is the design and not a limitation of it. A shape this package builds is
+<em>declared</em>, which is what makes it reviewable and assertable. A shape learned
+from a sample is neither, and one used directly would change whenever the
+factory did, silently.</p>
+<h3 id="the-point-is-what-it-finds-not-what-it-writes">The point is what it finds, not what it writes<a class="headerlink" href="#the-point-is-what-it-finds-not-what-it-writes" title="Permanent link">&para;</a></h3>
+<p>Factories are written for single-object tests, so they fix values and they reach
+foreign keys in the two most unrealistic ways there are. Measured faithfully,
+inference would emit <code>status=Constant('ACTIVE'), company=FanOut(...)</code> over one
+parent per child — the uniform world this library exists to argue against, now
+with a declaration blessing it. So those are reported as <strong>findings</strong> and the
+report leads with them:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a># What your factory does not vary, which is what this is for:
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>#   - Company grew by exactly one per call -- a sub-factory. That is a fan-out of
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>#     degree one: every parent has exactly one child, so the average is the truth
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>#     and a join over it cannot be misestimated.
+</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>#   - Session.label: every row got 's'. The factory fixes this column, so the
+</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>#     declaration above says the planner will see one value -- decide what the
+</span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>#     real spread is.
+</span></code></pre></div>
+<p><strong>A sub-factory is the sharpest case and the reason to run this.</strong>
+<code>company = SubFactory(CompanyFactory)</code> creates one parent per child, which is
+invisible in the factory's own source and is the single most unrealistic thing a
+fixture can do. A round-robin over four parents is the same defect wearing a
+different number: every parent gets the same count, so the average is still the
+truth.</p>
+<p>A factory that already varies everything gets a declaration and <strong>no findings</strong> —
+if the quiet case were not quiet, the loud one would stop meaning anything.</p>
+<h3 id="what-it-cannot-tell-you">What it cannot tell you<a class="headerlink" href="#what-it-cannot-tell-you" title="Permanent link">&para;</a></h3>
+<p>The sample size decides how much of the tail is seen, and the answer moves with
+it: fifty runs saw nineteen distinct parents where a thousand saw forty-nine.
+The report says which size produced it. And a column with many distinct values is
+reported as a count and a head share rather than written out — a <code>Skew</code> listing
+sixty entries is not a declaration anybody keeps.</p>
 
 
 
