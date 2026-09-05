@@ -168,7 +168,13 @@ def test_it_also_undoes_a_world_it_opened_the_transaction_for() -> None:
 # and stays a constant. Off PostgreSQL it is one DELETE per declared table --
 # two here -- which is a property of the *declaration* and not of the factor, so
 # the curve below still has the loader's own shape and only its intercept moved.
-_POSTGRES_STATEMENTS = 17
+#
+# And once more for the sequence reset that runs *after* the rollback, which is
+# one statement per declared table -- two here, again a property of the
+# declaration rather than the factor. PostgreSQL only: Django emits no sequence
+# reset for a SQLite table without AUTOINCREMENT, which is why the portable
+# constant did not move with it.
+_POSTGRES_STATEMENTS = 19
 _PORTABLE_STATEMENTS = 12
 _ROWS_PER_INSERT = 1000
 
@@ -189,8 +195,8 @@ def test_building_a_world_costs_the_same_on_postgres_at_every_factor() -> None:
     # The half that makes a capture around the block merely wrong rather than
     # catastrophic: COPY is not a wrapped statement, so the overhead is the
     # TRUNCATE, the emptiness check, the statistics-target read, the parent key
-    # read, the sequence reset, the ANALYZE and the savepoints -- none of which
-    # depend on how many rows there are.
+    # read, the two sequence resets, the ANALYZE and the savepoints -- none of
+    # which depend on how many rows there are.
     shape = _graph(companies=10, sessions=_ROWS_PER_INSERT)
 
     assert _statements(shape, 1, DEFAULT_DB_ALIAS) == _POSTGRES_STATEMENTS

@@ -8,7 +8,6 @@ from functools import partial
 from itertools import islice
 from typing import Any, cast
 
-from django.core.management.color import no_style
 from django.db import DEFAULT_DB_ALIAS, connections, transaction
 from django.db.models import Model
 
@@ -32,6 +31,7 @@ from django_data_shape.shape import Shape
 from django_data_shape.shape_not_empty import ShapeNotEmpty
 from django_data_shape.table import Table
 from django_data_shape.table_result import TableResult
+from django_data_shape.utils import reset_sequence
 
 # Big enough that the per-statement overhead disappears and small enough that
 # the peak list is a rounding error next to the rows themselves.
@@ -120,7 +120,7 @@ def build(
             else:
                 plans, pairings = _resolve(connection, table, shape.seed)
                 loaded = _load(connection, table, shape.seed, plans, pairings)
-            _reset_sequence(connection, table.model)
+            reset_sequence(connection, table.model)
             _analyze(connection, table.db_table)
             results.append(TableResult(table=table.db_table, rows=loaded))
         # The second of the three nets, and the only one that covers a rule the
@@ -378,20 +378,6 @@ def _insert(
             cursor.executemany(statement, chunk)
             loaded += len(chunk)
     return loaded
-
-
-def _reset_sequence(connection: Any, model: type[Model]) -> None:
-    """Move the identity sequence past the keys this package just assigned.
-
-    Skipping this is the first bug the design invites: rows exist at ids 1..N
-    while the sequence still starts at 1, so the very first ``objects.create()``
-    inside a test raises ``IntegrityError`` on a primary key that is already
-    taken. Django's own backend operation is used rather than a hand-written
-    ``setval`` because it already knows how the column's sequence is named.
-    """
-    with connection.cursor() as cursor:
-        for statement in connection.ops.sequence_reset_sql(no_style(), [model]):
-            cursor.execute(statement)
 
 
 def _analyze(connection: Any, db_table: str) -> None:

@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 from typing import Any
 
+from django.core.management.color import no_style
 from django.db.models import (
     DateField,
     DateTimeField,
@@ -232,3 +233,27 @@ def offsettable_kind(field: Field[Any, Any]) -> str | None:
     if isinstance(field, (IntegerField, FloatField, DecimalField)):
         return "number"
     return None
+
+
+def reset_sequence(connection: Any, model: type[Model]) -> None:
+    """Point the identity sequence at the rows the table currently holds.
+
+    Skipping it after a load is the first bug the design invites: rows exist at
+    ids 1..N while the sequence still starts at 1, so the very first
+    ``objects.create()`` inside a test raises ``IntegrityError`` on a primary key
+    that is already taken. Django's own backend operation is used rather than a
+    hand-written ``setval`` because it already knows how the column's sequence
+    is named.
+
+    **It is computed from the rows, not from a remembered number**, which is
+    what makes it correct to run again after a rollback as well as after a load.
+    ``setval`` is not transactional, so a scaled world built over a session
+    world leaves the counter at the scaled world's size while the session
+    world's larger rows come back underneath it -- and the next ``create()``
+    then collides with a row the failing test never wrote. Re-running this once
+    the transaction has ended reads whatever survived and agrees with it, in
+    either direction and with no state carried across the block.
+    """
+    with connection.cursor() as cursor:
+        for statement in connection.ops.sequence_reset_sql(no_style(), [model]):
+            cursor.execute(statement)

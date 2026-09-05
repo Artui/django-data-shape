@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.17.1] — 2026-09-05
+
+### Fixed
+
+- **A scaled world left the identity sequence pointing at rows that came back**,
+  a regression introduced by 0.17.0 and found by the consumer that prompted it.
+
+  0.17.0 made `scaled_world` empty the tables its shape declares, so a session
+  world could sit under one, and the rows come back because the emptying happens
+  inside the transaction it rolls back. The **sequence** does not: `setval` is
+  not transactional, so the counter kept whatever the scaled build moved it to.
+  A scaled world is usually *smaller* than the session world it was built over,
+  which left the counter below the ids that had just returned.
+
+  The symptom was an `IntegrityError` on a primary key, in a later test, for a
+  row the failing test never wrote.
+
+  The sequences are now recomputed once the transaction has ended -- from
+  `max(pk)` of whatever actually survived, rather than from a number captured on
+  the way in, so it is correct in both directions and correct too when the
+  caller's block raised partway through the build.
+
+  The Postgres statement-count constant moved from 17 to 19: one reset per
+  declared table, a property of the declaration rather than the factor, so what
+  those tests pin is unchanged. The portable constant did not move, because
+  Django emits no sequence reset for a SQLite table without `AUTOINCREMENT`.
+
 ## [0.17.0] — 2026-09-05
 
 ### Added
@@ -1115,7 +1142,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   into `COPY FROM STDIN`, which psycopg 2 cannot do without materialising them
   first.
 
-[Unreleased]: https://github.com/Artui/django-data-shape/compare/v0.17.0...HEAD
+[Unreleased]: https://github.com/Artui/django-data-shape/compare/v0.17.1...HEAD
+[0.17.1]: https://github.com/Artui/django-data-shape/compare/v0.17.0...v0.17.1
 [0.17.0]: https://github.com/Artui/django-data-shape/compare/v0.16.0...v0.17.0
 [0.16.0]: https://github.com/Artui/django-data-shape/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/Artui/django-data-shape/compare/v0.14.0...v0.15.0
