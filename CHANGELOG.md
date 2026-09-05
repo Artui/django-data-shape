@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **A lone `%` in a `sql=` statement is refused at declaration time.** The
+  statement is run with its parameters, and an empty parameter sequence is still
+  a sequence, so a `%` that is not a placeholder is read as the start of one:
+  the failure came from `psycopg/cursor.py` at build time, naming the driver and
+  nothing about the shape. A caller who passed no parameters at all had no model
+  that explained it, and the modulo operator is the reason anyone writes a bare
+  `%` in the first place.
+
+  A valid statement can never contain one, so nothing legal is refused -- which
+  is the whole reason this can be a refusal rather than an escape. `sql=` takes
+  `params=`, so pyformat is its interface and `%%` stays the spelling for the
+  operator.
+
+  `SqlValue` on the derived path escapes instead, and the two are not
+  inconsistent: there the caller supplies no parameters and has no reason to
+  know one exists. Both docstrings and the projections guide now say which is
+  which, at both call sites, because the asymmetry is exactly what a reader
+  finding one of them will next be confused by.
+
 ## [0.19.0] — 2026-09-05
 
 ### Added

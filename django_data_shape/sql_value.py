@@ -63,7 +63,8 @@ class SqlValue:
     has to be both.
 
     ``%`` is passed through as the operator, which takes an escape this package
-    applies rather than asking for. The statement is executed with bound
+    applies rather than asking for -- unlike ``sql=``, which takes ``params=``
+    and so owns its own placeholders; a lone ``%`` is refused there instead. The statement is executed with bound
     parameters, so a literal ``%`` in it is an incomplete placeholder to both
     psycopg and Django's SQLite wrapper, and the declaration fails at execution
     with a paramstyle error naming nothing in the shape. The paramstyle is this

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from copy import copy
@@ -28,6 +29,12 @@ from django_data_shape.utils import (
 # reader tracing a generated statement should be able to grep for one word.
 _PER = "per"
 _SOURCE = "src"
+
+# Every pyformat shape psycopg 3 and Django's SQLite wrapper accept: a doubled
+# `%%`, a positional placeholder (psycopg also takes `%b` and `%t`), and a named
+# one. Written as what is *allowed* rather than as what is wrong, because the
+# set of legal placeholders is short and closed and the set of mistakes is not.
+_PLACEHOLDER = re.compile(r"%(?:%|[sbt]|\([^)]*\)[sbt])")
 
 
 class Projection:
@@ -543,6 +550,7 @@ class Projection:
                 "what this package would use to write the key column, and here the statement "
                 f"writes it: put {pk_field.name} in columns= and produce it in the select."
             )
+        _refuse_a_lone_percent(self._model, cast("str", self._sql))
         if columns is None:
             raise InvalidShape(
                 f"{self._model.__name__} declares sql= without columns=. The select's columns "
@@ -645,6 +653,42 @@ class Projection:
             f"per={cast('type[Model]', self._per).__name__}, "
             f"copying={cast('type[Model]', self._copying).__name__})"
         )
+
+
+def _refuse_a_lone_percent(model: type[Model], sql: str) -> None:
+    """Refuse a ``%`` that is neither a placeholder nor doubled, here rather than at build.
+
+    ``sql=`` is a **parameterised** statement -- the caller writes ``%s`` and
+    passes ``params=``, which is the documented interface -- so pyformat is part
+    of that contract and a literal ``%`` has to be doubled. That is correct and
+    is not what this refusal changes.
+
+    What it changes is where the mistake surfaces. The statement reaches the
+    driver with a parameter sequence, and an empty sequence is still a sequence,
+    so an unescaped ``%`` is an incomplete placeholder: the exception comes from
+    ``psycopg/cursor.py``, at build time, naming nothing in the shape. A caller
+    who passed no parameters at all has no model that explains it, and the
+    modulo operator is the reason anyone writes a bare ``%`` in the first place.
+
+    A valid statement can never contain one, so nothing legal is refused -- the
+    check is the whole reason this can be a refusal rather than an escape.
+    ``SqlValue`` on the derived path *does* escape, and the two are not
+    inconsistent: there the caller supplies no parameters and has no reason to
+    know one exists.
+    """
+    position = 0
+    while (found := sql.find("%", position)) != -1:
+        placeholder = _PLACEHOLDER.match(sql, found)
+        if placeholder is None:
+            raise InvalidShape(
+                f"{model.__name__} declares sql= containing a lone '%' in "
+                f"{sql[max(0, found - 12) : found + 8].strip()!r}. The statement is run with "
+                "its parameters, so a '%' that is not a placeholder is read as the start of "
+                "one and the driver refuses it far from here. Write '%%' for the modulo "
+                "operator. (A derived projection's SqlValue needs no escaping, because there "
+                "you supply no parameters and the package escapes for you.)"
+            )
+        position = placeholder.end()
 
 
 def _addressable(model: type[Model]) -> dict[str, Field[Any, Any]]:
