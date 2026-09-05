@@ -5,9 +5,10 @@ from __future__ import annotations
 from collections.abc import Iterator
 from contextlib import contextmanager
 
-from django.db import DEFAULT_DB_ALIAS, transaction
+from django.db import DEFAULT_DB_ALIAS, connections, transaction
 
 from django_data_shape.build import build
+from django_data_shape.keys.disjoint import Disjoint
 from django_data_shape.scaled_shape import scaled_shape
 from django_data_shape.shape import Shape
 
@@ -81,8 +82,10 @@ def scaled_world(shape: Shape, factor: int, *, using: str = DEFAULT_DB_ALIAS) ->
     not drawn -- so the only visible effect is that a row created by the ORM
     after a world is torn down gets a larger id than it otherwise would.
     """
+    scaled = scaled_shape(shape, factor)
     with transaction.atomic(using=using):
-        result = build(scaled_shape(shape, factor), using=using, require_statistics=False)
+        _empty_declared_tables(scaled, using)
+        result = build(scaled, using=using, require_statistics=False)
         yield result.rows
         # Rolling back on the way out rather than raising and swallowing an
         # exception to get there: set_rollback is the supported way to leave an
@@ -90,3 +93,54 @@ def scaled_world(shape: Shape, factor: int, *, using: str = DEFAULT_DB_ALIAS) ->
         # never reaches this line and does not need to -- atomic rolls back for
         # exactly that case already.
         transaction.set_rollback(True, using=using)
+
+
+def _empty_declared_tables(shape: Shape, using: str) -> None:
+    """Clear the tables ``shape`` declares, inside the caller's transaction.
+
+    A world at a factor is the declared shape at that size and nothing else, so
+    rows already in those tables are not this world's -- and emptying them is
+    what lets a scaled world be built over a session world, which is the one
+    composition of this package's two pytest surfaces that an application with a
+    single model graph needs and could not have.
+
+    **Nothing is snapshotted, and nothing needs to be.** This runs inside the
+    atomic block ``scaled_world`` already rolls back, so whatever was there
+    comes back when the block ends -- the session world included. That is the
+    whole reason the fix is four lines rather than a save-and-restore: the
+    database was already going to undo this.
+
+    Emptying rather than refusing is safe *only* here, and that is why it lives
+    in this function and not in ``build``. A bare ``build()`` keeps its refusal,
+    because it has no transaction of its own to undo and would be destroying
+    rows for good.
+
+    A table whose keys are :class:`~django_data_shape.keys.disjoint.Disjoint`
+    is left alone, mirroring the exemption ``build`` makes for the same reason:
+    those keys cannot collide with a caller's rows, so the hybrid this package
+    documents -- parents made by your code, children made here -- must keep
+    working. Deleting the parents would break it in a new way.
+    """
+    connection = connections[using]
+    tables = [
+        table.db_table
+        for table in shape.tables
+        if not isinstance(getattr(table, "keys", None), Disjoint)
+    ]
+    if not tables:
+        return
+    quoted = ", ".join(connection.ops.quote_name(name) for name in tables)
+    with connection.cursor() as cursor:
+        if connection.vendor == "postgresql":
+            # TRUNCATE is transactional on PostgreSQL, so it rolls back with the
+            # rest of the block. CASCADE covers a foreign key from a table this
+            # shape does not declare; RESTART IDENTITY is deliberately omitted,
+            # because a sequence reset is not transactional and would leave the
+            # counter behind the rows that came back.
+            cursor.execute(f"TRUNCATE {quoted} CASCADE")
+        else:
+            # DELETE rather than TRUNCATE off PostgreSQL: SQLite has no
+            # TRUNCATE, and the loads here are small enough that the difference
+            # does not matter.
+            for name in reversed(tables):
+                cursor.execute(f"DELETE FROM {connection.ops.quote_name(name)}")

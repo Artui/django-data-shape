@@ -7,6 +7,69 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`Product`, `Offset` and `Copied`: the commonest arithmetic, said as data.**
+  They compute nothing `Derived` could not. They exist because of what `Derived`
+  costs: it takes a callable, a callable cannot be honestly digested, and a
+  shape holding one is refused by `template_database`. So a column as ordinary
+  as `total = quantity * unit_price` took a whole declaration out of the reuse
+  that turns a forty-second build into a hundred-millisecond clone -- and
+  `build()` kept working, so nothing said what it had cost.
+
+  The refusal stays; it is right. These three are pure data, implement
+  `Canonical`, and hash. `Derived` remains the answer for computation that
+  really is code.
+
+  `Offset` is also the same-row half of `After`, which is parent-scoped only.
+  Its gap is fixed rather than spread across a window, because a due date thirty
+  days after an issue date is a term and not a distribution.
+
+### Changed
+
+- **A scaled world can now be built over a session world.** The two pytest
+  surfaces this package ships wanted the same tables in any application with one
+  model graph, and were mutually exclusive: the session world holds its rows for
+  the whole run, so the scaled build met a table that was not empty and refused.
+  The documented answer -- give the two different models -- is not available to a
+  project whose plan assertions and growth assertions are about the same flow,
+  because that is what the application is.
+
+  It was also order-dependent, which is what made it worth fixing rather than
+  documenting better: a suite whose growth tests happened to be collected first
+  passed, and the same tests named in the other order failed.
+
+  `scaled_world` now empties the tables its shape declares before building.
+  **Nothing is snapshotted, and nothing needs to be**: this happens inside the
+  atomic block it already rolls back, so whatever was there comes back when the
+  block ends. A table whose keys are `Disjoint` is left alone, mirroring the
+  exemption `build` already makes, so the documented hybrid -- parents made by
+  your code, children made here -- keeps working.
+
+  `build()` keeps its refusal. It has no transaction of its own to undo and
+  would be destroying rows for good.
+
+  The two statement-count constants moved: one TRUNCATE on PostgreSQL, one
+  DELETE per declared table elsewhere. Both are properties of the declaration
+  rather than the factor, so what those tests pin -- fixed on PostgreSQL at
+  every factor, a curve off it -- is unchanged.
+
+### Fixed
+
+- **`After` across a parent column of a different kind is refused.**
+  `date + timedelta` is a `date`, so a `DateTimeField` child whose parent column
+  was a `DateField` was filled with dates: `COPY` accepted them and they landed
+  as naive midnights. A world whose orders went on sale in 2024 had shows
+  starting in 1900, and the only signal was Django's own per-row
+  `RuntimeWarning` in the middle of a build that prints thousands of lines.
+
+  Both field types are on `_meta` and both are known before a row is generated,
+  so this belonged in the class of things already refused at declaration time.
+  Only `After` is checked, deliberately: `After` *is* `parent + offset` written
+  into this column, so the two describe the same quantity by construction, while
+  a `Derived` reading a parent column may legitimately convert -- turning a
+  timestamp into a count of days is an ordinary thing to declare.
+
 ## [0.16.0] — 2026-09-04
 
 ### Fixed

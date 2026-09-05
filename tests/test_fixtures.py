@@ -11,7 +11,6 @@ from django_data_shape import (
     Constant,
     ScaleProtocol,
     Shape,
-    ShapeNotEmpty,
     Table,
     scaled_world,
 )
@@ -99,20 +98,30 @@ def test_an_ordinary_fixture_over_the_session_world_does_not_start_from_empty(
 
 
 @pytest.mark.django_db
-def test_a_scaled_world_over_the_session_world_is_refused_by_name(catalogue: BuildResult) -> None:
-    # The first thing a consumer composing both fixtures hits, and the reason the
-    # refusal names a cause rather than only a remedy: the rows are real, correct
-    # and put there by a fixture this test never mentions, so "empty the table
-    # first" on its own reads as advice about somebody else's data.
+def test_a_scaled_world_builds_over_the_session_world(catalogue: BuildResult) -> None:
+    """The composition an application with one model graph needs.
+
+    This used to be the first thing a consumer composing both fixtures hit, and
+    it was a refusal: the session world's rows are real, correct and put there
+    by a fixture the failing test never mentions. The documented remedy -- give
+    the two different models -- is not available to a project whose plan
+    assertions and growth assertions are about the same flow, because that is
+    what the application is.
+
+    It was also order-dependent, which is what made it worth fixing rather than
+    documenting better. A suite whose growth tests were collected first passed,
+    and the same tests named in the other order failed three.
+    """
     world = Shape(Table(Catalogue, rows=5, name=Constant("widget")))
 
-    with pytest.raises(ShapeNotEmpty) as raised, scaled_world(world, 1):
-        pass
+    with scaled_world(world, 1) as rows:
+        # Inside the block the world is exactly the declaration at this factor.
+        assert rows == 5
+        assert Catalogue.objects.count() == 5
 
-    assert "shape_fixture" in str(raised.value)
-    # And nothing was disturbed on the way out. The refusal happens before a row
-    # is written, inside a transaction that rolls back, so the session world the
-    # rest of the run depends on is untouched.
+    # And the session world is back untouched, because the emptying happened
+    # inside the transaction the scaled world was always going to roll back.
+    # Nothing is snapshotted and nothing is restored by hand.
     assert Catalogue.objects.count() == 25
 
 

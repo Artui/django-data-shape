@@ -8,6 +8,7 @@ from typing import Any, cast
 
 from django.db.models import Field, Model
 
+from django_data_shape.derivations.after import After
 from django_data_shape.derivations.derivation import Derivation
 from django_data_shape.derivations.per_parent import PerParent
 from django_data_shape.derivations.scope import Scope
@@ -26,6 +27,7 @@ from django_data_shape.utils import (
     check_not_inherited,
     check_statistics_target,
     has_db_default,
+    offsettable_kind,
     primary_key_field,
 )
 
@@ -370,6 +372,47 @@ class Table:
                     f"field named {field_name}. Its concrete fields are: "
                     f"{', '.join(sorted(available))}."
                 )
+            if isinstance(declared, After):
+                self._check_offset_units(name, source, parent, field_name, known[name])
+
+    def _check_offset_units(
+        self,
+        name: str,
+        source: str,
+        parent: type[Model],
+        field_name: str,
+        column: Field[Any, Any],
+    ) -> None:
+        """Refuse an ``After`` whose parent column is a different kind of thing.
+
+        Only ``After`` is checked, and deliberately not every parent-scoped
+        derivation: ``After`` *is* ``parent + offset`` written into this column,
+        so the two columns describe the same quantity by construction. A
+        ``Derived`` reading a parent column may legitimately convert -- turning
+        a timestamp into a count of days is an ordinary thing to declare -- and
+        a check that could not tell the two apart would refuse it.
+
+        The failure this prevents is silent rather than loud, which is why it
+        is worth a refusal at declaration time. ``date + timedelta`` is a
+        ``date``; the load accepts it, the rows arrive as naive midnights, and
+        the only complaint is Django's own per-row warning in the middle of a
+        build that prints thousands of lines.
+        """
+        parent_field = cast("Field[Any, Any]", parent._meta.get_field(field_name))
+        parent_kind = offsettable_kind(parent_field)
+        column_kind = offsettable_kind(column)
+        if parent_kind is None or column_kind is None or parent_kind == column_kind:
+            return
+        raise InvalidShape(
+            f"{self.model.__name__}.{name} is After({source!r}), which writes that parent "
+            f"column plus an offset into this one -- but {parent.__name__}.{field_name} is a "
+            f"{type(parent_field).__name__} and {self.model.__name__}.{name} is a "
+            f"{type(column).__name__}. Adding an offset to a "
+            f"{type(parent_field).__name__} produces a {parent_kind}, so this column would be "
+            f"filled with the wrong kind of value and the load would accept it. Read a "
+            f"{type(column).__name__} on the parent, or fill this column with a distribution "
+            "of its own."
+        )
 
     def _check_group_sources(self, name: str, declared: Derivation) -> None:
         """Refuse a group-scoped column whose groups are not there to be grouped by.

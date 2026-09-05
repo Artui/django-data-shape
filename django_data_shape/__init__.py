@@ -11,10 +11,13 @@ from django_data_shape.clone_database import clone_database
 from django_data_shape.derivation_queried_database import DerivationQueriedDatabase
 from django_data_shape.derivations.after import After
 from django_data_shape.derivations.aligned import Aligned
+from django_data_shape.derivations.copied import Copied
 from django_data_shape.derivations.derivation import Derivation
 from django_data_shape.derivations.derived import Derived
 from django_data_shape.derivations.given import Given
+from django_data_shape.derivations.offset import Offset
 from django_data_shape.derivations.per_parent import PerParent
+from django_data_shape.derivations.product import Product
 from django_data_shape.derivations.scope import Scope
 from django_data_shape.distributions.ascending import Ascending
 from django_data_shape.distributions.bounded import Bounded
@@ -67,6 +70,7 @@ __all__ = [
     "Categorical",
     "ChildrenPerParent",
     "Constant",
+    "Copied",
     "Derivation",
     "DerivationQueriedDatabase",
     "Derived",
@@ -81,8 +85,10 @@ __all__ = [
     "KeyFunction",
     "Md5Keys",
     "KeyStrategy",
+    "Offset",
     "Paired",
     "PerParent",
+    "Product",
     "Projection",
     "ScaleProtocol",
     "Scope",
