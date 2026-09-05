@@ -11,6 +11,7 @@ from django_data_shape.build import build
 from django_data_shape.keys.disjoint import Disjoint
 from django_data_shape.scaled_shape import scaled_shape
 from django_data_shape.shape import Shape
+from django_data_shape.utils import reset_sequence
 
 
 @contextmanager
@@ -83,16 +84,32 @@ def scaled_world(shape: Shape, factor: int, *, using: str = DEFAULT_DB_ALIAS) ->
     after a world is torn down gets a larger id than it otherwise would.
     """
     scaled = scaled_shape(shape, factor)
-    with transaction.atomic(using=using):
-        _empty_declared_tables(scaled, using)
-        result = build(scaled, using=using, require_statistics=False)
-        yield result.rows
-        # Rolling back on the way out rather than raising and swallowing an
-        # exception to get there: set_rollback is the supported way to leave an
-        # atomic block without keeping it. An exception from the caller's block
-        # never reaches this line and does not need to -- atomic rolls back for
-        # exactly that case already.
-        transaction.set_rollback(True, using=using)
+    try:
+        with transaction.atomic(using=using):
+            _empty_declared_tables(scaled, using)
+            result = build(scaled, using=using, require_statistics=False)
+            yield result.rows
+            # Rolling back on the way out rather than raising and swallowing
+            # an exception to get there: set_rollback is the supported way to
+            # leave an atomic block without keeping it. An exception from the
+            # caller's block never reaches this line and does not need to --
+            # atomic rolls back for exactly that case already.
+            transaction.set_rollback(True, using=using)
+    finally:
+        # After the rollback, never inside it. The rows are back and the
+        # sequences are not: ``setval`` is not transactional, so the counter
+        # still holds whatever the scaled build moved it to -- and a scaled
+        # world is usually *smaller* than a session world built over, which
+        # leaves it pointing at ids that have just come back. The next
+        # ``objects.create()`` then collides with a row the failing test never
+        # wrote, in a later test, which is about as far from the cause as a
+        # symptom gets.
+        #
+        # Recomputed from the rows rather than restored from a number captured
+        # on the way in, because the reset reads ``max(pk)`` of whatever is
+        # actually there: it is then correct in both directions, and correct
+        # too when the caller's block raised partway through the build.
+        _reset_declared_sequences(scaled, using)
 
 
 def _empty_declared_tables(shape: Shape, using: str) -> None:
@@ -144,3 +161,16 @@ def _empty_declared_tables(shape: Shape, using: str) -> None:
             # does not matter.
             for name in reversed(tables):
                 cursor.execute(f"DELETE FROM {connection.ops.quote_name(name)}")
+
+
+def _reset_declared_sequences(shape: Shape, using: str) -> None:
+    """Point every declared table's sequence at the rows it now holds.
+
+    A :class:`~django_data_shape.projection.Projection` is included: its rows
+    come from a statement rather than from generated keys, but it still has a
+    key column with a sequence behind it, and the rows it just lost were as real
+    as any other's.
+    """
+    connection = connections[using]
+    for table in shape.tables:
+        reset_sequence(connection, table.model)
