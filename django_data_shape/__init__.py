@@ -52,6 +52,7 @@ from django_data_shape.shape import Shape
 from django_data_shape.shape_digest import shape_digest
 from django_data_shape.shape_from_factory import shape_from_factory
 from django_data_shape.shape_not_empty import ShapeNotEmpty
+from django_data_shape.sql_value import SqlValue
 from django_data_shape.table import Table
 from django_data_shape.table_result import TableResult
 from django_data_shape.template_database import template_database
@@ -98,6 +99,7 @@ __all__ = [
     "ShapeNotEmpty",
     "Skew",
     "SqlKeys",
+    "SqlValue",
     "Table",
     "TableResult",
     "UnhashableShape",

@@ -7,6 +7,86 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.19.0] — 2026-09-05
+
+### Added
+
+- **`Paired(..., parents=)`: an edge narrowed to a subset of the partner table.**
+
+  Two through tables over one partner model chose independently -- every
+  mechanism here computes a column from the row index and nothing else -- so
+  they overlapped by construction, and any rule of the form *these two
+  relationships must not overlap* was unsatisfiable however the shape was
+  written. Declared as an invariant, such a rule correctly fired and rolled
+  every build back with nothing a declaration could change.
+
+  The family is larger than it looks: reviewer-is-not-author,
+  approver-is-not-requester, auditor-is-not-audited. It is every
+  separation-of-duties constraint there is.
+
+  It behaves as `FanOut(parents=)` does, which gained the same narrowing in
+  0.13.0 for the same class of problem one primitive over: keys are read through
+  the database as a predicate rather than filtered afterwards, named partners
+  are put back in declaration order so the weights do not follow a sort order
+  nobody wrote down, and a named key matching no row is **refused** rather than
+  silently dropped.
+
+  **Narrowing can make a declaration impossible that was fine over the whole
+  table**, because what binds is the busiest group rather than the product. The
+  existing build-time refusal already says so and now says it about the narrowed
+  set.
+
+- **`Projection(..., values={...})` and `SqlValue`: a projected column of the
+  table's own.**
+
+  A projection copies a column from the source it names or takes the model's
+  own default, and a projected table's **measure** column is neither -- the
+  score on a review, the amount on a generated line, the reading on a sample.
+
+  Leaving it to a model default was legal and was the wrong answer *for this
+  package specifically*: one value across every projected row is
+  `n_distinct = 1`, the exact shape a planner cannot use. A library whose whole
+  purpose is planner realism was building tables it had made unplannable, and
+  the declaration looked correct.
+
+  `sql=` already answered this and answered it expensively -- it replaces the
+  whole `SELECT`, so the join stops being derived from the model graph and can
+  drift from it afterwards, the copied columns are written by hand, and the key
+  strategy has to be spelled in SQL. `values=` gives up none of that:
+
+  ```python
+  Projection(
+      ReviewScore,
+      per=Review,
+      copying=Criterion,
+      values={"score": SqlValue("({per}.id * 31 + {source}.id * 17) % 5 + 1")},
+  )
+  ```
+
+  `{per}` and `{source}` are substituted with the aliases the derived statement
+  uses. They are placeholders rather than the aliases themselves because the
+  aliases are this package's private business.
+
+  **It takes SQL rather than a distribution, and that is a decision.** A
+  `Distribution` computes from `draw(stream, row)`, which is SplitMix64 --
+  expressible in PostgreSQL only through `numeric` modular arithmetic and casts
+  across the sign boundary, where one mistake gives a declaration two meanings
+  depending on which statement filled the table. That is the divergence
+  `SqlKeys` exists to refuse, and it is not worth buying convenience with.
+
+  Declaring an expression for a column the source already carries, or for a
+  column the model does not have, or alongside `sql=`, is refused at declaration
+  time.
+
+  Two things the expression carries that the declaration should not have to. A
+  literal `%` is escaped, because the statement is executed with bound
+  parameters and an unescaped one is an incomplete placeholder to psycopg and to
+  Django's SQLite wrapper alike -- the paramstyle is no more the declaration's
+  business than the join's aliases are. And the expression is the one part of a
+  shape that is **not portable**, which is documented rather than papered over:
+  `mod(x, 5)` is an integer on PostgreSQL and a REAL on SQLite, so `%` is the
+  spelling the examples use.
+
 ## [0.18.1] — 2026-09-05
 
 ### Fixed
@@ -1195,7 +1275,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   into `COPY FROM STDIN`, which psycopg 2 cannot do without materialising them
   first.
 
-[Unreleased]: https://github.com/Artui/django-data-shape/compare/v0.18.1...HEAD
+[Unreleased]: https://github.com/Artui/django-data-shape/compare/v0.19.0...HEAD
+[0.19.0]: https://github.com/Artui/django-data-shape/compare/v0.18.1...v0.19.0
 [0.18.1]: https://github.com/Artui/django-data-shape/compare/v0.18.0...v0.18.1
 [0.18.0]: https://github.com/Artui/django-data-shape/compare/v0.17.1...v0.18.0
 [0.17.1]: https://github.com/Artui/django-data-shape/compare/v0.17.0...v0.17.1

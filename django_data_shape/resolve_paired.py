@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 import numbers
 from decimal import Decimal
-from typing import Any
+from typing import Any, cast
 
 from django.db.models import Model
 
@@ -52,7 +52,9 @@ def resolve_paired(
     is resolved, so this is the one structural refusal that has to wait for the
     build.
     """
-    keys = _read_partner_keys(partner, connection)
+    keys = _read_partner_keys(partner, connection, paired.parents)
+    _require_every_named_partner(paired.parents, keys, partner, table, field)
+    keys = _in_declared_order(paired.parents, keys)
     sizes = plan.sizes()
     if not keys and rows:
         raise InvalidShape(
@@ -84,21 +86,90 @@ def resolve_paired(
     )
 
 
-def _read_partner_keys(partner: type[Model], connection: Any) -> list[int]:
+def _read_partner_keys(
+    partner: type[Model], connection: Any, named: tuple[object, ...] | None = None
+) -> list[int]:
     """The partner's real keys, queried rather than assumed.
 
     The same correction a fan-out carries: a project may have built the partner
     table with the ORM, so its keys are whatever the sequence handed out and a
     child pointing at ``1..N`` would point at nothing.
+
+    ``named`` narrows through the database as a predicate rather than as a
+    filter applied afterwards, so an edge table pinned to one half of a partner
+    table reads that half instead of every key it is about to ignore. The keys
+    go out as parameters, so a value from a caller never reaches the statement
+    as text.
     """
     pk_column = partner._meta.pk.column
     quote = connection.ops.quote_name
-    with connection.cursor() as cursor:
-        cursor.execute(
+    statement = (
+        f"SELECT {quote(pk_column)} FROM {quote(partner._meta.db_table)} "
+        f"ORDER BY {quote(pk_column)}"
+    )
+    params: tuple[object, ...] = ()
+    if named is not None:
+        placeholders = ", ".join(["%s"] * len(named)) or "NULL"
+        statement = (
             f"SELECT {quote(pk_column)} FROM {quote(partner._meta.db_table)} "
-            f"ORDER BY {quote(pk_column)}"
+            f"WHERE {quote(pk_column)} IN ({placeholders}) ORDER BY {quote(pk_column)}"
         )
+        params = tuple(named)
+    with connection.cursor() as cursor:
+        cursor.execute(statement, params)
         return [row[0] for row in cursor.fetchall()]
+
+
+def _require_every_named_partner(
+    named: tuple[object, ...] | None,
+    keys: list[int],
+    partner: type[Model],
+    table: str,
+    field: str,
+) -> None:
+    """Every key ``parents=`` named has to be a row, or the narrowing is a lie.
+
+    The database does the narrowing, so a key matching nothing simply does not
+    come back -- and the edges that would have used it go to whatever else was
+    named instead, or the table comes out empty if it was the only one. Both are
+    silent, and both produce a world the declaration does not describe.
+
+    The same refusal a fan-out makes, and the likely causes are the same: a key
+    from another test, a factory row that was rolled back, or a list built from
+    a queryset filtered differently from the one in the reader's head. None of
+    them is visible in the shape.
+    """
+    if named is None:
+        return
+    missing = [key for key in named if key not in set(keys)]
+    if not missing:
+        return
+    raise InvalidShape(
+        f"{table}.{field} names partner key(s) {missing!r} in parents=, and "
+        f"{partner.__name__} has no row with them. The narrowing runs in the database, so "
+        "a key that matches nothing is not an error there -- the edges that would have used "
+        "it go to the other named partners, or this table comes out empty. Load the partner "
+        "first, or name keys that exist."
+    )
+
+
+def _in_declared_order(named: tuple[object, ...] | None, keys: list[int]) -> list[int]:
+    """Put named partners back in the order the declaration named them.
+
+    Weights below are assigned by *position*, and keys arrive ordered by primary
+    key because that is how they are read -- so without this the popularity of a
+    partner would follow the sort order of values nobody wrote down. The fan-out
+    carries the same correction for the same reason, and there it was measured:
+    one declaration gave the first-named parent 5, 11 or 79 rows across twelve
+    builds, because the sort order moved with the keys.
+    """
+    if named is None:
+        return keys
+    present = set(keys)
+    # cast rather than a narrowing check: `named` holds whatever key type the
+    # partner's primary key is, and membership in `present` is what proves each
+    # one is a key this table actually read back.
+    return [cast("int", key) for key in named if key in present]
 
 
 def _weights(paired: Paired, keys: list[int], seed: int, table: str, field: str) -> list[float]:

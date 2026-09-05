@@ -217,6 +217,61 @@ on which statement filled the table.
 A UUID-keyed table can still be projected — with `sql=`, producing the keys in
 the statement.
 
+## `values=` — a column of the projected table's own
+
+A projection copies a column from the source it names, or takes the model's own
+default. Those are its only two answers, and a projected table's **measure**
+column is neither — the score on a review, the amount on a generated line, the
+reading on a sample. It belongs to the projected row and to nothing the source
+carries.
+
+Leaving it to a model default is legal and is the wrong answer *here
+specifically*: one value across every projected row is `n_distinct = 1`, the
+exact shape a planner cannot use. A package whose whole purpose is planner
+realism would be building a table it had made unplannable, and the declaration
+would look correct.
+
+```python
+Projection(
+    ReviewScore,
+    per=Review,
+    copying=Criterion,
+    values={"score": SqlValue("({per}.id * 31 + {source}.id * 17) % 5 + 1")},
+)
+```
+
+`{per}` and `{source}` are substituted with the aliases the derived statement
+uses, quoted for the connection. They are placeholders rather than the aliases
+themselves because the aliases are this package's private business: a
+declaration that spelled them would break the day they changed, and a reader
+could not tell which side was which. A literal `%` is escaped for the same
+reason -- the statement is executed with bound parameters, so an unescaped one
+is an incomplete placeholder to psycopg and to Django's SQLite wrapper alike,
+and the paramstyle is no more the declaration's business than the aliases are.
+
+### The expression is the one part of a shape that is not portable
+
+Everything else here is a declaration compiled per backend. An expression is SQL
+the database evaluates as written, and nothing can inspect it: `mod(x, 5)`
+returns an integer on PostgreSQL and a REAL on SQLite, so one declaration writes
+`5` into one database and `5.0` into the other. That is why the example above
+spells modulo as `%`, which is integer on both. Write the expression for the
+backend the shape is built on, and cast where it has to be both.
+
+The escape hatch below answers the same question and answers it expensively —
+`sql=` replaces the whole `SELECT`, so the join stops being derived from the
+model graph, the copied columns are written out by hand, and the key strategy
+has to be spelled in SQL. `values=` gives up none of that.
+
+### Why SQL and not a distribution
+
+A `Distribution` computes from `draw(stream, row)`, which is SplitMix64 —
+expressible in PostgreSQL only through `numeric` modular arithmetic and casts
+across the sign boundary, where one mistake gives a declaration two meanings
+depending on which statement filled the table. That is exactly the divergence
+[`SqlKeys`](keys.md) exists to refuse, and it is not worth buying convenience
+with. An expression you wrote is honest about being yours.
+
 ## The escape hatch
 
 For anything shaped oddly — a filter, an aggregate, a three-way join, a window —

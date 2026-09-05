@@ -14,6 +14,7 @@ from django_data_shape.infer_key_strategy import infer_key_strategy
 from django_data_shape.invalid_shape import InvalidShape
 from django_data_shape.keys.key_strategy import KeyStrategy
 from django_data_shape.keys.sql_keys import SqlKeys
+from django_data_shape.sql_value import SqlValue
 from django_data_shape.utils import (
     check_not_inherited,
     check_statistics_target,
@@ -179,6 +180,7 @@ class Projection:
         keys: KeyStrategy | None = None,
         statistics: Mapping[str, int] | None = None,
         max_rows: int | None = None,
+        values: Mapping[str, SqlValue] | None = None,
     ) -> None:
         self._model = model
         self._per = per
@@ -198,6 +200,8 @@ class Projection:
                 "nothing is already refused."
             )
         self._max_rows = max_rows
+        self._values = dict(values or {})
+        self._expressions: tuple[tuple[str, SqlValue], ...] = ()
         self._copied: tuple[tuple[str, str, str], ...] = ()
         self._literals: tuple[tuple[str, object], ...] = ()
         self._columns: tuple[str, ...] = ()
@@ -208,6 +212,16 @@ class Projection:
         # runs it first: under multi-table inheritance ``_meta.concrete_fields``
         # spans two tables and every column decision below would be made about
         # the wrong one.
+        if self._values and sql is not None:
+            # `sql=` is the whole SELECT, so there is nowhere for an expression
+            # to be put and no join for it to be written over. Two ways of
+            # saying one column is the over-determination refused everywhere
+            # else in this package.
+            raise InvalidShape(
+                f"{model.__name__} declares values= and sql= together. `sql=` is the entire "
+                "SELECT the insert reads from, so an expression has nowhere to go -- write it "
+                "into that statement instead."
+            )
         check_not_inherited(model)
         pk_field = primary_key_field(model)
         if sql is None:
@@ -372,6 +386,13 @@ class Projection:
         key = cast("SqlKeys", self._keys).key_sql(field_stream(seed, self.db_table, ":key"), row)
         values = [key]
         values.extend(f"{quote(alias)}.{quote(column)}" for _target, alias, column in self._copied)
+        # Between the copied columns and the bound literals, matching the order
+        # `_columns` was built in -- the two lists are one statement and a
+        # disagreement between them would write every column into the wrong slot.
+        values.extend(
+            expression.render(quote(_PER), quote(_SOURCE))
+            for _target, expression in self._expressions
+        )
         values.extend("%s" for _column, _value in self._literals)
         per_link, source_link = self._join
         return (
@@ -430,6 +451,7 @@ class Projection:
         source_pk = _column(primary_key_field(source))
 
         copied: list[tuple[str, str, str]] = []
+        expressions: list[tuple[str, SqlValue]] = []
         literals: list[tuple[str, object]] = []
         callables: list[str] = []
         missing: list[str] = []
@@ -444,6 +466,8 @@ class Projection:
                 copied.append((_column(field), _PER, _column(primary_key_field(per))))
             elif field.is_relation and field.related_model is source:
                 copied.append((_column(field), _SOURCE, source_pk))
+            elif field.name in self._values:
+                expressions.append((_column(field), self._values[field.name]))
             elif field.name in available:
                 copied.append((_column(field), _SOURCE, _column(available[field.name])))
             elif field.has_default() and callable(field.default):
@@ -455,6 +479,21 @@ class Projection:
             else:
                 missing.append(field.name)
 
+        declared = {field.name for field in self._model._meta.concrete_fields}
+        unknown = sorted(set(self._values) - declared)
+        if unknown:
+            raise InvalidShape(
+                f"{self._model.__name__} has no column(s) {', '.join(unknown)}, named in "
+                f"values=. Its columns are: {', '.join(sorted(declared))}."
+            )
+        answered = sorted(name for name in self._values if name in available)
+        if answered:
+            raise InvalidShape(
+                f"{self._model.__name__}.{', '.join(answered)} is named in values= and is also "
+                f"a column {source.__name__} carries under the same name, so the declaration "
+                "says two things about one column. Rename it, or drop it from values= and let "
+                "it be copied."
+            )
         if callables:
             raise InvalidShape(
                 f"{self._model.__name__}.{', '.join(callables)} has a callable default, which "
@@ -472,10 +511,12 @@ class Projection:
             )
 
         self._copied = tuple(copied)
+        self._expressions = tuple(expressions)
         self._literals = tuple(literals)
         self._columns = (
             _column(pk_field),
             *(column for column, _alias, _source in copied),
+            *(column for column, _expression in expressions),
             *(column for column, _value in literals),
         )
 
@@ -581,6 +622,10 @@ class Projection:
             self._columns,
             self._sql,
             self._params,
+            # The expressions decide the values in the columns they fill, so two
+            # declarations differing only here build different databases and a
+            # key that agreed would serve one for the other.
+            tuple((column, expression.canonical()) for column, expression in self._expressions),
             # In the key although it writes no column, because it decides load
             # order and load order reaches the data: a raw statement selecting
             # from a table built before it and after it returns different rows.

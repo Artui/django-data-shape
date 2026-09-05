@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 from django_data_shape.distributions.distribution import Distribution
 from django_data_shape.invalid_shape import InvalidShape
 
@@ -56,7 +58,13 @@ class Paired:
     derived shape nobody quotes is a shape nobody can check.
     """
 
-    def __init__(self, relation: str, weights: Distribution) -> None:
+    def __init__(
+        self,
+        relation: str,
+        weights: Distribution,
+        *,
+        parents: Sequence[object] | None = None,
+    ) -> None:
         if not isinstance(relation, str) or not relation:
             raise InvalidShape(
                 f"Paired needs the name of the fan-out it is paired with, got {relation!r}. "
@@ -65,6 +73,7 @@ class Paired:
             )
         self._relation = relation
         self._weights = weights
+        self._parents = None if parents is None else tuple(parents)
 
     @property
     def relation(self) -> str:
@@ -74,9 +83,44 @@ class Paired:
     def weights(self) -> Distribution:
         return self._weights
 
+    @property
+    def parents(self) -> tuple[object, ...] | None:
+        """The partner keys this edge may use, or ``None`` for all of them.
+
+        The same narrowing
+        :class:`~django_data_shape.fan_out.FanOut` takes, and it is here for the
+        one thing a fan-out's version cannot do: **two through tables over the
+        same partner model cannot otherwise be made disjoint.**
+
+        Every mechanism in this package computes a column from the row index
+        alone, so two ``Paired`` declarations over one partner table choose
+        independently and overlap by construction. Any rule of the form *these
+        two relationships must not overlap* is then violated however the shape
+        is written -- a reviewer who is also an author, an approver who is also
+        the requester, an auditor auditing their own team. That family is every
+        separation-of-duties constraint there is, and it was inexpressible.
+
+        Narrowing the two sides to disjoint subsets is what makes it
+        expressible, and it is also how the domains themselves work: a venue
+        keeps a reviewer board, an organisation separates approvers from
+        requesters. The declaration says the thing the business already says.
+
+        Keys are read through the database as a predicate rather than filtered
+        afterwards, and a named key matching no row is refused rather than
+        silently dropped -- both for the reasons the fan-out's version gives.
+        """
+        return self._parents
+
     def canonical(self) -> object:
-        """The fan-out it pairs with and the weights over partners. See ``Canonical``."""
-        return (self._relation, self._weights)
+        """The fan-out it pairs with, the weights, and any narrowing. See ``Canonical``.
+
+        ``parents`` is part of the digest because it changes which rows exist:
+        two declarations differing only in their subset build different
+        databases, and a cache key that agreed would serve one for the other.
+        """
+        return (self._relation, self._weights, self._parents)
 
     def __repr__(self) -> str:
-        return f"Paired({self._relation!r}, {self._weights!r})"
+        if self._parents is None:
+            return f"Paired({self._relation!r}, {self._weights!r})"
+        return f"Paired({self._relation!r}, {self._weights!r}, parents={list(self._parents)!r})"
