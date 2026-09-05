@@ -866,6 +866,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#django_data_shape.projection.Projection.scaled" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        scaled
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#django_data_shape.projection.Projection.count_statement" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2366,6 +2377,17 @@
     <span class="md-ellipsis">
       
         statement
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#django_data_shape.projection.Projection.scaled" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        scaled
       
     </span>
   </a>
@@ -4703,6 +4725,39 @@ and not this package's.</p>
 <div class="doc doc-object doc-function">
 
 
+<h3 id="django_data_shape.projection.Projection.scaled" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">scaled</span>
+
+
+<a href="#django_data_shape.projection.Projection.scaled" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">scaled</span><span class="p">(</span><span class="n">factor</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Projection</span>
+</span></code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>This declaration at another size, which for a projection is its ceiling.</p>
+<p>A projection has no row count to multiply -- its size is
+<code>count(per JOIN copying)</code>, so scaling the tables it reads scales it
+without anything being said. <code>max_rows</code> is different: it is a declared
+number in the same units as that size, and a ceiling that does not move
+with the factor fires on the first growth assertion.</p>
+<p><strong>Multiplying it by the factor is the right arithmetic rather than an
+approximation of one</strong>, and for the same reason the count needs no
+factor. <code>scaled_shape</code> scales <em>every</em> table, parents included, so a
+parent has the same number of children at every factor; the projection
+is then a sum over <code>factor</code> times as many parents of an unchanged
+per-parent product, which is <code>factor</code> times the original.</p>
+<p>Returns <code>self</code> when there is no ceiling, so a declaration that did not
+ask for one keeps the identity it always had here.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
 <h3 id="django_data_shape.projection.Projection.count_statement" class="doc doc-heading">
             <span class="doc doc-object-name doc-function-name">count_statement</span>
 
@@ -6360,14 +6415,22 @@ than assembled behind it, so a declaration that is only valid at its
 original size is refused at the factor that breaks it -- naming the factor,
 because a message about a row count the caller never wrote is a message that
 knows more than it says.</p>
-<p><strong>A :class:<code>~django_data_shape.projection.Projection</code> passes through
-untouched, and needs no factor of its own.</strong> It has no declared row count to
+<p><strong>A :class:<code>~django_data_shape.projection.Projection</code> needs no factor for
+its size, and one for its ceiling.</strong> It has no declared row count to
 multiply: its size is <code>count(per JOIN copying)</code>, so scaling the tables it
 reads scales it by exactly the same amount without anything being said.
 That is the determined-not-distributed property paying for itself -- a
 mirroring vocabulary with a row count in it would have needed a rule here,
 and would have had to pick between scaling the count and scaling the thing
 the count was derived from.</p>
+<p><code>max_rows</code> <strong>is</strong> multiplied, and the same reasoning is why. A ceiling is
+a declared number in the same units as that size, so one that stayed put
+would fire on the first growth assertion -- which is exactly what a consumer
+hit within a run of asking for the feature. Because every table scales,
+parents included, a parent has the same number of children at every factor
+and the projection is a sum over <code>factor</code> times as many parents of an
+unchanged per-parent product: linear, so multiplying the ceiling is the
+arithmetic rather than an approximation of it.</p>
 
 
     </div>
