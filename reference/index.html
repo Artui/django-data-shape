@@ -844,10 +844,32 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#django_data_shape.projection.Projection.max_rows" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        max_rows
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#django_data_shape.projection.Projection.statement" class="md-nav__link">
     <span class="md-ellipsis">
       
         statement
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#django_data_shape.projection.Projection.count_statement" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        count_statement
       
     </span>
   </a>
@@ -2329,10 +2351,32 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#django_data_shape.projection.Projection.max_rows" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        max_rows
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#django_data_shape.projection.Projection.statement" class="md-nav__link">
     <span class="md-ellipsis">
       
         statement
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#django_data_shape.projection.Projection.count_statement" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        count_statement
       
     </span>
   </a>
@@ -4586,6 +4630,46 @@ declared, and with nothing at all when it declared nothing.</p>
 
 </div>
 
+<div class="doc doc-object doc-attribute">
+
+
+
+<h3 id="django_data_shape.projection.Projection.max_rows" class="doc doc-heading">
+            <span class="doc doc-object-name doc-attribute-name">max_rows</span>
+
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-property"><code>property</code></small>
+  </span>
+
+<a href="#django_data_shape.projection.Projection.max_rows" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="n">max_rows</span><span class="p">:</span> <span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span>
+</span></code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>The largest number of rows this declaration is willing to insert.</p>
+<p><code>None</code>, and no count is taken -- a declaration that does not ask is
+not charged for the answer.</p>
+<p>It exists because a projection is the one declaration with no <code>rows=</code>,
+and that is deliberate: its cardinality comes from the join, which is
+what reproduces a correlation a <code>FanOut</code> on the child would destroy.
+The consequence is that the largest table in a database can be the one
+nobody declared a size for. <strong>Its size is a product</strong>, so when both
+sides of the join fan out over the same parents the busy parents
+multiply: raise either declared count by four and the projection grows
+by sixteen. A consumer measured 2,413,223 rows against a declaration
+whose largest number was 300,000.</p>
+<p>There is no default ceiling and there will not be one. How many rows is
+too many is a judgement about size, which this package does not make on
+a caller's behalf anywhere else either -- see the statistics target,
+declared for the same reason. What it can do is act on the caller's own
+number, before the expensive statement rather than after it.</p>
+
+    </div>
+
+</div>
+
 
 
 
@@ -4610,6 +4694,33 @@ spells it.</p>
 <p>A model default lands as a bound parameter rather than as a literal in
 the SQL, so a string default carrying a quote is the driver's problem
 and not this package's.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="django_data_shape.projection.Projection.count_statement" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">count_statement</span>
+
+
+<a href="#django_data_shape.projection.Projection.count_statement" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">count_statement</span><span class="p">(</span><span class="n">connection</span><span class="p">:</span> <span class="n">Any</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">object</span><span class="p">,</span> <span class="o">...</span><span class="p">]]</span>
+</span></code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>How many rows the insert would write, without writing them.</p>
+<p>Exact rather than estimated: it counts the same join the insert selects
+from, and the select is one row per joined pair, so the two agree by
+construction. The derived form counts the join directly rather than
+wrapping the select -- the window function and the ordering decide what
+the rows <em>are</em> and cost real time, while the question here is only how
+many. A <code>sql=</code> projection is wrapped instead, because this package
+cannot know what the caller's statement is one row per.</p>
 
 
     </div>
