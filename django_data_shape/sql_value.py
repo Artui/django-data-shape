@@ -33,7 +33,7 @@ class SqlValue:
             ReviewScore,
             per=Review,
             copying=Criterion,
-            values={"score": SqlValue("mod({per}.id * 31 + {source}.id * 17, 5) + 1")},
+            values={"score": SqlValue("({per}.id * 31 + {source}.id * 17) % 5 + 1")},
         )
 
     ``{per}`` and ``{source}`` are substituted with the aliases the derived
@@ -52,6 +52,25 @@ class SqlValue:
     is not worth buying convenience with. An expression the caller wrote is
     honest about being the caller's.
 
+    **It is the one part of a shape that is not portable, and it cannot be
+    made portable.** Everything else here is a declaration this package
+    compiles per backend; an expression is SQL the database evaluates as
+    written. ``mod(x, 5)`` returns an integer on PostgreSQL and a REAL on
+    SQLite, so one declaration writes ``5`` into one database and ``5.0`` into
+    the other -- which is why the example above uses ``%``, integer on both.
+    Nothing here can detect that: the expression is opaque until the database
+    reads it. Write it for the backend the shape is built on, and cast when it
+    has to be both.
+
+    ``%`` is passed through as the operator, which takes an escape this package
+    applies rather than asking for. The statement is executed with bound
+    parameters, so a literal ``%`` in it is an incomplete placeholder to both
+    psycopg and Django's SQLite wrapper, and the declaration fails at execution
+    with a paramstyle error naming nothing in the shape. The paramstyle is this
+    package's private business for the same reason the join's aliases are: a
+    declaration that spelled it would be spelling how the statement happens to
+    be run.
+
     The expression is inert data, so a shape holding one still digests.
     """
 
@@ -69,9 +88,17 @@ class SqlValue:
         return self._expression
 
     def render(self, per_alias: str, source_alias: str) -> str:
-        """The expression with the join's aliases substituted in."""
-        return self._expression.replace(_PER_PLACEHOLDER, per_alias).replace(
-            _SOURCE_PLACEHOLDER, source_alias
+        """The expression with the join's aliases substituted and ``%`` escaped.
+
+        The escape is last so it also covers a ``%`` inside a quoted alias,
+        and it is unconditional because the statement always carries a
+        parameter sequence -- an empty one is still a sequence, and both
+        drivers interpolate on anything that is not ``None``.
+        """
+        return (
+            self._expression.replace(_PER_PLACEHOLDER, per_alias)
+            .replace(_SOURCE_PLACEHOLDER, source_alias)
+            .replace("%", "%%")
         )
 
     def canonical(self) -> object:

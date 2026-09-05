@@ -236,7 +236,7 @@ Projection(
     ReviewScore,
     per=Review,
     copying=Criterion,
-    values={"score": SqlValue("mod({per}.id * 31 + {source}.id * 17, 5) + 1")},
+    values={"score": SqlValue("({per}.id * 31 + {source}.id * 17) % 5 + 1")},
 )
 ```
 
@@ -244,7 +244,19 @@ Projection(
 uses, quoted for the connection. They are placeholders rather than the aliases
 themselves because the aliases are this package's private business: a
 declaration that spelled them would break the day they changed, and a reader
-could not tell which side was which.
+could not tell which side was which. A literal `%` is escaped for the same
+reason -- the statement is executed with bound parameters, so an unescaped one
+is an incomplete placeholder to psycopg and to Django's SQLite wrapper alike,
+and the paramstyle is no more the declaration's business than the aliases are.
+
+### The expression is the one part of a shape that is not portable
+
+Everything else here is a declaration compiled per backend. An expression is SQL
+the database evaluates as written, and nothing can inspect it: `mod(x, 5)`
+returns an integer on PostgreSQL and a REAL on SQLite, so one declaration writes
+`5` into one database and `5.0` into the other. That is why the example above
+spells modulo as `%`, which is integer on both. Write the expression for the
+backend the shape is built on, and cast where it has to be both.
 
 The escape hatch below answers the same question and answers it expensively —
 `sql=` replaces the whole `SELECT`, so the join stops being derived from the

@@ -59,7 +59,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
       ReviewScore,
       per=Review,
       copying=Criterion,
-      values={"score": SqlValue("mod({per}.id * 31 + {source}.id * 17, 5) + 1")},
+      values={"score": SqlValue("({per}.id * 31 + {source}.id * 17) % 5 + 1")},
   )
   ```
 
@@ -77,6 +77,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Declaring an expression for a column the source already carries, or for a
   column the model does not have, or alongside `sql=`, is refused at declaration
   time.
+
+  Two things the expression carries that the declaration should not have to. A
+  literal `%` is escaped, because the statement is executed with bound
+  parameters and an unescaped one is an incomplete placeholder to psycopg and to
+  Django's SQLite wrapper alike -- the paramstyle is no more the declaration's
+  business than the join's aliases are. And the expression is the one part of a
+  shape that is **not portable**, which is documented rather than papered over:
+  `mod(x, 5)` is an integer on PostgreSQL and a REAL on SQLite, so `%` is the
+  spelling the examples use.
 
 ## [0.18.1] — 2026-09-05
 

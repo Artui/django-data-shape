@@ -35,7 +35,7 @@ from tests.testapp.models import Event, EventSession, Template, TemplateSession
 pytestmark = pytest.mark.django_db
 
 
-def _shape(expression: str = "mod({per}.id * 31 + {source}.id * 17, 5) + 1") -> Shape:
+def _shape(expression: str = "({per}.id * 31 + {source}.id * 17) % 5 + 1") -> Shape:
     return Shape(
         Table(Template, rows=4, name=Constant("t")),
         Table(
@@ -62,7 +62,25 @@ def test_a_projected_column_can_be_an_expression_over_the_join() -> None:
     values = set(EventSession.objects.values_list("channel", flat=True))
 
     assert len(values) > 1, "the column has to be distributed, not a single default"
-    assert values <= {"1", "2", "3", "4", "5"}
+    assert {float(value) for value in values} <= {1, 2, 3, 4, 5}
+
+
+def test_the_modulo_operator_reaches_the_database_as_an_operator() -> None:
+    """A literal `%` survives, and it takes an escape the caller does not write.
+
+    The statement carries a parameter sequence -- empty here, still a sequence --
+    so psycopg and Django's SQLite wrapper both interpolate it, and an unescaped
+    `%` is an incomplete placeholder. The error names the driver and nothing in
+    the shape, which is the worst place for a declaration to fail.
+
+    `%` is also the portable spelling of modulo, integer on both backends where
+    `mod()` is a REAL on SQLite, so it is the one a caller reaches for first.
+    """
+    build(_shape("({per}.id * 31 + {source}.id * 17) % 5 + 1"), require_statistics=False)
+
+    values = {float(value) for value in EventSession.objects.values_list("channel", flat=True)}
+
+    assert values == {1, 2, 3, 4, 5}
 
 
 def test_the_derived_join_is_kept() -> None:
