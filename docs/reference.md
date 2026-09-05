@@ -96,6 +96,8 @@
 
 ::: django_data_shape.keys.sql_keys.SqlKeys
 
+::: django_data_shape.sql_value.SqlValue
+
 ::: django_data_shape.keys.disjoint.Disjoint
 
 ## Distributions

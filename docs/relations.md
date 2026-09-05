@@ -263,6 +263,59 @@ construction rather than removed afterwards. The edge count is therefore exactly
 `rows`: nothing is deduplicated, and the build never reports an achieved count
 against a requested one.
 
+### `parents=` — and why two edge tables need it
+
+Two through tables over the same partner model choose independently, because
+every mechanism here computes a column from the row index and nothing else. So
+they overlap by construction, and any rule of the form *these two relationships
+must not overlap* is unsatisfiable however the shape is written:
+
+```python
+# A reviewer must not be an author of what they review.
+Table(Authorship, rows=900, submission=FanOut(Zipf()), person=Paired("submission", Zipf()))
+Table(Assignment, rows=1100, submission=FanOut(Zipf()), reviewer=Paired("submission", Zipf()))
+```
+
+Declared as an [invariant](invariants.md), that rule correctly fires and rolls
+the build back — with nothing you can change to satisfy it. The family is
+larger than it looks: reviewer-is-not-author, approver-is-not-requester,
+auditor-is-not-audited. It is every separation-of-duties constraint there is.
+
+`parents=` narrows an edge to a subset of the partner table, so the two sides
+can be made disjoint:
+
+```python
+board = list(Person.objects.filter(is_reviewer=True).values_list("id", flat=True))
+authors = list(Person.objects.exclude(is_reviewer=True).values_list("id", flat=True))
+
+Table(
+    Authorship,
+    rows=900,
+    submission=FanOut(Zipf()),
+    person=Paired("submission", Zipf(), parents=authors),
+)
+Table(
+    Assignment,
+    rows=1100,
+    submission=FanOut(Zipf()),
+    reviewer=Paired("submission", Zipf(), parents=board),
+)
+```
+
+That is also how the domains themselves work: a venue keeps a reviewer board, an
+organisation separates approvers from requesters. The declaration says what the
+business already says.
+
+It behaves exactly as [`FanOut(parents=)`](#narrowing-which-parents) does. Keys are
+read through the database as a predicate rather than filtered afterwards, and a
+named key matching no row is **refused** rather than quietly dropped — the
+narrowing runs in the database, so a key that matches nothing is not an error
+there: the edges that would have used it go to the other named partners, and
+the world is built and quietly not the declared one.
+
+Narrowing can make a declaration impossible that was fine over the whole
+table, because what binds is the busiest group — see below.
+
 ### What binds is the busiest group, not the product
 
 Every row of one group needs a different partner, so the constraint is
