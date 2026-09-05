@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.18.0] — 2026-09-05
+
 ### Added
 
 - **`Projection(..., max_rows=N)`: a declared ceiling, checked before the insert.**
@@ -1171,7 +1173,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   into `COPY FROM STDIN`, which psycopg 2 cannot do without materialising them
   first.
 
-[Unreleased]: https://github.com/Artui/django-data-shape/compare/v0.17.1...HEAD
+[Unreleased]: https://github.com/Artui/django-data-shape/compare/v0.18.0...HEAD
+[0.18.0]: https://github.com/Artui/django-data-shape/compare/v0.17.1...v0.18.0
 [0.17.1]: https://github.com/Artui/django-data-shape/compare/v0.17.0...v0.17.1
 [0.17.0]: https://github.com/Artui/django-data-shape/compare/v0.16.0...v0.17.0
 [0.16.0]: https://github.com/Artui/django-data-shape/compare/v0.15.0...v0.16.0
