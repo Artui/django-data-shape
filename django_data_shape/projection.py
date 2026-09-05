@@ -177,6 +177,7 @@ class Projection:
         reads: Sequence[type[Model]] = (),
         keys: KeyStrategy | None = None,
         statistics: Mapping[str, int] | None = None,
+        max_rows: int | None = None,
     ) -> None:
         self._model = model
         self._per = per
@@ -186,6 +187,16 @@ class Projection:
         self._params = tuple(params)
         self._reads: tuple[type[Model], ...] = tuple(reads)
         self._statistics = dict(statistics or {})
+        # A bool is an int as far as isinstance is concerned, and a ceiling of
+        # one row is never what ``max_rows=True`` meant. Refused here rather
+        # than compared later, where it would silently be a very low ceiling.
+        if max_rows is not None and (isinstance(max_rows, bool) or max_rows < 1):
+            raise InvalidShape(
+                f"{model.__name__} declares max_rows={max_rows!r}. A ceiling is a whole "
+                "number of rows and at least one, because a projection that inserts "
+                "nothing is already refused."
+            )
+        self._max_rows = max_rows
         self._copied: tuple[tuple[str, str, str], ...] = ()
         self._literals: tuple[tuple[str, object], ...] = ()
         self._columns: tuple[str, ...] = ()
@@ -246,6 +257,31 @@ class Projection:
             return self._reads
         return (cast("type[Model]", self._per), cast("type[Model]", self._copying))
 
+    @property
+    def max_rows(self) -> int | None:
+        """The largest number of rows this declaration is willing to insert.
+
+        ``None``, and no count is taken -- a declaration that does not ask is
+        not charged for the answer.
+
+        It exists because a projection is the one declaration with no ``rows=``,
+        and that is deliberate: its cardinality comes from the join, which is
+        what reproduces a correlation a ``FanOut`` on the child would destroy.
+        The consequence is that the largest table in a database can be the one
+        nobody declared a size for. **Its size is a product**, so when both
+        sides of the join fan out over the same parents the busy parents
+        multiply: raise either declared count by four and the projection grows
+        by sixteen. A consumer measured 2,413,223 rows against a declaration
+        whose largest number was 300,000.
+
+        There is no default ceiling and there will not be one. How many rows is
+        too many is a judgement about size, which this package does not make on
+        a caller's behalf anywhere else either -- see the statistics target,
+        declared for the same reason. What it can do is act on the caller's own
+        number, before the expensive statement rather than after it.
+        """
+        return self._max_rows
+
     def statement(self, connection: Any, seed: int) -> tuple[str, tuple[object, ...]]:
         """The ``INSERT ... SELECT`` this declaration means, and its parameters.
 
@@ -265,6 +301,32 @@ class Projection:
             return f"{into} {self._sql}", self._params
         defaults = tuple(value for _column, value in self._literals)
         return f"{into} {self._select(quote, seed)}", defaults
+
+    def count_statement(self, connection: Any) -> tuple[str, tuple[object, ...]]:
+        """How many rows the insert would write, without writing them.
+
+        Exact rather than estimated: it counts the same join the insert selects
+        from, and the select is one row per joined pair, so the two agree by
+        construction. The derived form counts the join directly rather than
+        wrapping the select -- the window function and the ordering decide what
+        the rows *are* and cost real time, while the question here is only how
+        many. A ``sql=`` projection is wrapped instead, because this package
+        cannot know what the caller's statement is one row per.
+        """
+        quote = connection.ops.quote_name
+        if self._sql is not None:
+            return f"SELECT count(*) FROM ({self._sql}) AS {quote('counted')}", self._params
+        per = cast("type[Model]", self._per)
+        source = cast("type[Model]", self._copying)
+        per_alias, source_alias = quote(_PER), quote(_SOURCE)
+        per_link, source_link = self._join
+        return (
+            f"SELECT count(*) "
+            f"FROM {quote(per._meta.db_table)} AS {per_alias} "
+            f"INNER JOIN {quote(source._meta.db_table)} AS {source_alias} "
+            f"ON {source_alias}.{quote(source_link)} = {per_alias}.{quote(per_link)}",
+            (),
+        )
 
     def _select(self, quote: Any, seed: int) -> str:
         """The derived select: the key, the copied columns, then the join."""

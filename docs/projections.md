@@ -73,6 +73,55 @@ print(sessions.rows)
 It also means a projection needs no scale factor of its own. `scaled_shape`
 passes it through untouched, and it grows because the tables it reads did.
 
+### It grows as a product, which is the part that surprises
+
+A projection is one row per *pair* along the join, so its size is the inner
+product of the two sides. When both of them fan out over the same parents, the
+busy parents multiply:
+
+```python
+Table(Venue, rows=40, name=Constant("alhambra"))
+Table(VenueSeat, rows=24_000, venue=FanOut(Zipf(1.1)), number=Sequential(1, 1))
+Table(Show, rows=4_000, venue=FanOut(Zipf(1.15)), title=Constant("an evening with"))
+Projection(ShowSeat, per=Show, copying=VenueSeat)
+```
+
+```
+boxoffice_order      300,000     <- the largest number in the declaration
+boxoffice_showseat 2,413,223     <- eight times bigger, declared nowhere
+```
+
+Raise either declared count by four and the projection grows by **sixteen**.
+That is the model working as intended -- it is what reproduces a correlation a
+`FanOut` on the child would destroy -- but it does mean the largest table in a
+database can be the one nobody wrote a number for.
+
+### `max_rows` bounds it, before the insert rather than after
+
+```python
+Projection(ShowSeat, per=Show, copying=VenueSeat, max_rows=3_000_000)
+```
+
+The count is taken first and compared, so a declaration that has run away costs
+a scan of the join rather than the time to write every row of it. The refusal
+names the number it would have written and the tables the join is over, because
+the surprise is never the ceiling:
+
+```
+The projection into boxoffice_showseat would insert 12,058,114 rows, which is
+over its declared max_rows=3,000,000. Nothing was written. A projection has no
+row count of its own: its size is one row per pair along the join it copies,
+over Show, VenueSeat. That size is a product, so when both sides of the join fan
+out over the same parents the busy parents multiply and raising either declared
+count by four grows this by sixteen. Either the ceiling is too low, or one of
+those counts moved further than it looked.
+```
+
+A declaration that does not set one is not charged for the answer -- no count is
+taken. **There is no default ceiling and there will not be one**: how many rows
+is too many is a judgement about size, which this package does not make on your
+behalf anywhere else either. What it can do is act on your number, early.
+
 ## What gets derived
 
 **The join.** `per` and `copying` are joined through a model they both reach in
