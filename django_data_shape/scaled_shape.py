@@ -71,14 +71,23 @@ def scaled_shape(shape: Shape, factor: int) -> Shape:
     because a message about a row count the caller never wrote is a message that
     knows more than it says.
 
-    **A :class:`~django_data_shape.projection.Projection` passes through
-    untouched, and needs no factor of its own.** It has no declared row count to
+    **A :class:`~django_data_shape.projection.Projection` needs no factor for
+    its size, and one for its ceiling.** It has no declared row count to
     multiply: its size is ``count(per JOIN copying)``, so scaling the tables it
     reads scales it by exactly the same amount without anything being said.
     That is the determined-not-distributed property paying for itself -- a
     mirroring vocabulary with a row count in it would have needed a rule here,
     and would have had to pick between scaling the count and scaling the thing
     the count was derived from.
+
+    ``max_rows`` **is** multiplied, and the same reasoning is why. A ceiling is
+    a declared number in the same units as that size, so one that stayed put
+    would fire on the first growth assertion -- which is exactly what a consumer
+    hit within a run of asking for the feature. Because every table scales,
+    parents included, a parent has the same number of children at every factor
+    and the projection is a sum over ``factor`` times as many parents of an
+    unchanged per-parent product: linear, so multiplying the ceiling is the
+    arithmetic rather than an approximation of it.
     """
     # A whole number, checked rather than rounded. Rounding would let each table
     # decide its own size at a fractional factor, so two tables in one shape
@@ -94,7 +103,7 @@ def scaled_shape(shape: Shape, factor: int) -> Shape:
 
     try:
         tables = tuple(
-            table
+            table.scaled(factor)
             if isinstance(table, Projection)
             # ``fields`` rather than keyword arguments, because a model may have
             # a column named ``rows`` or ``model``. Everything else is forwarded

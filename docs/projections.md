@@ -117,6 +117,12 @@ count by four grows this by sixteen. Either the ceiling is too low, or one of
 those counts moved further than it looked.
 ```
 
+`scaled_shape` multiplies the ceiling by the factor, for the same reason the
+size needs no factor at all: every table scales, parents included, so a parent
+has the same number of children at every factor and the projection is a sum over
+`factor` times as many parents of an unchanged per-parent product. A ceiling
+that stayed put would fire on the first growth assertion.
+
 A declaration that does not set one is not charged for the answer -- no count is
 taken. **There is no default ceiling and there will not be one**: how many rows
 is too many is a judgement about size, which this package does not make on your

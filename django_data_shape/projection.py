@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections import Counter
 from collections.abc import Mapping, Sequence
+from copy import copy
 from types import MappingProxyType
 from typing import Any, cast
 
@@ -301,6 +302,31 @@ class Projection:
             return f"{into} {self._sql}", self._params
         defaults = tuple(value for _column, value in self._literals)
         return f"{into} {self._select(quote, seed)}", defaults
+
+    def scaled(self, factor: int) -> Projection:
+        """This declaration at another size, which for a projection is its ceiling.
+
+        A projection has no row count to multiply -- its size is
+        ``count(per JOIN copying)``, so scaling the tables it reads scales it
+        without anything being said. ``max_rows`` is different: it is a declared
+        number in the same units as that size, and a ceiling that does not move
+        with the factor fires on the first growth assertion.
+
+        **Multiplying it by the factor is the right arithmetic rather than an
+        approximation of one**, and for the same reason the count needs no
+        factor. ``scaled_shape`` scales *every* table, parents included, so a
+        parent has the same number of children at every factor; the projection
+        is then a sum over ``factor`` times as many parents of an unchanged
+        per-parent product, which is ``factor`` times the original.
+
+        Returns ``self`` when there is no ceiling, so a declaration that did not
+        ask for one keeps the identity it always had here.
+        """
+        if self._max_rows is None:
+            return self
+        scaled = copy(self)
+        scaled._max_rows = self._max_rows * factor
+        return scaled
 
     def count_statement(self, connection: Any) -> tuple[str, tuple[object, ...]]:
         """How many rows the insert would write, without writing them.
