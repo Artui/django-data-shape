@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.18.1] — 2026-09-05
+
+### Fixed
+
+- **`scaled_shape` now multiplies a projection's `max_rows` by the factor.**
+  It passed a `Projection` through untouched, which is right for its *size* --
+  that grows because the tables it reads did -- and wrong for a declared
+  ceiling, which is a number in the same units and did not move. A ceiling sized
+  for the world as written therefore refused every growth assertion, because
+  those build the same declaration at a larger factor.
+
+  The consumer that asked for `max_rows` in 0.18.0 hit this on the first run:
+  10,000 declared against a world of 3,188 rows, and 29,078 at factor 10.
+
+  Multiplying is the arithmetic rather than an approximation of one, and the
+  reason is the same one that makes the size need no factor: every table scales,
+  parents included, so a parent has the same number of children at every factor
+  and the projection is a sum over `factor` times as many parents of an
+  unchanged per-parent product.
+
+  A declaration with no ceiling is still passed through by identity.
+
 ## [0.18.0] — 2026-09-05
 
 ### Added
@@ -1173,7 +1195,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   into `COPY FROM STDIN`, which psycopg 2 cannot do without materialising them
   first.
 
-[Unreleased]: https://github.com/Artui/django-data-shape/compare/v0.18.0...HEAD
+[Unreleased]: https://github.com/Artui/django-data-shape/compare/v0.18.1...HEAD
+[0.18.1]: https://github.com/Artui/django-data-shape/compare/v0.18.0...v0.18.1
 [0.18.0]: https://github.com/Artui/django-data-shape/compare/v0.17.1...v0.18.0
 [0.17.1]: https://github.com/Artui/django-data-shape/compare/v0.17.0...v0.17.1
 [0.17.0]: https://github.com/Artui/django-data-shape/compare/v0.16.0...v0.17.0
