@@ -556,6 +556,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#one-thing-is-inspected-a-lone" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        One thing is inspected: a lone %
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#reads-what-the-statement-selects-from" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -925,6 +936,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#one-thing-is-inspected-a-lone" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        One thing is inspected: a lone %
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#reads-what-the-statement-selects-from" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1255,6 +1277,22 @@ the second, and that is what the refusal asking for <code>columns=</code> descri
 package owns the keys, and a statement it did not write has to say what they are
 rather than leave them to a sequence whose current value is not part of any
 declaration.</p>
+<h3 id="one-thing-is-inspected-a-lone">One thing is inspected: a lone <code>%</code><a class="headerlink" href="#one-thing-is-inspected-a-lone" title="Permanent link">&para;</a></h3>
+<p>The statement is run <strong>with its parameters</strong>, and an empty parameter sequence is
+still a sequence — so a <code>%</code> that is not a placeholder is read as the start of one
+and the driver refuses it, at build time, with a message naming <code>psycopg</code> and
+nothing about the shape. Write <code>%%</code> for the modulo operator:</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="n">sql</span> <span class="o">=</span> <span class="s2">"SELECT row_number() OVER (ORDER BY e.id), e.id, e.id </span><span class="si">%%</span><span class="s2"> 5 FROM app_event e"</span>
+</span></code></pre></div>
+<p>That is the pyformat contract and it is deliberate here: <code>sql=</code> takes <code>params=</code>,
+so the placeholders are the interface. The declaration is checked for a lone <code>%</code>
+only so the refusal arrives where the mistake is, rather than one layer down. A
+valid statement can never contain one, so nothing legal is refused.</p>
+<p><code>SqlValue</code> on the derived path is the other way round and that is not an
+inconsistency: there you supply no parameters and have no reason to know one
+exists, so <code>%</code> is escaped for you. The rule is the same in both places — the
+paramstyle belongs to whoever wrote the statement, and on the derived path that
+is this package.</p>
 <p>Nothing else about the select is inspected — that is what an escape hatch is —
 but the build still gives it the emptiness check, the sequence reset, the
 <code>ANALYZE</code> and the transaction.</p>
@@ -1265,13 +1303,13 @@ something fans out over the table it fills: the projection then has to run
 <em>before</em> that table, and may find the tables it selects from still empty.
 <code>reads=</code> says what it needs, and puts it back in the graph precisely — after
 what it reads, before what reads it.</p>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="n">Projection</span><span class="p">(</span>
-</span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>    <span class="n">EventSession</span><span class="p">,</span>
-</span><span id="__span-10-3"><a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>    <span class="n">columns</span><span class="o">=</span><span class="p">(</span><span class="s2">"id"</span><span class="p">,</span> <span class="s2">"event"</span><span class="p">,</span> <span class="s2">"title"</span><span class="p">,</span> <span class="s2">"minutes"</span><span class="p">,</span> <span class="s2">"channel"</span><span class="p">),</span>
-</span><span id="__span-10-4"><a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>    <span class="n">sql</span><span class="o">=</span><span class="s2">"SELECT row_number() OVER (ORDER BY e.id), e.id, e.name, 1, </span><span class="si">%s</span><span class="s2"> FROM app_event e"</span><span class="p">,</span>
-</span><span id="__span-10-5"><a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a>    <span class="n">params</span><span class="o">=</span><span class="p">(</span><span class="s2">"web"</span><span class="p">,),</span>
-</span><span id="__span-10-6"><a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a>    <span class="n">reads</span><span class="o">=</span><span class="p">(</span><span class="n">Event</span><span class="p">,),</span>
-</span><span id="__span-10-7"><a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a><span class="p">)</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="n">Projection</span><span class="p">(</span>
+</span><span id="__span-11-2"><a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>    <span class="n">EventSession</span><span class="p">,</span>
+</span><span id="__span-11-3"><a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>    <span class="n">columns</span><span class="o">=</span><span class="p">(</span><span class="s2">"id"</span><span class="p">,</span> <span class="s2">"event"</span><span class="p">,</span> <span class="s2">"title"</span><span class="p">,</span> <span class="s2">"minutes"</span><span class="p">,</span> <span class="s2">"channel"</span><span class="p">),</span>
+</span><span id="__span-11-4"><a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a>    <span class="n">sql</span><span class="o">=</span><span class="s2">"SELECT row_number() OVER (ORDER BY e.id), e.id, e.name, 1, </span><span class="si">%s</span><span class="s2"> FROM app_event e"</span><span class="p">,</span>
+</span><span id="__span-11-5"><a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a>    <span class="n">params</span><span class="o">=</span><span class="p">(</span><span class="s2">"web"</span><span class="p">,),</span>
+</span><span id="__span-11-6"><a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a>    <span class="n">reads</span><span class="o">=</span><span class="p">(</span><span class="n">Event</span><span class="p">,),</span>
+</span><span id="__span-11-7"><a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a><span class="p">)</span>
 </span></code></pre></div>
 <p>It is part of the declaration the template-database cache keys on, because the
 same statement run before and after a table selects different rows. A derived
@@ -1281,11 +1319,11 @@ already are the answer.</p>
 <p>A projection is ordered like everything else: after the tables it reads, before
 anything that reads it. So the order the declarations are written in does not
 matter, and <strong>a projected table may itself be a fan-out parent</strong>.</p>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="n">Shape</span><span class="p">(</span>
-</span><span id="__span-11-2"><a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>    <span class="n">Table</span><span class="p">(</span><span class="n">Attendance</span><span class="p">,</span> <span class="n">rows</span><span class="o">=</span><span class="mi">1_000_000</span><span class="p">,</span> <span class="n">session</span><span class="o">=</span><span class="n">FanOut</span><span class="p">(</span><span class="n">Zipf</span><span class="p">()),</span> <span class="n">name</span><span class="o">=</span><span class="n">Constant</span><span class="p">(</span><span class="s2">"a"</span><span class="p">)),</span>
-</span><span id="__span-11-3"><a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>    <span class="n">Projection</span><span class="p">(</span><span class="n">EventSession</span><span class="p">,</span> <span class="n">per</span><span class="o">=</span><span class="n">Event</span><span class="p">,</span> <span class="n">copying</span><span class="o">=</span><span class="n">TemplateSession</span><span class="p">),</span>
-</span><span id="__span-11-4"><a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a>    <span class="o">...</span><span class="p">,</span>
-</span><span id="__span-11-5"><a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a><span class="p">)</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="n">Shape</span><span class="p">(</span>
+</span><span id="__span-12-2"><a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>    <span class="n">Table</span><span class="p">(</span><span class="n">Attendance</span><span class="p">,</span> <span class="n">rows</span><span class="o">=</span><span class="mi">1_000_000</span><span class="p">,</span> <span class="n">session</span><span class="o">=</span><span class="n">FanOut</span><span class="p">(</span><span class="n">Zipf</span><span class="p">()),</span> <span class="n">name</span><span class="o">=</span><span class="n">Constant</span><span class="p">(</span><span class="s2">"a"</span><span class="p">)),</span>
+</span><span id="__span-12-3"><a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>    <span class="n">Projection</span><span class="p">(</span><span class="n">EventSession</span><span class="p">,</span> <span class="n">per</span><span class="o">=</span><span class="n">Event</span><span class="p">,</span> <span class="n">copying</span><span class="o">=</span><span class="n">TemplateSession</span><span class="p">),</span>
+</span><span id="__span-12-4"><a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a>    <span class="o">...</span><span class="p">,</span>
+</span><span id="__span-12-5"><a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a><span class="p">)</span>
 </span></code></pre></div>
 <p>A raw <code>sql=</code> projection without <code>reads=</code> is the exception: it names nothing, so
 "run it last" is a <strong>preference</strong> rather than an edge. It goes after everything

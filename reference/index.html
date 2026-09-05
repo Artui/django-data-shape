@@ -7974,7 +7974,8 @@ Nothing here can detect that: the expression is opaque until the database
 reads it. Write it for the backend the shape is built on, and cast when it
 has to be both.</p>
 <p><code>%</code> is passed through as the operator, which takes an escape this package
-applies rather than asking for. The statement is executed with bound
+applies rather than asking for -- unlike <code>sql=</code>, which takes <code>params=</code>
+and so owns its own placeholders; a lone <code>%</code> is refused there instead. The statement is executed with bound
 parameters, so a literal <code>%</code> in it is an incomplete placeholder to both
 psycopg and Django's SQLite wrapper, and the declaration fails at execution
 with a paramstyle error naming nothing in the shape. The paramstyle is this
