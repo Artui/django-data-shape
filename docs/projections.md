@@ -299,6 +299,28 @@ package owns the keys, and a statement it did not write has to say what they are
 rather than leave them to a sequence whose current value is not part of any
 declaration.
 
+### One thing is inspected: a lone `%`
+
+The statement is run **with its parameters**, and an empty parameter sequence is
+still a sequence — so a `%` that is not a placeholder is read as the start of one
+and the driver refuses it, at build time, with a message naming `psycopg` and
+nothing about the shape. Write `%%` for the modulo operator:
+
+```python
+sql = "SELECT row_number() OVER (ORDER BY e.id), e.id, e.id %% 5 FROM app_event e"
+```
+
+That is the pyformat contract and it is deliberate here: `sql=` takes `params=`,
+so the placeholders are the interface. The declaration is checked for a lone `%`
+only so the refusal arrives where the mistake is, rather than one layer down. A
+valid statement can never contain one, so nothing legal is refused.
+
+`SqlValue` on the derived path is the other way round and that is not an
+inconsistency: there you supply no parameters and have no reason to know one
+exists, so `%` is escaped for you. The rule is the same in both places — the
+paramstyle belongs to whoever wrote the statement, and on the derived path that
+is this package.
+
 Nothing else about the select is inspected — that is what an escape hatch is —
 but the build still gives it the emptiness check, the sequence reset, the
 `ANALYZE` and the transaction.

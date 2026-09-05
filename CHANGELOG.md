@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.20.0] — 2026-09-05
+
+### Added
+
+- **A lone `%` in a `sql=` statement is refused at declaration time.** The
+  statement is run with its parameters, and an empty parameter sequence is still
+  a sequence, so a `%` that is not a placeholder is read as the start of one:
+  the failure came from `psycopg/cursor.py` at build time, naming the driver and
+  nothing about the shape. A caller who passed no parameters at all had no model
+  that explained it, and the modulo operator is the reason anyone writes a bare
+  `%` in the first place.
+
+  A valid statement can never contain one, so nothing legal is refused -- which
+  is the whole reason this can be a refusal rather than an escape. `sql=` takes
+  `params=`, so pyformat is its interface and `%%` stays the spelling for the
+  operator.
+
+  `SqlValue` on the derived path escapes instead, and the two are not
+  inconsistent: there the caller supplies no parameters and has no reason to
+  know one exists. Both docstrings and the projections guide now say which is
+  which, at both call sites, because the asymmetry is exactly what a reader
+  finding one of them will next be confused by.
+
 ## [0.19.0] — 2026-09-05
 
 ### Added
@@ -1275,7 +1298,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   into `COPY FROM STDIN`, which psycopg 2 cannot do without materialising them
   first.
 
-[Unreleased]: https://github.com/Artui/django-data-shape/compare/v0.19.0...HEAD
+[Unreleased]: https://github.com/Artui/django-data-shape/compare/v0.20.0...HEAD
+[0.20.0]: https://github.com/Artui/django-data-shape/compare/v0.19.0...v0.20.0
 [0.19.0]: https://github.com/Artui/django-data-shape/compare/v0.18.1...v0.19.0
 [0.18.1]: https://github.com/Artui/django-data-shape/compare/v0.18.0...v0.18.1
 [0.18.0]: https://github.com/Artui/django-data-shape/compare/v0.17.1...v0.18.0
