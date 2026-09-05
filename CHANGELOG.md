@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.18.0] — 2026-09-05
+
+### Added
+
+- **`Projection(..., max_rows=N)`: a declared ceiling, checked before the insert.**
+
+  A projection is the one declaration with no `rows=`, deliberately -- its
+  cardinality comes from the join, which is what reproduces a correlation a
+  `FanOut` on the child would destroy. The consequence is that the largest table
+  in a database can be the one nobody declared a size for, and it grows as a
+  **product**: when both sides of the join fan out over the same parents, the
+  busy parents multiply, so raising either declared count by four grows the
+  result by sixteen. A consumer measured 2,413,223 rows against a declaration
+  whose largest number was 300,000.
+
+  The count is taken first and compared, so a declaration that has run away
+  costs a scan of the join rather than the time to write every row of it. It is
+  exact rather than estimated: the derived form counts the same join the insert
+  selects from, and a `sql=` projection is counted by wrapping the caller's own
+  select, because this package cannot know what that statement is one row per.
+
+  The refusal names the number it would have written and the tables the join is
+  over, because the surprise is never the ceiling -- a reader told only that a
+  limit was exceeded still has to work out which of the two counts moved.
+
+  **A declaration that does not ask is not charged for the answer**: with no
+  ceiling, no count is taken. There is no default ceiling and there will not be
+  one -- how many rows is too many is a judgement about size, which this package
+  does not make on a caller's behalf anywhere else either.
+
+
 ## [0.17.1] — 2026-09-05
 
 ### Fixed
@@ -1142,7 +1173,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   into `COPY FROM STDIN`, which psycopg 2 cannot do without materialising them
   first.
 
-[Unreleased]: https://github.com/Artui/django-data-shape/compare/v0.17.1...HEAD
+[Unreleased]: https://github.com/Artui/django-data-shape/compare/v0.18.0...HEAD
+[0.18.0]: https://github.com/Artui/django-data-shape/compare/v0.17.1...v0.18.0
 [0.17.1]: https://github.com/Artui/django-data-shape/compare/v0.17.0...v0.17.1
 [0.17.0]: https://github.com/Artui/django-data-shape/compare/v0.16.0...v0.17.0
 [0.16.0]: https://github.com/Artui/django-data-shape/compare/v0.15.0...v0.16.0

@@ -133,6 +133,44 @@ def build(
     return BuildResult(tables=tuple(results))
 
 
+def _require_within_ceiling(connection: Any, projection: Projection) -> None:
+    """Refuse a projection that has outgrown its declared ceiling, before it runs.
+
+    Before rather than after, which is the whole value: the count costs a
+    scan of the join and the insert costs writing every row of it, so a
+    declaration that has run away is stopped for the price of the cheaper half.
+    A ceiling that is not declared costs nothing at all -- no count is taken.
+
+    The message names the number it would have written and the tables the join
+    is over, because the surprise here is never the ceiling. A projection's size
+    is a *product*: when both sides fan out over the same parents, the busy
+    parents multiply, and raising either declared count by four grows the result
+    by sixteen. A reader who is told only that a limit was exceeded has to go
+    and work out which of the two counts moved.
+    """
+    ceiling = projection.max_rows
+    if ceiling is None:
+        return
+    statement, params = projection.count_statement(connection)
+    with connection.cursor() as cursor:
+        cursor.execute(statement, params)
+        row = cursor.fetchone()
+    would_insert = int(row[0])
+    if would_insert <= ceiling:
+        return
+    over = ", ".join(model.__name__ for model in projection.reads)
+    raise InvalidShape(
+        f"The projection into {projection.db_table} would insert {would_insert:,} rows, "
+        f"which is over its declared max_rows={ceiling:,}. Nothing was written. "
+        f"A projection has no row count of its own: its size is one row per pair along "
+        f"the join it copies, over {over or 'the tables its statement selects from'}. "
+        "That size is a product, so when both sides of the join fan out over the same "
+        "parents the busy parents multiply and raising either declared count by four "
+        "grows this by sixteen. Either the ceiling is too low, or one of those counts "
+        "moved further than it looked."
+    )
+
+
 def _project(connection: Any, projection: Projection, seed: int) -> int:
     """Fill a table from tables already built, with one ``INSERT ... SELECT``.
 
@@ -148,6 +186,7 @@ def _project(connection: Any, projection: Projection, seed: int) -> int:
     one of the few that cannot happen at declaration time, because what it
     depends on lives in the other tables rather than in the declaration.
     """
+    _require_within_ceiling(connection, projection)
     statement, params = projection.statement(connection, seed)
     with connection.cursor() as cursor:
         cursor.execute(statement, params)
