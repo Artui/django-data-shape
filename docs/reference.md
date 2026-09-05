@@ -76,6 +76,12 @@
 
 ::: django_data_shape.derivations.aligned.Aligned
 
+::: django_data_shape.derivations.product.Product
+
+::: django_data_shape.derivations.offset.Offset
+
+::: django_data_shape.derivations.copied.Copied
+
 ## Keys
 
 ::: django_data_shape.keys.key_strategy.KeyStrategy

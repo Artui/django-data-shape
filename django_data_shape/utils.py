@@ -5,7 +5,17 @@ from __future__ import annotations
 import hashlib
 from typing import Any
 
-from django.db.models import Field, Model
+from django.db.models import (
+    DateField,
+    DateTimeField,
+    DecimalField,
+    DurationField,
+    Field,
+    FloatField,
+    IntegerField,
+    Model,
+    TimeField,
+)
 from django.db.models.fields import NOT_PROVIDED
 
 from django_data_shape.invalid_shape import InvalidShape
@@ -191,3 +201,34 @@ def check_not_inherited(model: type[Model]) -> None:
         f"{parents} on its own for the columns that live in its table, and make the rows of "
         f"{model.__name__} another way."
     )
+
+
+def offsettable_kind(field: Field[Any, Any]) -> str | None:
+    """What kind of thing this column holds, for the purpose of adding to it.
+
+    ``After`` writes ``parent + offset`` into a column, so the parent's column
+    and the child's have to be the same kind of thing. They are not
+    interchangeable even when Python will add them: ``date + timedelta`` is a
+    ``date``, so a ``DateTimeField`` filled from a ``DateField`` parent gets
+    dates, ``COPY`` accepts them, and they land as naive midnights.
+
+    ``DateTimeField`` is checked before ``DateField`` because it *subclasses*
+    it -- the one ordering in this function that is load-bearing, and the reason
+    an ``isinstance`` chain is used rather than a mapping keyed on the class.
+
+    Returns ``None`` for a column this package has no opinion about, and the
+    caller then declines to judge rather than inventing a refusal: a custom
+    field that adds cleanly to an offset is a legitimate thing to declare, and
+    refusing it would cost a caller a working shape to buy nothing.
+    """
+    if isinstance(field, DateTimeField):
+        return "datetime"
+    if isinstance(field, DateField):
+        return "date"
+    if isinstance(field, TimeField):
+        return "time"
+    if isinstance(field, DurationField):
+        return "duration"
+    if isinstance(field, (IntegerField, FloatField, DecimalField)):
+        return "number"
+    return None

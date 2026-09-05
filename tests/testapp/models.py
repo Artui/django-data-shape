@@ -227,6 +227,28 @@ class Ticket(models.Model):
     total = models.DecimalField(max_digits=12, decimal_places=2)
 
 
+class Playhouse(models.Model):
+    """A parent whose date column is a ``DateField``, not a ``DateTimeField``.
+
+    Its own model for the same reason ``Account`` is: adding a ``DateField`` to
+    an existing parent would make it a required column on every declaration
+    that already names that model. The distinction it exists for is that
+    ``date + timedelta`` is a ``date``, so a child ``DateTimeField`` filled
+    across this edge gets dates rather than datetimes.
+    """
+
+    opened_on = models.DateField()
+    announced_at = models.DateTimeField()
+
+
+class Performance(models.Model):
+    """A child with one column of each temporal kind, so both directions test."""
+
+    playhouse = models.ForeignKey(Playhouse, on_delete=models.CASCADE, related_name="performances")
+    starts_at = models.DateTimeField()
+    doors_on = models.DateField()
+
+
 class ActiveVendorManager(models.Manager):
     """A default manager that hides rows, which is an ordinary thing to write."""
 

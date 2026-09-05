@@ -35,6 +35,9 @@ different places, and the place is the only thing that varies:
 | `After` | `parent` | `"relation.field"` on the parent row | an order opened after its account signed up |
 | `Given` | `parent` | `"relation.field"` on the parent row | severity skewed by the account's plan |
 | `Aligned` | `rank` | a shared rank the declaration names | the whales are the same whales |
+| `Product` | `row` | two other columns of this row | `total = quantity * unit_price` |
+| `Offset` | `row` | one other column of this row | a show starts 75 days after it goes on sale |
+| `Copied` | `parent` | `"relation.field"`, unchanged | a ticket's face value is its order's unit price |
 
 `Derived` is the mechanism and the other three are shorthand over it. The scope
 is a parameter, so a correlation nobody shipped a face for is still declarable:
@@ -42,6 +45,35 @@ is a parameter, so a correlation nobody shipped a face for is still declarable:
 ```python
 region = Derived("account.country", compute=region_of, scope="parent")
 ```
+
+## Why three of them say arithmetic as data
+
+`Product`, `Offset` and `Copied` compute nothing `Derived` could not. They exist
+because of what `Derived` costs, and the cost is not obvious from the
+declaration.
+
+`Derived` takes a **callable**, and a callable cannot be honestly digested: two
+lambdas share a name, and identical bytecode returns something else when a
+constant it reads is edited in another module. So a shape holding one is refused
+by [`template_database`](statistics.md) -- and that refusal is right, because a
+cache key that agreed while the data changed would serve a stale database to a
+suite that then passes.
+
+What was wrong is what it excluded. `total = quantity * unit_price` is about as
+ordinary as a column gets, and declaring it with a lambda took the whole shape
+out of the reuse that turns a forty-second build into a hundred-millisecond
+clone. `build()` kept working, so nothing said what it had cost.
+
+These three are pure data -- a product of two named columns, a fixed offset, a
+parent column unchanged -- so they implement `Canonical` and the shape hashes.
+Reach for `Derived` when the computation really is code; reach for these when it
+can be written down.
+
+`Offset` is also the same-row half of `After`, which is parent-scoped only. The
+difference beyond scope is that `After` spreads its gap across `within` using
+the column's own draw, because a child's distance from its parent is a real
+distribution; `Offset`'s gap is fixed, because a due date thirty days after an
+issue date is a term rather than a distribution.
 
 That is why they are one thing. Built separately, "custom creation logic" and
 "correlate across a relation" become two vocabularies overlapping on the

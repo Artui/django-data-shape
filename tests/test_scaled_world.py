@@ -161,8 +161,15 @@ def test_it_also_undoes_a_world_it_opened_the_transaction_for() -> None:
 # catalogue read per table -- a deliberate change to the loader, and exactly the
 # kind these constants exist to make visible rather than silent. What did not
 # move is the property being asserted: still fixed whatever the factor.
-_POSTGRES_STATEMENTS = 16
-_PORTABLE_STATEMENTS = 10
+#
+# It moved again when a scaled world began emptying the tables it declares, so a
+# session world can sit under one. On PostgreSQL that is a single TRUNCATE
+# whatever the shape and whatever the factor, so the Postgres constant gains one
+# and stays a constant. Off PostgreSQL it is one DELETE per declared table --
+# two here -- which is a property of the *declaration* and not of the factor, so
+# the curve below still has the loader's own shape and only its intercept moved.
+_POSTGRES_STATEMENTS = 17
+_PORTABLE_STATEMENTS = 12
 _ROWS_PER_INSERT = 1000
 
 
@@ -181,9 +188,9 @@ def _statements(shape: Shape, factor: int, alias: str) -> int:
 def test_building_a_world_costs_the_same_on_postgres_at_every_factor() -> None:
     # The half that makes a capture around the block merely wrong rather than
     # catastrophic: COPY is not a wrapped statement, so the overhead is the
-    # emptiness check, the statistics-target read, the parent key read, the
-    # sequence reset, the ANALYZE and the savepoints -- none of which depend on
-    # how many rows there are.
+    # TRUNCATE, the emptiness check, the statistics-target read, the parent key
+    # read, the sequence reset, the ANALYZE and the savepoints -- none of which
+    # depend on how many rows there are.
     shape = _graph(companies=10, sessions=_ROWS_PER_INSERT)
 
     assert _statements(shape, 1, DEFAULT_DB_ALIAS) == _POSTGRES_STATEMENTS

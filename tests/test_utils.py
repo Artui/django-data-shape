@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any, cast
 
 import pytest
+from django.db import models
 
 from django_data_shape import InvalidShape
 from django_data_shape.utils import (
@@ -13,6 +14,7 @@ from django_data_shape.utils import (
     draw,
     field_stream,
     has_db_default,
+    offsettable_kind,
     primary_key_field,
 )
 from tests.testapp.models import Company
@@ -134,3 +136,47 @@ def test_a_target_that_is_not_a_whole_number_is_refused(target: object) -> None:
     # for a statistics target of one.
     with pytest.raises(InvalidShape, match="not a whole number"):
         check_statistics_target("Order.status", cast("int", target))
+
+
+# ---------------------------------------------------------------------------
+# offsettable_kind: what a column holds, for the purpose of adding to it.
+# Tested directly as well as through `After`, because the ordering inside it
+# is load-bearing and invisible from outside -- `DateTimeField` subclasses
+# `DateField`, so a chain asking the questions the other way round would call
+# every timestamp a date and refuse nothing.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("field", "expected"),
+    [
+        (models.DateTimeField(), "datetime"),
+        (models.DateField(), "date"),
+        (models.TimeField(), "time"),
+        (models.DurationField(), "duration"),
+        (models.IntegerField(), "number"),
+        (models.BigIntegerField(), "number"),
+        (models.FloatField(), "number"),
+        (models.DecimalField(max_digits=5, decimal_places=2), "number"),
+    ],
+)
+def test_each_kind_is_named(field: models.Field, expected: str) -> None:
+    assert offsettable_kind(field) == expected
+
+
+def test_a_datetime_is_not_read_as_a_date() -> None:
+    """The one ordering that matters: DateTimeField *is* a DateField."""
+    assert isinstance(models.DateTimeField(), models.DateField)
+
+    assert offsettable_kind(models.DateTimeField()) != offsettable_kind(models.DateField())
+
+
+@pytest.mark.parametrize(
+    "field",
+    [models.CharField(max_length=1), models.JSONField(), models.BooleanField()],
+)
+def test_a_column_with_no_opinion_declines_to_judge(field: models.Field) -> None:
+    """None rather than a guess: the caller then refuses nothing, which is the
+    safe direction. A custom field that adds cleanly to an offset is a
+    legitimate declaration, and refusing it would cost a working shape."""
+    assert offsettable_kind(field) is None
