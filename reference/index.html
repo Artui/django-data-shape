@@ -722,6 +722,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#django_data_shape.paired.Paired.parents" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        parents
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#django_data_shape.paired.Paired.canonical" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1647,6 +1658,45 @@
       
     </span>
   </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#django_data_shape.sql_value.SqlValue" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SqlValue
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="SqlValue">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#django_data_shape.sql_value.SqlValue.render" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        render
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#django_data_shape.sql_value.SqlValue.canonical" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        canonical
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -2240,6 +2290,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#django_data_shape.paired.Paired.parents" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        parents
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#django_data_shape.paired.Paired.canonical" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3165,6 +3226,45 @@
       
     </span>
   </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#django_data_shape.sql_value.SqlValue" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SqlValue
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="SqlValue">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#django_data_shape.sql_value.SqlValue.render" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        render
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#django_data_shape.sql_value.SqlValue.canonical" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        canonical
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -4159,6 +4259,48 @@ derived shape nobody quotes is a shape nobody can check.</p>
 
 
 
+<div class="doc doc-object doc-attribute">
+
+
+
+<h3 id="django_data_shape.paired.Paired.parents" class="doc doc-heading">
+            <span class="doc doc-object-name doc-attribute-name">parents</span>
+
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-property"><code>property</code></small>
+  </span>
+
+<a href="#django_data_shape.paired.Paired.parents" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="n">parents</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">object</span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span>
+</span></code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>The partner keys this edge may use, or <code>None</code> for all of them.</p>
+<p>The same narrowing
+:class:<code>~django_data_shape.fan_out.FanOut</code> takes, and it is here for the
+one thing a fan-out's version cannot do: <strong>two through tables over the
+same partner model cannot otherwise be made disjoint.</strong></p>
+<p>Every mechanism in this package computes a column from the row index
+alone, so two <code>Paired</code> declarations over one partner table choose
+independently and overlap by construction. Any rule of the form <em>these
+two relationships must not overlap</em> is then violated however the shape
+is written -- a reviewer who is also an author, an approver who is also
+the requester, an auditor auditing their own team. That family is every
+separation-of-duties constraint there is, and it was inexpressible.</p>
+<p>Narrowing the two sides to disjoint subsets is what makes it
+expressible, and it is also how the domains themselves work: a venue
+keeps a reviewer board, an organisation separates approvers from
+requesters. The declaration says the thing the business already says.</p>
+<p>Keys are read through the database as a predicate rather than filtered
+afterwards, and a named key matching no row is refused rather than
+silently dropped -- both for the reasons the fan-out's version gives.</p>
+
+    </div>
+
+</div>
+
 
 
 
@@ -4175,7 +4317,10 @@ derived shape nobody quotes is a shape nobody can check.</p>
 
     <div class="doc doc-contents ">
 
-        <p>The fan-out it pairs with and the weights over partners. See <code>Canonical</code>.</p>
+        <p>The fan-out it pairs with, the weights, and any narrowing. See <code>Canonical</code>.</p>
+<p><code>parents</code> is part of the digest because it changes which rows exist:
+two declarations differing only in their subset build different
+databases, and a cache key that agreed would serve one for the other.</p>
 
 
     </div>
@@ -7758,6 +7903,150 @@ this package exists to prevent.</p>
 
 
 
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h2 id="django_data_shape.sql_value.SqlValue" class="doc doc-heading">
+            <span class="doc doc-object-name doc-class-name">SqlValue</span>
+
+
+<a href="#django_data_shape.sql_value.SqlValue" class="headerlink" title="Permanent link">&para;</a></h2>
+
+
+    <div class="doc doc-contents first">
+
+
+
+        <p>One projected column's value, as SQL over the join the projection derives.</p>
+<p>A projection copies a column from the source it names, or takes the model's
+own default, and those are the only two answers it has. A projected table's
+<strong>measure</strong> column is neither: the score on a review, the amount on a
+generated line, the reading on a sample. It belongs to the projected row and
+to nothing the source carries.</p>
+<p>Leaving it to the model default is legal and is the wrong answer <em>for this
+package specifically</em>: one value across every projected row is
+<code>n_distinct = 1</code>, which is the exact shape a planner cannot use. A library
+whose whole purpose is planner realism would then be building a table it had
+made unplannable, and the declaration would look correct.</p>
+<p><code>sql=</code> already answers this and answers it expensively: it replaces the
+whole <code>SELECT</code>, so the join stops being derived from the model graph and
+can drift from it afterwards, the copied columns are written out by hand,
+and the key strategy has to be spelled in SQL. <code>values=</code> gives up none of
+that and writes one expression for the one column that needs one::</p>
+<div class="language-text highlight"><pre><span></span><code>Projection(
+    ReviewScore,
+    per=Review,
+    copying=Criterion,
+    values={"score": SqlValue("({per}.id * 31 + {source}.id * 17) % 5 + 1")},
+)
+</code></pre></div>
+<p><code>{per}</code> and <code>{source}</code> are substituted with the aliases the derived
+statement uses, quoted for the connection. They are placeholders rather than
+the aliases themselves because the aliases are this package's private
+business: a declaration that spelled them would break the day they changed,
+and a reader could not tell which side was which.</p>
+<p><strong>It is SQL rather than a distribution, and that is a decision worth
+stating.</strong> A :class:<code>~django_data_shape.distributions.distribution.Distribution</code>
+computes from <code>draw(stream, row)</code>, which is SplitMix64 -- expressible in
+PostgreSQL only through <code>numeric</code> modular arithmetic and casts across the
+sign boundary, where a single mistake gives one declaration two meanings
+depending on which statement filled the table. That is the divergence
+:class:<code>~django_data_shape.keys.sql_keys.SqlKeys</code> exists to refuse, and it
+is not worth buying convenience with. An expression the caller wrote is
+honest about being the caller's.</p>
+<p><strong>It is the one part of a shape that is not portable, and it cannot be
+made portable.</strong> Everything else here is a declaration this package
+compiles per backend; an expression is SQL the database evaluates as
+written. <code>mod(x, 5)</code> returns an integer on PostgreSQL and a REAL on
+SQLite, so one declaration writes <code>5</code> into one database and <code>5.0</code> into
+the other -- which is why the example above uses <code>%</code>, integer on both.
+Nothing here can detect that: the expression is opaque until the database
+reads it. Write it for the backend the shape is built on, and cast when it
+has to be both.</p>
+<p><code>%</code> is passed through as the operator, which takes an escape this package
+applies rather than asking for. The statement is executed with bound
+parameters, so a literal <code>%</code> in it is an incomplete placeholder to both
+psycopg and Django's SQLite wrapper, and the declaration fails at execution
+with a paramstyle error naming nothing in the shape. The paramstyle is this
+package's private business for the same reason the join's aliases are: a
+declaration that spelled it would be spelling how the statement happens to
+be run.</p>
+<p>The expression is inert data, so a shape holding one still digests.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="django_data_shape.sql_value.SqlValue.render" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">render</span>
+
+
+<a href="#django_data_shape.sql_value.SqlValue.render" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">render</span><span class="p">(</span><span class="n">per_alias</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">source_alias</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span>
+</span></code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>The expression with the join's aliases substituted and <code>%</code> escaped.</p>
+<p>The escape is last so it also covers a <code>%</code> inside a quoted alias,
+and it is unconditional because the statement always carries a
+parameter sequence -- an empty one is still a sequence, and both
+drivers interpolate on anything that is not <code>None</code>.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="django_data_shape.sql_value.SqlValue.canonical" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">canonical</span>
+
+
+<a href="#django_data_shape.sql_value.SqlValue.canonical" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">canonical</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">object</span>
+</span></code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>The expression itself, which is what decides the rows. See <code>Canonical</code>.</p>
+
+
+    </div>
+
+</div>
 
 
 

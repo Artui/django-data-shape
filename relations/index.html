@@ -496,6 +496,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#parents-and-why-two-edge-tables-need-it" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        parents= — and why two edge tables need it
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#what-binds-is-the-busiest-group-not-the-product" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -924,6 +935,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#parents-and-why-two-edge-tables-need-it" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        parents= — and why two edge tables need it
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#what-binds-is-the-busiest-group-not-the-product" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1208,6 +1230,48 @@ that many <strong>distinct</strong> partners, so a duplicate pair is impossible 
 construction rather than removed afterwards. The edge count is therefore exactly
 <code>rows</code>: nothing is deduplicated, and the build never reports an achieved count
 against a requested one.</p>
+<h3 id="parents-and-why-two-edge-tables-need-it"><code>parents=</code> — and why two edge tables need it<a class="headerlink" href="#parents-and-why-two-edge-tables-need-it" title="Permanent link">&para;</a></h3>
+<p>Two through tables over the same partner model choose independently, because
+every mechanism here computes a column from the row index and nothing else. So
+they overlap by construction, and any rule of the form <em>these two relationships
+must not overlap</em> is unsatisfiable however the shape is written:</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="c1"># A reviewer must not be an author of what they review.</span>
+</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="n">Table</span><span class="p">(</span><span class="n">Authorship</span><span class="p">,</span> <span class="n">rows</span><span class="o">=</span><span class="mi">900</span><span class="p">,</span> <span class="n">submission</span><span class="o">=</span><span class="n">FanOut</span><span class="p">(</span><span class="n">Zipf</span><span class="p">()),</span> <span class="n">person</span><span class="o">=</span><span class="n">Paired</span><span class="p">(</span><span class="s2">"submission"</span><span class="p">,</span> <span class="n">Zipf</span><span class="p">()))</span>
+</span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="n">Table</span><span class="p">(</span><span class="n">Assignment</span><span class="p">,</span> <span class="n">rows</span><span class="o">=</span><span class="mi">1100</span><span class="p">,</span> <span class="n">submission</span><span class="o">=</span><span class="n">FanOut</span><span class="p">(</span><span class="n">Zipf</span><span class="p">()),</span> <span class="n">reviewer</span><span class="o">=</span><span class="n">Paired</span><span class="p">(</span><span class="s2">"submission"</span><span class="p">,</span> <span class="n">Zipf</span><span class="p">()))</span>
+</span></code></pre></div>
+<p>Declared as an <a href="../invariants/">invariant</a>, that rule correctly fires and rolls
+the build back — with nothing you can change to satisfy it. The family is
+larger than it looks: reviewer-is-not-author, approver-is-not-requester,
+auditor-is-not-audited. It is every separation-of-duties constraint there is.</p>
+<p><code>parents=</code> narrows an edge to a subset of the partner table, so the two sides
+can be made disjoint:</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="n">board</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">Person</span><span class="o">.</span><span class="n">objects</span><span class="o">.</span><span class="n">filter</span><span class="p">(</span><span class="n">is_reviewer</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span><span class="o">.</span><span class="n">values_list</span><span class="p">(</span><span class="s2">"id"</span><span class="p">,</span> <span class="n">flat</span><span class="o">=</span><span class="kc">True</span><span class="p">))</span>
+</span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="n">authors</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">Person</span><span class="o">.</span><span class="n">objects</span><span class="o">.</span><span class="n">exclude</span><span class="p">(</span><span class="n">is_reviewer</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span><span class="o">.</span><span class="n">values_list</span><span class="p">(</span><span class="s2">"id"</span><span class="p">,</span> <span class="n">flat</span><span class="o">=</span><span class="kc">True</span><span class="p">))</span>
+</span><span id="__span-9-3"><a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>
+</span><span id="__span-9-4"><a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="n">Table</span><span class="p">(</span>
+</span><span id="__span-9-5"><a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>    <span class="n">Authorship</span><span class="p">,</span>
+</span><span id="__span-9-6"><a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a>    <span class="n">rows</span><span class="o">=</span><span class="mi">900</span><span class="p">,</span>
+</span><span id="__span-9-7"><a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a>    <span class="n">submission</span><span class="o">=</span><span class="n">FanOut</span><span class="p">(</span><span class="n">Zipf</span><span class="p">()),</span>
+</span><span id="__span-9-8"><a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a>    <span class="n">person</span><span class="o">=</span><span class="n">Paired</span><span class="p">(</span><span class="s2">"submission"</span><span class="p">,</span> <span class="n">Zipf</span><span class="p">(),</span> <span class="n">parents</span><span class="o">=</span><span class="n">authors</span><span class="p">),</span>
+</span><span id="__span-9-9"><a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a><span class="p">)</span>
+</span><span id="__span-9-10"><a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a><span class="n">Table</span><span class="p">(</span>
+</span><span id="__span-9-11"><a id="__codelineno-9-11" name="__codelineno-9-11" href="#__codelineno-9-11"></a>    <span class="n">Assignment</span><span class="p">,</span>
+</span><span id="__span-9-12"><a id="__codelineno-9-12" name="__codelineno-9-12" href="#__codelineno-9-12"></a>    <span class="n">rows</span><span class="o">=</span><span class="mi">1100</span><span class="p">,</span>
+</span><span id="__span-9-13"><a id="__codelineno-9-13" name="__codelineno-9-13" href="#__codelineno-9-13"></a>    <span class="n">submission</span><span class="o">=</span><span class="n">FanOut</span><span class="p">(</span><span class="n">Zipf</span><span class="p">()),</span>
+</span><span id="__span-9-14"><a id="__codelineno-9-14" name="__codelineno-9-14" href="#__codelineno-9-14"></a>    <span class="n">reviewer</span><span class="o">=</span><span class="n">Paired</span><span class="p">(</span><span class="s2">"submission"</span><span class="p">,</span> <span class="n">Zipf</span><span class="p">(),</span> <span class="n">parents</span><span class="o">=</span><span class="n">board</span><span class="p">),</span>
+</span><span id="__span-9-15"><a id="__codelineno-9-15" name="__codelineno-9-15" href="#__codelineno-9-15"></a><span class="p">)</span>
+</span></code></pre></div>
+<p>That is also how the domains themselves work: a venue keeps a reviewer board, an
+organisation separates approvers from requesters. The declaration says what the
+business already says.</p>
+<p>It behaves exactly as <a href="#narrowing-which-parents"><code>FanOut(parents=)</code></a> does. Keys are
+read through the database as a predicate rather than filtered afterwards, and a
+named key matching no row is <strong>refused</strong> rather than quietly dropped — the
+narrowing runs in the database, so a key that matches nothing is not an error
+there: the edges that would have used it go to the other named partners, and
+the world is built and quietly not the declared one.</p>
+<p>Narrowing can make a declaration impossible that was fine over the whole
+table, because what binds is the busiest group — see below.</p>
 <h3 id="what-binds-is-the-busiest-group-not-the-product">What binds is the busiest group, not the product<a class="headerlink" href="#what-binds-is-the-busiest-group-not-the-product" title="Permanent link">&para;</a></h3>
 <p>Every row of one group needs a different partner, so the constraint is
 <strong><code>largest group ≤ partners</code></strong> — not <code>rows ≤ companies × people</code>, which is far
