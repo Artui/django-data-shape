@@ -1413,6 +1413,39 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#django_data_shape.derivations.product.Product" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Product
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#django_data_shape.derivations.offset.Offset" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Offset
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#django_data_shape.derivations.copied.Copied" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Copied
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#keys" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2861,6 +2894,39 @@
         
       </ul>
     </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#django_data_shape.derivations.product.Product" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Product
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#django_data_shape.derivations.offset.Offset" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Offset
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#django_data_shape.derivations.copied.Copied" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Copied
+      
+    </span>
+  </a>
   
 </li>
       
@@ -6782,6 +6848,194 @@ guessing from the type would refuse a caller's own perfectly good one.</p>
     </div>
 
 </div>
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h2 id="django_data_shape.derivations.product.Product" class="doc doc-heading">
+            <span class="doc doc-object-name doc-class-name">Product</span>
+
+
+<a href="#django_data_shape.derivations.product.Product" class="headerlink" title="Permanent link">&para;</a></h2>
+
+
+    <div class="doc doc-contents first">
+
+
+
+        <p><code>left * right</code>, read from two other columns of this row.</p>
+<p>One of three derivations that exist because
+:class:<code>~django_data_shape.derivations.derived.Derived</code> -- the only shipped
+face that can read another column of the same row -- takes a callable, and
+a callable cannot be digested. A shape holding one is refused by
+:func:<code>~django_data_shape.template_database.template_database</code>, so a column
+as ordinary as <code>total = quantity * unit_price</code> excluded the whole
+declaration from the reuse that turns a forty-second build into a
+hundred-millisecond clone.</p>
+<p>That refusal is right and stays: two lambdas share a name, and identical
+bytecode returns something else when a constant it reads is edited in
+another module. What was wrong is what it excluded. These three say the
+commonest arithmetic as <strong>data</strong>, so they implement
+:class:<code>~django_data_shape.canonical.Canonical</code> and the shape hashes::</p>
+<div class="language-text highlight"><pre><span></span><code>Table(
+    Order,
+    rows=2_000_000,
+    quantity=Aligned("basket", Uniform(1, 8, places=0)),
+    unit_price=Aligned("basket", Uniform(1500, 25000, places=0)),
+    total=Product("quantity", "unit_price"),
+)
+</code></pre></div>
+<p><code>Derived</code> is unchanged and remains the answer for computation that really
+is code. The line between them is whether the declaration can be written
+down: a product of two named columns can, a lambda cannot.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h2 id="django_data_shape.derivations.offset.Offset" class="doc doc-heading">
+            <span class="doc doc-object-name doc-class-name">Offset</span>
+
+
+<a href="#django_data_shape.derivations.offset.Offset" class="headerlink" title="Permanent link">&para;</a></h2>
+
+
+    <div class="doc doc-contents first">
+
+
+
+        <p><code>source + by</code>, where <code>source</code> is another column of this row.</p>
+<p>The same-row half of :class:<code>~django_data_shape.derivations.after.After</code>,
+which is parent-scoped only. A show goes on sale and then happens; an
+invoice is issued and then falls due. Both columns are on the same row, and
+until this existed the only way to say so was a lambda -- which cost the
+whole shape its template-database cache. See
+:class:<code>~django_data_shape.derivations.product.Product</code> for why that
+mattered.</p>
+<p>The gap is <strong>fixed</strong>, which is the difference from <code>After</code>: that one
+spreads a gap across <code>within</code> using the column's own draw, because a
+child's distance from its parent is a real distribution. A due date thirty
+days after an issue date is not a distribution, it is a term. Where the
+spread is wanted on the same row, <code>Derived</code> still takes a callable.</p>
+<p><code>by</code> is in the column's own units -- a <code>timedelta</code> for a datetime
+column, a number for a numeric one -- and anything supporting
+<code>source + by</code> works.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h2 id="django_data_shape.derivations.copied.Copied" class="doc doc-heading">
+            <span class="doc doc-object-name doc-class-name">Copied</span>
+
+
+<a href="#django_data_shape.derivations.copied.Copied" class="headerlink" title="Permanent link">&para;</a></h2>
+
+
+    <div class="doc doc-contents first">
+
+
+
+        <p><code>relation.field</code>, unchanged.</p>
+<p>A ticket's face value is the unit price of the order it belongs to; a line's
+currency is its invoice's. There is no arithmetic at all, which is what made
+needing a lambda for it -- and losing the template-database cache with it --
+annoying rather than merely unfortunate. See
+:class:<code>~django_data_shape.derivations.product.Product</code>.</p>
+<p>Worth saying what this is <em>not</em>, because the two are easy to confuse. A
+denormalised copy is a column with its own statistics: the planner sees a
+distribution over the child table rather than a join, which is the whole
+reason schemas carry such columns and the reason a shaped database has to
+reproduce them. Reading the parent's column through the join is a different
+query with a different plan.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
 
 
 

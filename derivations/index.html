@@ -389,6 +389,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#why-three-of-them-say-arithmetic-as-data" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why three of them say arithmetic as data
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#a-derivation-is-not-a-distribution" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -684,6 +695,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#why-three-of-them-say-arithmetic-as-data" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why three of them say arithmetic as data
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#a-derivation-is-not-a-distribution" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -855,12 +877,53 @@ different places, and the place is the only thing that varies:</p>
 <td>a shared rank the declaration names</td>
 <td>the whales are the same whales</td>
 </tr>
+<tr>
+<td><code>Product</code></td>
+<td><code>row</code></td>
+<td>two other columns of this row</td>
+<td><code>total = quantity * unit_price</code></td>
+</tr>
+<tr>
+<td><code>Offset</code></td>
+<td><code>row</code></td>
+<td>one other column of this row</td>
+<td>a show starts 75 days after it goes on sale</td>
+</tr>
+<tr>
+<td><code>Copied</code></td>
+<td><code>parent</code></td>
+<td><code>"relation.field"</code>, unchanged</td>
+<td>a ticket's face value is its order's unit price</td>
+</tr>
 </tbody>
 </table>
 <p><code>Derived</code> is the mechanism and the other three are shorthand over it. The scope
 is a parameter, so a correlation nobody shipped a face for is still declarable:</p>
 <div class="language-python highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="n">region</span> <span class="o">=</span> <span class="n">Derived</span><span class="p">(</span><span class="s2">"account.country"</span><span class="p">,</span> <span class="n">compute</span><span class="o">=</span><span class="n">region_of</span><span class="p">,</span> <span class="n">scope</span><span class="o">=</span><span class="s2">"parent"</span><span class="p">)</span>
 </span></code></pre></div>
+<h2 id="why-three-of-them-say-arithmetic-as-data">Why three of them say arithmetic as data<a class="headerlink" href="#why-three-of-them-say-arithmetic-as-data" title="Permanent link">&para;</a></h2>
+<p><code>Product</code>, <code>Offset</code> and <code>Copied</code> compute nothing <code>Derived</code> could not. They exist
+because of what <code>Derived</code> costs, and the cost is not obvious from the
+declaration.</p>
+<p><code>Derived</code> takes a <strong>callable</strong>, and a callable cannot be honestly digested: two
+lambdas share a name, and identical bytecode returns something else when a
+constant it reads is edited in another module. So a shape holding one is refused
+by <a href="../statistics/"><code>template_database</code></a> -- and that refusal is right, because a
+cache key that agreed while the data changed would serve a stale database to a
+suite that then passes.</p>
+<p>What was wrong is what it excluded. <code>total = quantity * unit_price</code> is about as
+ordinary as a column gets, and declaring it with a lambda took the whole shape
+out of the reuse that turns a forty-second build into a hundred-millisecond
+clone. <code>build()</code> kept working, so nothing said what it had cost.</p>
+<p>These three are pure data -- a product of two named columns, a fixed offset, a
+parent column unchanged -- so they implement <code>Canonical</code> and the shape hashes.
+Reach for <code>Derived</code> when the computation really is code; reach for these when it
+can be written down.</p>
+<p><code>Offset</code> is also the same-row half of <code>After</code>, which is parent-scoped only. The
+difference beyond scope is that <code>After</code> spreads its gap across <code>within</code> using
+the column's own draw, because a child's distance from its parent is a real
+distribution; <code>Offset</code>'s gap is fixed, because a due date thirty days after an
+issue date is a term rather than a distribution.</p>
 <p>That is why they are one thing. Built separately, "custom creation logic" and
 "correlate across a relation" become two vocabularies overlapping on the
 interesting half -- and the half a consumer asks for first is the within-row one,
