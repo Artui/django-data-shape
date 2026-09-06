@@ -217,6 +217,14 @@ on which statement filled the table.
 A UUID-keyed table can still be projected — with `sql=`, producing the keys in
 the statement.
 
+That is about the **projected table's own** primary key, and only that. The
+tables named by `per=` and `copying=` may be keyed however they like: a
+projection reads them, and reading a UUID key needs nothing special. What does
+need care is an expression *over* one — see
+[the note on UUID keys](#an-expression-over-a-uuid-key-needs-a-hash) below,
+because integer arithmetic on a UUID is a type error rather than a refusal this
+package can make.
+
 ## `values=` — a column of the projected table's own
 
 A projection copies a column from the source it names, or takes the model's own
@@ -248,6 +256,94 @@ could not tell which side was which. A literal `%` is escaped for the same
 reason -- the statement is executed with bound parameters, so an unescaped one
 is an incomplete placeholder to psycopg and to Django's SQLite wrapper alike,
 and the paramstyle is no more the declaration's business than the aliases are.
+
+### An expression over a UUID key needs a hash
+
+The example above multiplies `id` by an integer, which works on Django's default
+`BigAutoField` and is a **type error** on a schema whose models carry
+`id = UUIDField(primary_key=True)` — a shared abstract base doing exactly that is
+an ordinary Django layout, not an unusual one. PostgreSQL has no `uuid * integer`
+operator, and because an expression is opaque to this package the refusal comes
+from the driver at build time, naming neither the shape nor the column.
+
+Per-row variation over a UUID has to come from a hash:
+
+```python
+Projection(
+    ReviewScore,
+    per=Review,
+    copying=Criterion,
+    values={
+        "score": SqlValue("abs(hashtext({per}.id::text || {source}.id::text)::bigint) % 5 + 1")
+    },
+)
+```
+
+Every part of that is load-bearing, and two of them fail rarely enough to reach
+production:
+
+- `::bigint` goes **before** `abs`, because `hashtext` returns `int4` and
+  `abs(-2147483648)` is `integer out of range`. That is one value in four
+  billion, which is to say it is a crash your suite will not find and a
+  consumer will.
+- `abs` is there because PostgreSQL's `%` keeps the sign of the **dividend**, so
+  `hashtext(...) % 5` runs from `-4` to `4`. A measure column would hold
+  negatives and every plan over it would still look fine.
+
+### `{values.x}` — one column named from another
+
+A projected table's measure columns are usually related to each other: a
+requested amount and an approved one, a quantity and a total, an amount and the
+rate derived from it. An expression can name another entry in the same `values=`
+dict, and the relationship is then stated where a reader will look for it:
+
+```python
+values = {
+    "requested_amount": SqlValue("abs(hashtext({per}.id::text)::bigint) % 500 + 100"),
+    "approved_amount": SqlValue("{values.requested_amount} * 8 / 10"),
+}
+```
+
+Without it, both columns have to be restated from whatever they were both
+computed from, with coefficients picked so that `approved <= requested` happens
+to hold — an invariant a reader can only find by doing the arithmetic, and one
+that nothing rechecks when either expression is edited.
+
+The name is dotted rather than a bare `{requested_amount}` because `{per}` and
+`{source}` already occupy that space and a model is entitled to a column called
+`per`. Only `values=` entries are referenceable: a copied column is already
+reachable as `{source}.name`, and the primary key is the `row_number()` window
+itself and is reachable nowhere at all. A name that resolves to neither, and a
+cycle, are refused at declaration time and name the path.
+
+#### It is substitution, not sharing
+
+`{values.x}` names *the declaration*, and what it splices in is that expression
+written out again — parenthesised, so `1 + 1` referenced from `x * 3` is 6 and
+not 4. The database evaluates the referenced expression once per reference.
+
+For a deterministic expression that costs arithmetic nobody measures, and every
+expression here has to be deterministic anyway: `template_database` reuses a
+database keyed on the declaration and nothing else, so a volatile expression is
+already a stale-data bug waiting for the second run. What a reference adds is
+that the two copies are two different values *within one build*, so the
+relationship the declaration appears to state is not the one the rows hold.
+
+State the relationship in `values=` and net it with an
+[`Invariant`](invariants.md):
+
+```python
+Invariant(
+    "an approved amount never exceeds the amount requested",
+    Shipment,
+    violated_by=Q(approved_amount__gt=F("requested_amount")),
+)
+```
+
+That pairing is the answer to "nothing rechecks it": the declaration says what
+the relationship is, and the invariant fails the build if it ever stops being
+true — whether because an expression was edited, or because one of them was not
+deterministic after all.
 
 ### The expression is the one part of a shape that is not portable
 

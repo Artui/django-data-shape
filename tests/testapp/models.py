@@ -976,3 +976,56 @@ class RunStage(models.Model):
     title = models.CharField(max_length=50)
     created_by = models.ForeignKey(Auditor, null=True, on_delete=models.SET_NULL, related_name="+")
     updated_by = models.ForeignKey(Auditor, null=True, on_delete=models.SET_NULL, related_name="+")
+
+
+class Region(models.Model):
+    """A UUID-keyed root, which is what a shared abstract base usually produces.
+
+    A project that gives every model ``id = UUIDField(primary_key=True)`` from
+    one base class is an ordinary Django layout, not an exotic one, and the four
+    models below exist so the documented ``values=`` idiom is executed against
+    it rather than asserted to work on it.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    name = models.CharField(max_length=50)
+
+
+class Depot(models.Model):
+    """The ``per`` side of a projection over UUID keys."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    region = models.ForeignKey(Region, on_delete=models.CASCADE, related_name="depots")
+    name = models.CharField(max_length=50)
+
+
+class Route(models.Model):
+    """The ``copying`` side, joinable to ``Depot`` through ``Region``."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    region = models.ForeignKey(Region, on_delete=models.CASCADE, related_name="routes")
+    label = models.CharField(max_length=50)
+
+
+class Shipment(models.Model):
+    """A projected table whose two measure columns are related to each other.
+
+    Integer-keyed on purpose while its sources are not: a projection owns its
+    own keys and ``UuidKeys`` cannot say itself in SQL, so this is the shape a
+    UUID-keyed project actually reaches -- the projected table's key is this
+    package's, and the UUIDs are on the tables the expression reads.
+
+    ``requested_amount`` and ``approved_amount`` are the pair the reference
+    syntax exists for: the second is a fraction of the first, and that is a
+    relationship the declaration should be able to state rather than encode in
+    two sets of coefficients that agree by arithmetic nobody rechecks.
+    ``settled_amount`` is a third so that a reference can be chained, which is
+    the case a single pair cannot reach.
+    """
+
+    depot = models.ForeignKey(Depot, on_delete=models.CASCADE, related_name="shipments")
+    source = models.ForeignKey(Route, null=True, on_delete=models.SET_NULL, related_name="+")
+    label = models.CharField(max_length=50)
+    requested_amount = models.IntegerField()
+    approved_amount = models.IntegerField()
+    settled_amount = models.IntegerField()

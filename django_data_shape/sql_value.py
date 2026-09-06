@@ -42,6 +42,60 @@ class SqlValue:
     business: a declaration that spelled them would break the day they changed,
     and a reader could not tell which side was which.
 
+    **On a UUID-keyed schema the example above is a type error**, and it is worth
+    saying so here rather than leaving it to the build. A project that gives
+    every model ``id = UUIDField(primary_key=True)`` from one abstract base is an
+    ordinary Django layout, and ``uuid * integer`` has no operator in PostgreSQL:
+    the expression is opaque to this package, so the refusal comes from the
+    driver, at build time, naming neither the shape nor the column. The variation
+    has to come from a hash instead::
+
+        values={
+            "score": SqlValue(
+                "abs(hashtext({per}.id::text || {source}.id::text)::bigint) % 5 + 1"
+            )
+        }
+
+    Each part of that earns its place. ``::bigint`` goes **before** ``abs``
+    because ``hashtext`` returns ``int4`` and ``abs(-2147483648)`` is ``integer
+    out of range``; ``abs`` is there at all because PostgreSQL's ``%`` keeps the
+    sign of the dividend, so ``hashtext(...) % 5`` spans negatives and a measure
+    column would quietly hold them.
+
+    **An expression may name another column in the same ``values=``**, as
+    ``{values.<name>}``. A projected table's measure columns are usually related
+    to each other -- a requested amount and an approved one, a quantity and a
+    total -- and without this the relationship has to be restated from whatever
+    both were computed from, with coefficients chosen so that it happens to
+    hold::
+
+        values={
+            "requested_amount": SqlValue(
+                "abs(hashtext({per}.id::text)::bigint) % 500 + 100"
+            ),
+            "approved_amount": SqlValue("{values.requested_amount} * 8 / 10"),
+        }
+
+    The name is dotted rather than a bare ``{requested_amount}`` because
+    ``{per}`` and ``{source}`` already occupy that space and a model is entitled
+    to a column called ``per``. Only ``values=`` entries are referenceable: a
+    copied column is already reachable as ``{source}.name``, and the primary key
+    is the ``row_number()`` window itself and is reachable nowhere. A name that
+    resolves to neither, and a cycle, are refused at declaration time.
+
+    **It is substitution, not sharing**, and that spelling is deliberate:
+    ``{values.x}`` names *the declaration*, and what it splices in is that
+    expression written out again. The database evaluates it once per reference.
+    For a deterministic expression -- which every expression here has to be
+    anyway, since
+    :func:`~django_data_shape.template_database.template_database` reuses a
+    database keyed on the declaration and nothing else -- that costs arithmetic
+    nobody measures. For a volatile one the two copies are two different values,
+    and the relationship the declaration appears to state is not the one the rows
+    hold. State it in the declaration and net it with an
+    :class:`~django_data_shape.invariant.Invariant`, which is what catches that
+    case and every other way the rule can stop being true.
+
     **It is SQL rather than a distribution, and that is a decision worth
     stating.** A :class:`~django_data_shape.distributions.distribution.Distribution`
     computes from ``draw(stream, row)``, which is SplitMix64 -- expressible in

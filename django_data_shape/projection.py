@@ -36,6 +36,14 @@ _SOURCE = "src"
 # set of legal placeholders is short and closed and the set of mistakes is not.
 _PLACEHOLDER = re.compile(r"%(?:%|[sbt]|\([^)]*\)[sbt])")
 
+# One `values=` entry naming another: `{values.approved_amount}`. Dotted rather
+# than a bare `{approved_amount}` because `{per}` and `{source}` already occupy
+# that space, and a model is perfectly entitled to a column called `per`. The
+# name is captured loosely -- anything but a brace -- so that a misspelling and
+# a nonsense path both arrive at the same refusal, which can list what was
+# available instead of arguing about the shape of the name.
+_REFERENCE = re.compile(r"\{values\.([^{}]*)\}")
+
 
 class Projection:
     """One row per pair, copied along a join, by ``INSERT ... SELECT``.
@@ -458,7 +466,7 @@ class Projection:
         source_pk = _column(primary_key_field(source))
 
         copied: list[tuple[str, str, str]] = []
-        expressions: list[tuple[str, SqlValue]] = []
+        expressions: list[tuple[str, str]] = []
         literals: list[tuple[str, object]] = []
         callables: list[str] = []
         missing: list[str] = []
@@ -474,7 +482,10 @@ class Projection:
             elif field.is_relation and field.related_model is source:
                 copied.append((_column(field), _SOURCE, source_pk))
             elif field.name in self._values:
-                expressions.append((_column(field), self._values[field.name]))
+                # The field name rather than the expression: resolving a reference
+                # needs the key values= is written under, and for a relation that is
+                # `event` where the column is `event_id`.
+                expressions.append((_column(field), field.name))
             elif field.name in available:
                 copied.append((_column(field), _SOURCE, _column(available[field.name])))
             elif field.has_default() and callable(field.default):
@@ -517,8 +528,17 @@ class Projection:
                 "same column, or write the statement with sql=."
             )
 
+        _check_references(self._model, self._values, available)
+
         self._copied = tuple(copied)
-        self._expressions = tuple(expressions)
+        # Resolved here rather than at build time so that a reference costs
+        # nothing per build, and so that `canonical` sees what decides the rows:
+        # the same shape written inline and written through a reference produce
+        # the same statement and must share a template database.
+        self._expressions = tuple(
+            (column, SqlValue(_resolve_references(self._model, name, self._values, (name,))))
+            for column, name in expressions
+        )
         self._literals = tuple(literals)
         self._columns = (
             _column(pk_field),
@@ -653,6 +673,94 @@ class Projection:
             f"per={cast('type[Model]', self._per).__name__}, "
             f"copying={cast('type[Model]', self._copying).__name__})"
         )
+
+
+def _check_references(
+    model: type[Model],
+    values: Mapping[str, SqlValue],
+    available: Mapping[str, Field[Any, Any]],
+) -> None:
+    """Refuse a ``{values.x}`` that names nothing, or a cycle, at declaration time.
+
+    Both failures are otherwise the database's to report, and it reports them
+    badly: an unknown name becomes ``column "x" does not exist`` from inside a
+    generated statement, and a cycle never reaches the database at all because
+    the substitution below would recurse until Python ran out of stack, in a
+    frame naming neither the shape nor the column.
+
+    The unknown-name refusal distinguishes two cases on purpose. A name that is
+    a **copied** column is not a mistake about the column, it is a mistake about
+    the spelling: the column is real and reachable, just not through ``values=``
+    -- so the message hands over ``{source}.x`` rather than listing names the
+    reader already knows are wrong.
+    """
+    for name in sorted(values):
+        for target in _REFERENCE.findall(values[name].expression):
+            if target in values:
+                continue
+            if target in available:
+                raise InvalidShape(
+                    f"{model.__name__}.{name} references {{values.{target}}}, and {target} is "
+                    f"not written by values= -- it is copied from {target!r} on the source. "
+                    f"Write {{source}}.{target} instead, which is the column itself rather "
+                    "than an expression for it."
+                )
+            raise InvalidShape(
+                f"{model.__name__}.{name} references {{values.{target}}}, which values= does "
+                f"not declare. It declares: {', '.join(sorted(values))}."
+            )
+
+    # Separately, and after every name is known to resolve, because a cycle
+    # reported over an unknown name would name a path that does not exist.
+    for name in sorted(values):
+        _resolve_references(model, name, values, (name,))
+
+
+def _resolve_references(
+    model: type[Model],
+    name: str,
+    values: Mapping[str, SqlValue],
+    stack: tuple[str, ...],
+) -> str:
+    """``values[name]`` with every ``{values.x}`` replaced by x's own expression.
+
+    **Substitution, not sharing**, and the difference is the whole cost of this
+    feature: the referenced expression is written out again at each reference and
+    the database evaluates it once per copy. For a deterministic expression --
+    which every expression here has to be anyway, because
+    :func:`~django_data_shape.template_database.template_database` reuses a
+    database keyed on the declaration and nothing else -- that is arithmetic the
+    planner does not care about. For a volatile one it means the two copies are
+    two different values, and the relationship the declaration appears to state
+    is not the one the rows hold.
+
+    The alternative was a subquery whose inner select computed each expression
+    once. It was declined: the key is a ``row_number()`` window and the outer
+    ``ORDER BY`` is what decides where rows physically land, so nesting moves
+    the one thing this package exists to control -- and a shape using no
+    reference at all would have had its statement changed to buy a feature it
+    does not use.
+
+    **The result is parenthesised.** ``1 + 1`` spliced into ``x * 3`` is 4
+    without brackets and 6 with them, and nothing downstream could tell the two
+    apart afterwards.
+
+    ``stack`` is the chain of names being resolved, outermost first, and is what
+    turns a cycle into a refusal naming the path rather than a recursion error.
+    """
+
+    def substitute(match: re.Match[str]) -> str:
+        target = match.group(1)
+        if target in stack:
+            path = " -> ".join((*stack, target))
+            raise InvalidShape(
+                f"{model.__name__} declares a cycle in values=: {path}. Each expression is "
+                "written out in place of the reference to it, so a cycle has no expansion at "
+                "all rather than an expensive one."
+            )
+        return f"({_resolve_references(model, target, values, (*stack, target))})"
+
+    return _REFERENCE.sub(substitute, values[name].expression)
 
 
 def _refuse_a_lone_percent(model: type[Model], sql: str) -> None:
