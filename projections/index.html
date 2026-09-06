@@ -517,6 +517,45 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#an-expression-over-a-uuid-key-needs-a-hash" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        An expression over a UUID key needs a hash
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#valuesx-one-column-named-from-another" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        {values.x} — one column named from another
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="{values.x} — one column named from another">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#it-is-substitution-not-sharing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        It is substitution, not sharing
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#the-expression-is-the-one-part-of-a-shape-that-is-not-portable" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -897,6 +936,45 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#an-expression-over-a-uuid-key-needs-a-hash" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        An expression over a UUID key needs a hash
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#valuesx-one-column-named-from-another" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        {values.x} — one column named from another
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="{values.x} — one column named from another">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#it-is-substitution-not-sharing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        It is substitution, not sharing
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#the-expression-is-the-one-part-of-a-shape-that-is-not-portable" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1211,6 +1289,13 @@ SQL from the one Python computes would give one strategy two meanings depending
 on which statement filled the table.</p>
 <p>A UUID-keyed table can still be projected — with <code>sql=</code>, producing the keys in
 the statement.</p>
+<p>That is about the <strong>projected table's own</strong> primary key, and only that. The
+tables named by <code>per=</code> and <code>copying=</code> may be keyed however they like: a
+projection reads them, and reading a UUID key needs nothing special. What does
+need care is an expression <em>over</em> one — see
+<a href="#an-expression-over-a-uuid-key-needs-a-hash">the note on UUID keys</a> below,
+because integer arithmetic on a UUID is a type error rather than a refusal this
+package can make.</p>
 <h2 id="values-a-column-of-the-projected-tables-own"><code>values=</code> — a column of the projected table's own<a class="headerlink" href="#values-a-column-of-the-projected-tables-own" title="Permanent link">&para;</a></h2>
 <p>A projection copies a column from the source it names, or takes the model's own
 default. Those are its only two answers, and a projected table's <strong>measure</strong>
@@ -1237,6 +1322,76 @@ could not tell which side was which. A literal <code>%</code> is escaped for the
 reason -- the statement is executed with bound parameters, so an unescaped one
 is an incomplete placeholder to psycopg and to Django's SQLite wrapper alike,
 and the paramstyle is no more the declaration's business than the aliases are.</p>
+<h3 id="an-expression-over-a-uuid-key-needs-a-hash">An expression over a UUID key needs a hash<a class="headerlink" href="#an-expression-over-a-uuid-key-needs-a-hash" title="Permanent link">&para;</a></h3>
+<p>The example above multiplies <code>id</code> by an integer, which works on Django's default
+<code>BigAutoField</code> and is a <strong>type error</strong> on a schema whose models carry
+<code>id = UUIDField(primary_key=True)</code> — a shared abstract base doing exactly that is
+an ordinary Django layout, not an unusual one. PostgreSQL has no <code>uuid * integer</code>
+operator, and because an expression is opaque to this package the refusal comes
+from the driver at build time, naming neither the shape nor the column.</p>
+<p>Per-row variation over a UUID has to come from a hash:</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="n">Projection</span><span class="p">(</span>
+</span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>    <span class="n">ReviewScore</span><span class="p">,</span>
+</span><span id="__span-9-3"><a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>    <span class="n">per</span><span class="o">=</span><span class="n">Review</span><span class="p">,</span>
+</span><span id="__span-9-4"><a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a>    <span class="n">copying</span><span class="o">=</span><span class="n">Criterion</span><span class="p">,</span>
+</span><span id="__span-9-5"><a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>    <span class="n">values</span><span class="o">=</span><span class="p">{</span>
+</span><span id="__span-9-6"><a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a>        <span class="s2">"score"</span><span class="p">:</span> <span class="n">SqlValue</span><span class="p">(</span><span class="s2">"abs(hashtext(</span><span class="si">{per}</span><span class="s2">.id::text || </span><span class="si">{source}</span><span class="s2">.id::text)::bigint) % 5 + 1"</span><span class="p">)</span>
+</span><span id="__span-9-7"><a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a>    <span class="p">},</span>
+</span><span id="__span-9-8"><a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a><span class="p">)</span>
+</span></code></pre></div>
+<p>Every part of that is load-bearing, and two of them fail rarely enough to reach
+production:</p>
+<ul>
+<li><code>::bigint</code> goes <strong>before</strong> <code>abs</code>, because <code>hashtext</code> returns <code>int4</code> and
+  <code>abs(-2147483648)</code> is <code>integer out of range</code>. That is one value in four
+  billion, which is to say it is a crash your suite will not find and a
+  consumer will.</li>
+<li><code>abs</code> is there because PostgreSQL's <code>%</code> keeps the sign of the <strong>dividend</strong>, so
+  <code>hashtext(...) % 5</code> runs from <code>-4</code> to <code>4</code>. A measure column would hold
+  negatives and every plan over it would still look fine.</li>
+</ul>
+<h3 id="valuesx-one-column-named-from-another"><code>{values.x}</code> — one column named from another<a class="headerlink" href="#valuesx-one-column-named-from-another" title="Permanent link">&para;</a></h3>
+<p>A projected table's measure columns are usually related to each other: a
+requested amount and an approved one, a quantity and a total, an amount and the
+rate derived from it. An expression can name another entry in the same <code>values=</code>
+dict, and the relationship is then stated where a reader will look for it:</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="n">values</span> <span class="o">=</span> <span class="p">{</span>
+</span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>    <span class="s2">"requested_amount"</span><span class="p">:</span> <span class="n">SqlValue</span><span class="p">(</span><span class="s2">"abs(hashtext(</span><span class="si">{per}</span><span class="s2">.id::text)::bigint) % 500 + 100"</span><span class="p">),</span>
+</span><span id="__span-10-3"><a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>    <span class="s2">"approved_amount"</span><span class="p">:</span> <span class="n">SqlValue</span><span class="p">(</span><span class="s2">"</span><span class="si">{values.requested_amount}</span><span class="s2"> * 8 / 10"</span><span class="p">),</span>
+</span><span id="__span-10-4"><a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="p">}</span>
+</span></code></pre></div>
+<p>Without it, both columns have to be restated from whatever they were both
+computed from, with coefficients picked so that <code>approved &lt;= requested</code> happens
+to hold — an invariant a reader can only find by doing the arithmetic, and one
+that nothing rechecks when either expression is edited.</p>
+<p>The name is dotted rather than a bare <code>{requested_amount}</code> because <code>{per}</code> and
+<code>{source}</code> already occupy that space and a model is entitled to a column called
+<code>per</code>. Only <code>values=</code> entries are referenceable: a copied column is already
+reachable as <code>{source}.name</code>, and the primary key is the <code>row_number()</code> window
+itself and is reachable nowhere at all. A name that resolves to neither, and a
+cycle, are refused at declaration time and name the path.</p>
+<h4 id="it-is-substitution-not-sharing">It is substitution, not sharing<a class="headerlink" href="#it-is-substitution-not-sharing" title="Permanent link">&para;</a></h4>
+<p><code>{values.x}</code> names <em>the declaration</em>, and what it splices in is that expression
+written out again — parenthesised, so <code>1 + 1</code> referenced from <code>x * 3</code> is 6 and
+not 4. The database evaluates the referenced expression once per reference.</p>
+<p>For a deterministic expression that costs arithmetic nobody measures, and every
+expression here has to be deterministic anyway: <code>template_database</code> reuses a
+database keyed on the declaration and nothing else, so a volatile expression is
+already a stale-data bug waiting for the second run. What a reference adds is
+that the two copies are two different values <em>within one build</em>, so the
+relationship the declaration appears to state is not the one the rows hold.</p>
+<p>State the relationship in <code>values=</code> and net it with an
+<a href="../invariants/"><code>Invariant</code></a>:</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="n">Invariant</span><span class="p">(</span>
+</span><span id="__span-11-2"><a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>    <span class="s2">"an approved amount never exceeds the amount requested"</span><span class="p">,</span>
+</span><span id="__span-11-3"><a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>    <span class="n">Shipment</span><span class="p">,</span>
+</span><span id="__span-11-4"><a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a>    <span class="n">violated_by</span><span class="o">=</span><span class="n">Q</span><span class="p">(</span><span class="n">approved_amount__gt</span><span class="o">=</span><span class="n">F</span><span class="p">(</span><span class="s2">"requested_amount"</span><span class="p">)),</span>
+</span><span id="__span-11-5"><a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a><span class="p">)</span>
+</span></code></pre></div>
+<p>That pairing is the answer to "nothing rechecks it": the declaration says what
+the relationship is, and the invariant fails the build if it ever stops being
+true — whether because an expression was edited, or because one of them was not
+deterministic after all.</p>
 <h3 id="the-expression-is-the-one-part-of-a-shape-that-is-not-portable">The expression is the one part of a shape that is not portable<a class="headerlink" href="#the-expression-is-the-one-part-of-a-shape-that-is-not-portable" title="Permanent link">&para;</a></h3>
 <p>Everything else here is a declaration compiled per backend. An expression is SQL
 the database evaluates as written, and nothing can inspect it: <code>mod(x, 5)</code>
@@ -1258,17 +1413,17 @@ with. An expression you wrote is honest about being yours.</p>
 <h2 id="the-escape-hatch">The escape hatch<a class="headerlink" href="#the-escape-hatch" title="Permanent link">&para;</a></h2>
 <p>For anything shaped oddly — a filter, an aggregate, a three-way join, a window —
 supply the <code>SELECT</code> yourself and name the columns it produces.</p>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="n">Projection</span><span class="p">(</span>
-</span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>    <span class="n">EventSession</span><span class="p">,</span>
-</span><span id="__span-9-3"><a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>    <span class="n">columns</span><span class="o">=</span><span class="p">(</span><span class="s2">"id"</span><span class="p">,</span> <span class="s2">"event"</span><span class="p">,</span> <span class="s2">"title"</span><span class="p">,</span> <span class="s2">"minutes"</span><span class="p">,</span> <span class="s2">"channel"</span><span class="p">),</span>
-</span><span id="__span-9-4"><a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a>    <span class="n">sql</span><span class="o">=</span><span class="p">(</span>
-</span><span id="__span-9-5"><a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>        <span class="s2">"SELECT row_number() OVER (ORDER BY e.id, t.id), e.id, t.title, t.minutes, </span><span class="si">%s</span><span class="s2"> "</span>
-</span><span id="__span-9-6"><a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a>        <span class="s2">"FROM app_event e "</span>
-</span><span id="__span-9-7"><a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a>        <span class="s2">"JOIN app_templatesession t ON t.template_id = e.template_id "</span>
-</span><span id="__span-9-8"><a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a>        <span class="s2">"WHERE t.title &lt;&gt; </span><span class="si">%s</span><span class="s2">"</span>
-</span><span id="__span-9-9"><a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a>    <span class="p">),</span>
-</span><span id="__span-9-10"><a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a>    <span class="n">params</span><span class="o">=</span><span class="p">(</span><span class="s2">"web"</span><span class="p">,</span> <span class="s2">"hidden"</span><span class="p">),</span>
-</span><span id="__span-9-11"><a id="__codelineno-9-11" name="__codelineno-9-11" href="#__codelineno-9-11"></a><span class="p">)</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="n">Projection</span><span class="p">(</span>
+</span><span id="__span-12-2"><a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>    <span class="n">EventSession</span><span class="p">,</span>
+</span><span id="__span-12-3"><a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>    <span class="n">columns</span><span class="o">=</span><span class="p">(</span><span class="s2">"id"</span><span class="p">,</span> <span class="s2">"event"</span><span class="p">,</span> <span class="s2">"title"</span><span class="p">,</span> <span class="s2">"minutes"</span><span class="p">,</span> <span class="s2">"channel"</span><span class="p">),</span>
+</span><span id="__span-12-4"><a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a>    <span class="n">sql</span><span class="o">=</span><span class="p">(</span>
+</span><span id="__span-12-5"><a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a>        <span class="s2">"SELECT row_number() OVER (ORDER BY e.id, t.id), e.id, t.title, t.minutes, </span><span class="si">%s</span><span class="s2"> "</span>
+</span><span id="__span-12-6"><a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a>        <span class="s2">"FROM app_event e "</span>
+</span><span id="__span-12-7"><a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a>        <span class="s2">"JOIN app_templatesession t ON t.template_id = e.template_id "</span>
+</span><span id="__span-12-8"><a id="__codelineno-12-8" name="__codelineno-12-8" href="#__codelineno-12-8"></a>        <span class="s2">"WHERE t.title &lt;&gt; </span><span class="si">%s</span><span class="s2">"</span>
+</span><span id="__span-12-9"><a id="__codelineno-12-9" name="__codelineno-12-9" href="#__codelineno-12-9"></a>    <span class="p">),</span>
+</span><span id="__span-12-10"><a id="__codelineno-12-10" name="__codelineno-12-10" href="#__codelineno-12-10"></a>    <span class="n">params</span><span class="o">=</span><span class="p">(</span><span class="s2">"web"</span><span class="p">,</span> <span class="s2">"hidden"</span><span class="p">),</span>
+</span><span id="__span-12-11"><a id="__codelineno-12-11" name="__codelineno-12-11" href="#__codelineno-12-11"></a><span class="p">)</span>
 </span></code></pre></div>
 <p>The columns are <strong>field names</strong>, checked against the model, so a typo is refused
 here rather than by the database. A relation may be spelled either way —
@@ -1282,7 +1437,7 @@ declaration.</p>
 still a sequence — so a <code>%</code> that is not a placeholder is read as the start of one
 and the driver refuses it, at build time, with a message naming <code>psycopg</code> and
 nothing about the shape. Write <code>%%</code> for the modulo operator:</p>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="n">sql</span> <span class="o">=</span> <span class="s2">"SELECT row_number() OVER (ORDER BY e.id), e.id, e.id </span><span class="si">%%</span><span class="s2"> 5 FROM app_event e"</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-13-1"><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="n">sql</span> <span class="o">=</span> <span class="s2">"SELECT row_number() OVER (ORDER BY e.id), e.id, e.id </span><span class="si">%%</span><span class="s2"> 5 FROM app_event e"</span>
 </span></code></pre></div>
 <p>That is the pyformat contract and it is deliberate here: <code>sql=</code> takes <code>params=</code>,
 so the placeholders are the interface. The declaration is checked for a lone <code>%</code>
@@ -1303,13 +1458,13 @@ something fans out over the table it fills: the projection then has to run
 <em>before</em> that table, and may find the tables it selects from still empty.
 <code>reads=</code> says what it needs, and puts it back in the graph precisely — after
 what it reads, before what reads it.</p>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="n">Projection</span><span class="p">(</span>
-</span><span id="__span-11-2"><a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>    <span class="n">EventSession</span><span class="p">,</span>
-</span><span id="__span-11-3"><a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>    <span class="n">columns</span><span class="o">=</span><span class="p">(</span><span class="s2">"id"</span><span class="p">,</span> <span class="s2">"event"</span><span class="p">,</span> <span class="s2">"title"</span><span class="p">,</span> <span class="s2">"minutes"</span><span class="p">,</span> <span class="s2">"channel"</span><span class="p">),</span>
-</span><span id="__span-11-4"><a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a>    <span class="n">sql</span><span class="o">=</span><span class="s2">"SELECT row_number() OVER (ORDER BY e.id), e.id, e.name, 1, </span><span class="si">%s</span><span class="s2"> FROM app_event e"</span><span class="p">,</span>
-</span><span id="__span-11-5"><a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a>    <span class="n">params</span><span class="o">=</span><span class="p">(</span><span class="s2">"web"</span><span class="p">,),</span>
-</span><span id="__span-11-6"><a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a>    <span class="n">reads</span><span class="o">=</span><span class="p">(</span><span class="n">Event</span><span class="p">,),</span>
-</span><span id="__span-11-7"><a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a><span class="p">)</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-14-1"><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="n">Projection</span><span class="p">(</span>
+</span><span id="__span-14-2"><a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a>    <span class="n">EventSession</span><span class="p">,</span>
+</span><span id="__span-14-3"><a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a>    <span class="n">columns</span><span class="o">=</span><span class="p">(</span><span class="s2">"id"</span><span class="p">,</span> <span class="s2">"event"</span><span class="p">,</span> <span class="s2">"title"</span><span class="p">,</span> <span class="s2">"minutes"</span><span class="p">,</span> <span class="s2">"channel"</span><span class="p">),</span>
+</span><span id="__span-14-4"><a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a>    <span class="n">sql</span><span class="o">=</span><span class="s2">"SELECT row_number() OVER (ORDER BY e.id), e.id, e.name, 1, </span><span class="si">%s</span><span class="s2"> FROM app_event e"</span><span class="p">,</span>
+</span><span id="__span-14-5"><a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a>    <span class="n">params</span><span class="o">=</span><span class="p">(</span><span class="s2">"web"</span><span class="p">,),</span>
+</span><span id="__span-14-6"><a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a>    <span class="n">reads</span><span class="o">=</span><span class="p">(</span><span class="n">Event</span><span class="p">,),</span>
+</span><span id="__span-14-7"><a id="__codelineno-14-7" name="__codelineno-14-7" href="#__codelineno-14-7"></a><span class="p">)</span>
 </span></code></pre></div>
 <p>It is part of the declaration the template-database cache keys on, because the
 same statement run before and after a table selects different rows. A derived
@@ -1319,11 +1474,11 @@ already are the answer.</p>
 <p>A projection is ordered like everything else: after the tables it reads, before
 anything that reads it. So the order the declarations are written in does not
 matter, and <strong>a projected table may itself be a fan-out parent</strong>.</p>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="n">Shape</span><span class="p">(</span>
-</span><span id="__span-12-2"><a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>    <span class="n">Table</span><span class="p">(</span><span class="n">Attendance</span><span class="p">,</span> <span class="n">rows</span><span class="o">=</span><span class="mi">1_000_000</span><span class="p">,</span> <span class="n">session</span><span class="o">=</span><span class="n">FanOut</span><span class="p">(</span><span class="n">Zipf</span><span class="p">()),</span> <span class="n">name</span><span class="o">=</span><span class="n">Constant</span><span class="p">(</span><span class="s2">"a"</span><span class="p">)),</span>
-</span><span id="__span-12-3"><a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>    <span class="n">Projection</span><span class="p">(</span><span class="n">EventSession</span><span class="p">,</span> <span class="n">per</span><span class="o">=</span><span class="n">Event</span><span class="p">,</span> <span class="n">copying</span><span class="o">=</span><span class="n">TemplateSession</span><span class="p">),</span>
-</span><span id="__span-12-4"><a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a>    <span class="o">...</span><span class="p">,</span>
-</span><span id="__span-12-5"><a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a><span class="p">)</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-15-1"><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="n">Shape</span><span class="p">(</span>
+</span><span id="__span-15-2"><a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a>    <span class="n">Table</span><span class="p">(</span><span class="n">Attendance</span><span class="p">,</span> <span class="n">rows</span><span class="o">=</span><span class="mi">1_000_000</span><span class="p">,</span> <span class="n">session</span><span class="o">=</span><span class="n">FanOut</span><span class="p">(</span><span class="n">Zipf</span><span class="p">()),</span> <span class="n">name</span><span class="o">=</span><span class="n">Constant</span><span class="p">(</span><span class="s2">"a"</span><span class="p">)),</span>
+</span><span id="__span-15-3"><a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a>    <span class="n">Projection</span><span class="p">(</span><span class="n">EventSession</span><span class="p">,</span> <span class="n">per</span><span class="o">=</span><span class="n">Event</span><span class="p">,</span> <span class="n">copying</span><span class="o">=</span><span class="n">TemplateSession</span><span class="p">),</span>
+</span><span id="__span-15-4"><a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a>    <span class="o">...</span><span class="p">,</span>
+</span><span id="__span-15-5"><a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a><span class="p">)</span>
 </span></code></pre></div>
 <p>A raw <code>sql=</code> projection without <code>reads=</code> is the exception: it names nothing, so
 "run it last" is a <strong>preference</strong> rather than an edge. It goes after everything

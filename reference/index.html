@@ -7955,6 +7955,55 @@ statement uses, quoted for the connection. They are placeholders rather than
 the aliases themselves because the aliases are this package's private
 business: a declaration that spelled them would break the day they changed,
 and a reader could not tell which side was which.</p>
+<p><strong>On a UUID-keyed schema the example above is a type error</strong>, and it is worth
+saying so here rather than leaving it to the build. A project that gives
+every model <code>id = UUIDField(primary_key=True)</code> from one abstract base is an
+ordinary Django layout, and <code>uuid * integer</code> has no operator in PostgreSQL:
+the expression is opaque to this package, so the refusal comes from the
+driver, at build time, naming neither the shape nor the column. The variation
+has to come from a hash instead::</p>
+<div class="language-text highlight"><pre><span></span><code>values={
+    "score": SqlValue(
+        "abs(hashtext({per}.id::text || {source}.id::text)::bigint) % 5 + 1"
+    )
+}
+</code></pre></div>
+<p>Each part of that earns its place. <code>::bigint</code> goes <strong>before</strong> <code>abs</code>
+because <code>hashtext</code> returns <code>int4</code> and <code>abs(-2147483648)</code> is <code>integer
+out of range</code>; <code>abs</code> is there at all because PostgreSQL's <code>%</code> keeps the
+sign of the dividend, so <code>hashtext(...) % 5</code> spans negatives and a measure
+column would quietly hold them.</p>
+<p><strong>An expression may name another column in the same <code>values=</code></strong>, as
+<code>{values.&lt;name&gt;}</code>. A projected table's measure columns are usually related
+to each other -- a requested amount and an approved one, a quantity and a
+total -- and without this the relationship has to be restated from whatever
+both were computed from, with coefficients chosen so that it happens to
+hold::</p>
+<div class="language-text highlight"><pre><span></span><code>values={
+    "requested_amount": SqlValue(
+        "abs(hashtext({per}.id::text)::bigint) % 500 + 100"
+    ),
+    "approved_amount": SqlValue("{values.requested_amount} * 8 / 10"),
+}
+</code></pre></div>
+<p>The name is dotted rather than a bare <code>{requested_amount}</code> because
+<code>{per}</code> and <code>{source}</code> already occupy that space and a model is entitled
+to a column called <code>per</code>. Only <code>values=</code> entries are referenceable: a
+copied column is already reachable as <code>{source}.name</code>, and the primary key
+is the <code>row_number()</code> window itself and is reachable nowhere. A name that
+resolves to neither, and a cycle, are refused at declaration time.</p>
+<p><strong>It is substitution, not sharing</strong>, and that spelling is deliberate:
+<code>{values.x}</code> names <em>the declaration</em>, and what it splices in is that
+expression written out again. The database evaluates it once per reference.
+For a deterministic expression -- which every expression here has to be
+anyway, since
+:func:<code>~django_data_shape.template_database.template_database</code> reuses a
+database keyed on the declaration and nothing else -- that costs arithmetic
+nobody measures. For a volatile one the two copies are two different values,
+and the relationship the declaration appears to state is not the one the rows
+hold. State it in the declaration and net it with an
+:class:<code>~django_data_shape.invariant.Invariant</code>, which is what catches that
+case and every other way the rule can stop being true.</p>
 <p><strong>It is SQL rather than a distribution, and that is a decision worth
 stating.</strong> A :class:<code>~django_data_shape.distributions.distribution.Distribution</code>
 computes from <code>draw(stream, row)</code>, which is SplitMix64 -- expressible in
