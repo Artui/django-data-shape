@@ -7,6 +7,72 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.21.0] — 2026-09-06
+
+### Added
+
+- **`values=` expressions can name one another, as `{values.<name>}`.** A
+  projected table's measure columns are usually related to each other -- a
+  requested amount and an approved one, a quantity and a total, an amount and
+  the rate derived from it -- and an expression could not say so. The
+  relationship had to be restated from whatever both columns were computed from,
+  with coefficients chosen so that it happens to hold: a reader could only find
+  the invariant by doing the arithmetic, and nothing rechecked it when either
+  expression was edited.
+
+  The name is dotted rather than a bare `{requested_amount}` because `{per}` and
+  `{source}` already occupy that space and a model is entitled to a column
+  called `per`. Only `values=` entries are referenceable -- a copied column is
+  already reachable as `{source}.name`, and the primary key is the
+  `row_number()` window itself and is reachable nowhere.
+
+  **It is substitution, not sharing**, which is what the spelling says: the
+  referenced expression is written out again, parenthesised, and the database
+  evaluates it once per reference. That is free for a deterministic expression,
+  and every expression here already had to be deterministic -- `template_database`
+  reuses a database keyed on the declaration and nothing else. What a reference
+  adds is that a volatile expression now disagrees with itself *within one
+  build*, so the documentation pairs the feature with an `Invariant` rather than
+  leaving the rule stated and unchecked.
+
+  A subquery computing each expression once was declined: the key is a
+  `row_number()` window whose outer `ORDER BY` decides where rows physically
+  land, so nesting moves the one thing this package exists to control -- and a
+  shape using no reference would have had its statement changed to buy a feature
+  it does not use. Substitution leaves every existing shape's SQL byte-identical.
+
+  A reference that names nothing, and a cycle, are refused at declaration time
+  and name the path. A name that is a *copied* column is refused separately and
+  hands over `{source}.name`, because that is a mistake about the spelling
+  rather than about the column.
+
+### Fixed
+
+- **The documented `SqlValue` example was a type error on UUID-keyed models.**
+  `({per}.id * 31 + {source}.id * 17) % 5 + 1` works on Django's default
+  `BigAutoField` and has no operator at all on a schema whose models carry
+  `id = UUIDField(primary_key=True)` -- which a shared abstract base makes an
+  ordinary layout rather than an unusual one. So the first thing such a reader
+  copied out of the documentation did not run, and it failed from inside a
+  generated statement at build time rather than at declaration.
+
+  The guide and the docstring now carry a worked example for UUID keys, and it
+  is **executed by the suite** rather than asserted: the documentation's Python
+  blocks are only parsed, and an expression is a string literal that parses
+  perfectly, which is exactly how this shipped. Two parts of the replacement are
+  load-bearing and fail rarely enough to reach production -- `::bigint` before
+  `abs`, because `hashtext` returns `int4` and `abs(-2147483648)` is `integer
+  out of range`; and `abs` at all, because PostgreSQL's `%` keeps the sign of
+  the dividend, so a measure column would hold negatives and every plan over it
+  would still look fine.
+
+- **The projections guide implied UUID keys were settled by one sentence about
+  `sql=`.** That sentence is about the *projected table's own* primary key. The
+  tables named by `per=` and `copying=` may be keyed however they like, and the
+  care an expression over one of them needs is a different subject that the page
+  did not cover -- so a reader with UUID keys throughout read a paragraph that
+  appeared to address them and was sent onward into the broken example.
+
 ## [0.20.0] — 2026-09-05
 
 ### Added
@@ -1298,7 +1364,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   into `COPY FROM STDIN`, which psycopg 2 cannot do without materialising them
   first.
 
-[Unreleased]: https://github.com/Artui/django-data-shape/compare/v0.20.0...HEAD
+[Unreleased]: https://github.com/Artui/django-data-shape/compare/v0.21.0...HEAD
+[0.21.0]: https://github.com/Artui/django-data-shape/compare/v0.20.0...v0.21.0
 [0.20.0]: https://github.com/Artui/django-data-shape/compare/v0.19.0...v0.20.0
 [0.19.0]: https://github.com/Artui/django-data-shape/compare/v0.18.1...v0.19.0
 [0.18.1]: https://github.com/Artui/django-data-shape/compare/v0.18.0...v0.18.1
