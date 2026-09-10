@@ -16,7 +16,7 @@ class SequentialKeys:
 
     It is also the only strategy in this package that can say itself in SQL, so
     it is the only one that can fill a
-    :class:`~django_data_shape.projection.Projection` -- see
+    :class:`~django_data_shape.declaration.projection.Projection` -- see
     :class:`~django_data_shape.keys.sql_keys.SqlKeys`. That is not an accident
     of implementation effort: ``row + 1`` is arithmetic every database has, and
     a keyed hash is not.

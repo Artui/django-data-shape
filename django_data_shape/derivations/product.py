@@ -14,7 +14,7 @@ class Product:
     :class:`~django_data_shape.derivations.derived.Derived` -- the only shipped
     face that can read another column of the same row -- takes a callable, and
     a callable cannot be digested. A shape holding one is refused by
-    :func:`~django_data_shape.template_database.template_database`, so a column
+    :func:`~django_data_shape.databases.template_database.template_database`, so a column
     as ordinary as ``total = quantity * unit_price`` excluded the whole
     declaration from the reuse that turns a forty-second build into a
     hundred-millisecond clone.
@@ -23,7 +23,7 @@ class Product:
     bytecode returns something else when a constant it reads is edited in
     another module. What was wrong is what it excluded. These three say the
     commonest arithmetic as **data**, so they implement
-    :class:`~django_data_shape.canonical.Canonical` and the shape hashes::
+    :class:`~django_data_shape.types.canonical.Canonical` and the shape hashes::
 
         Table(
             Order,

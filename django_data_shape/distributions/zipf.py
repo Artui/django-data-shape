@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 
-from django_data_shape.invalid_shape import InvalidShape
+from django_data_shape.declaration.invalid_shape import InvalidShape
 
 
 class Zipf:

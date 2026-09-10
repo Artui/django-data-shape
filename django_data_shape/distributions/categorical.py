@@ -12,7 +12,7 @@ class Categorical(Protocol):
 
     The fourth opt-in protocol, beside
     :class:`~django_data_shape.distributions.bounded.Bounded`,
-    :class:`~django_data_shape.canonical.Canonical` and
+    :class:`~django_data_shape.types.canonical.Canonical` and
     :class:`~django_data_shape.keys.sql_keys.SqlKeys`, and added for the one
     question a business invariant asks that none of the others can answer:
     **how many of these rows will carry this particular value?**

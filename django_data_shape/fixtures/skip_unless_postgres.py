@@ -6,15 +6,15 @@ from typing import Any
 
 import pytest
 
-from django_data_shape.require_postgres import require_postgres
-from django_data_shape.unsupported_backend import UnsupportedBackend
+from django_data_shape.backends.require_postgres import require_postgres
+from django_data_shape.backends.unsupported_backend import UnsupportedBackend
 
 
 def skip_unless_postgres(connection: Any, operation: str) -> None:
     """Skip the current test, with a stated reason, where ``operation`` cannot mean anything.
 
     The pytest twin of
-    :func:`~django_data_shape.require_postgres.require_postgres`, and the two
+    :func:`~django_data_shape.backends.require_postgres.require_postgres`, and the two
     differ only in how the same sentence is delivered. A function that is called
     raises; a fixture that cannot supply what it promised skips, because a test
     that never ran is honest and a test that ran against a database nobody

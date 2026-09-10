@@ -47,8 +47,8 @@ Shape(
 ```
 
 `statistics=` maps a field name to a number of buckets, on
-[`Table`][django_data_shape.table.Table] and on
-[`Projection`][django_data_shape.projection.Projection] alike. A column left out
+[`Table`][django_data_shape.declaration.table.Table] and on
+[`Projection`][django_data_shape.declaration.projection.Projection] alike. A column left out
 keeps whatever target the schema gives it.
 
 ### Declared, never inferred
@@ -121,7 +121,7 @@ template = template_database(shape)  # builds the first time, finds it after
 clone_database(template, "test_myapp", replace=True)
 ```
 
-[`template_database`][django_data_shape.template_database.template_database]
+[`template_database`][django_data_shape.databases.template_database.template_database]
 names the database after a content hash of everything that decides what is in it,
 so reuse is safe rather than merely fast. Change the declaration, the schema, the
 time-zone settings or this package's version and the name changes, so the old
@@ -129,7 +129,7 @@ database is simply never asked for again.
 
 ### The key
 
-[`shape_digest`][django_data_shape.shape_digest.shape_digest] is the declaration
+[`shape_digest`][django_data_shape.databases.shape_digest.shape_digest] is the declaration
 half, and it is public because it is useful on its own -- it needs no database and
 answers "are these two shapes the same shape".
 
@@ -158,9 +158,9 @@ the key agrees while the data has changed -- and the result is a suite running
 against a database built from code that no longer exists.
 
 So a shape holding one raises
-[`UnhashableShape`][django_data_shape.unhashable_shape.UnhashableShape], naming
+[`UnhashableShape`][django_data_shape.databases.unhashable_shape.UnhashableShape], naming
 the table and the column. Build it with `build()` and pay the load, or implement
-[`Canonical`][django_data_shape.canonical.Canonical] on a declaration that really
+[`Canonical`][django_data_shape.types.canonical.Canonical] on a declaration that really
 is data:
 
 ```python
@@ -254,7 +254,7 @@ deciding whether the database you have is the one you want, and the template
   that survives is ever *wrong*, only unused, and dropping one on a guess would
   mean deleting a database because this package stopped recognising its name.
   They are all named `data_shape_` followed by a digest, and
-  [`drop_database`][django_data_shape.drop_database.drop_database] removes one.
+  [`drop_database`][django_data_shape.databases.drop_database.drop_database] removes one.
 - **A `RunSQL` edited inside a migration that already exists.** The key covers
   every migration's name and every model's fields, so ordinary schema changes
   move it; editing the body of a migration that has already been created changes

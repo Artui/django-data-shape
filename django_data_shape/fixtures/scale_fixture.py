@@ -7,15 +7,15 @@ from functools import partial
 import pytest
 from django.db import DEFAULT_DB_ALIAS
 
-from django_data_shape.scale_protocol import ScaleProtocol
-from django_data_shape.scaled_world import scaled_world
-from django_data_shape.shape import Shape
+from django_data_shape.declaration.shape import Shape
+from django_data_shape.scaling.scale_protocol import ScaleProtocol
+from django_data_shape.scaling.scaled_world import scaled_world
 
 
 # ``object`` for the same reason as in shape_fixture: the type of a fixture is
 # pytest's own and it changed shape between pytest 8.0 and 8.4.
 def scale_fixture(shape: Shape, *, using: str = DEFAULT_DB_ALIAS) -> object:
-    """A pytest fixture yielding a :class:`~django_data_shape.scale_protocol.ScaleProtocol`.
+    """A pytest fixture yielding a :class:`~django_data_shape.scaling.scale_protocol.ScaleProtocol`.
 
     The pytest face of the scale protocol. Bind it in ``conftest.py``::
 
@@ -55,7 +55,7 @@ def scale_fixture(shape: Shape, *, using: str = DEFAULT_DB_ALIAS) -> object:
     models, not by taking turns over one.
 
     **Open a query capture inside the block, never around it.** Repeated here
-    from :func:`~django_data_shape.scaled_world.scaled_world` and not merely
+    from :func:`~django_data_shape.scaling.scaled_world.scaled_world` and not merely
     cross-referenced, because the person who can make this mistake is the one
     writing the test, and they reach this function without ever opening that
     one. Building a world emits statements of its own::

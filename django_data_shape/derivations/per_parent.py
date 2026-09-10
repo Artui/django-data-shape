@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from typing import cast
 
+from django_data_shape.declaration.invalid_shape import InvalidShape
 from django_data_shape.derivations.scope import Scope
 from django_data_shape.distributions.categorical import Categorical
 from django_data_shape.distributions.distribution import Distribution
-from django_data_shape.invalid_shape import InvalidShape
 
 # Not ``None``, because ``None`` is a value a caller legitimately wants on the
 # special row: an SCD-2 validity chain ends with ``valid_to`` unset, and "the
@@ -92,7 +92,7 @@ class PerParent:
 
     ``order_by=`` names the column whose ordering the group's positions agree
     with. It is a **claim that is checked, not a sort that is performed**: see
-    :meth:`~django_data_shape.table.Table` for the two conditions that make it
+    :meth:`~django_data_shape.declaration.table.Table` for the two conditions that make it
     true, and note that it buys realism the planner cannot see -- Postgres keeps
     no statistic about which row of a group holds which value, so a shape
     without it has the same selectivity and the same plan.

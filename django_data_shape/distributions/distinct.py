@@ -17,13 +17,13 @@ class Distinct(Protocol):
     It exists for one question, and the question is not about capacity.
     A multi-column ``UniqueConstraint`` needs the **tuple** to be distinct, and
     every mechanism this package has for filling a column -- a
-    :class:`~django_data_shape.fan_out.FanOut` partition, and every
+    :class:`~django_data_shape.relations.fan_out.FanOut` partition, and every
     :class:`~django_data_shape.distributions.distribution.Distribution` --
     computes its column from the row index and from nothing else. So no column
     can see what another column put in the same row, nothing enumerates the
     tuples, and whether two rows collide is a matter of the seed. That is
     refused by
-    :func:`~django_data_shape.check_constraints.check_constraints` rather than
+    :func:`~django_data_shape.declaration.check_constraints.check_constraints` rather than
     left to fail inside ``COPY``.
 
     One kind of column keeps such a constraint anyway, and keeps it without

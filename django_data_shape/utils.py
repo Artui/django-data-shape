@@ -19,7 +19,7 @@ from django.db.models import (
 )
 from django.db.models.fields import NOT_PROVIDED
 
-from django_data_shape.invalid_shape import InvalidShape
+from django_data_shape.declaration.invalid_shape import InvalidShape
 
 _MASK64 = (1 << 64) - 1
 _GOLDEN = 0x9E3779B97F4A7C15

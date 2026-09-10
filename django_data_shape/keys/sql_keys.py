@@ -11,7 +11,7 @@ class SqlKeys(Protocol):
 
     Every table in a shape has a declared row count, so its keys can be
     enumerated in Python and streamed into ``COPY``. A
-    :class:`~django_data_shape.projection.Projection` has no declared row count
+    :class:`~django_data_shape.declaration.projection.Projection` has no declared row count
     -- its cardinality is determined by the join it copies along -- so there is
     no range of row indices to enumerate, and the rows never pass through Python
     at all. The keys have to be assigned by the statement that inserts them.

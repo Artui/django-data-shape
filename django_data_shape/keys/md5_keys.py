@@ -17,7 +17,7 @@ class Md5Keys:
     which statement filled the table.
 
     **Why md5 rather than blake2b.** A
-    :class:`~django_data_shape.projection.Projection` has no declared row count,
+    :class:`~django_data_shape.declaration.projection.Projection` has no declared row count,
     so its rows never pass through Python and its keys have to be assigned by
     the ``INSERT ... SELECT`` that writes them -- which means the hash has to
     exist on both sides and agree byte for byte. ``blake2b`` has no PostgreSQL
