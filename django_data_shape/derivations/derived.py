@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+from django_data_shape.declaration.invalid_shape import InvalidShape
 from django_data_shape.derivations.scope import Scope
-from django_data_shape.invalid_shape import InvalidShape
 
 
 class Derived:
@@ -34,7 +34,7 @@ class Derived:
     **Your function may not touch the database.** That is not a request: the
     generation pass runs under a wrapper on the connection being built, and a
     query raises
-    :class:`~django_data_shape.derivation_queried_database.DerivationQueriedDatabase`
+    :class:`~django_data_shape.generation.derivation_queried_database.DerivationQueriedDatabase`
     naming the table. The rule is what keeps this a derivation rather than the
     per-row creation hook this package exists to replace -- a hook whose body
     can query is a hook whose body will, and then nothing is ``COPY``-loaded and

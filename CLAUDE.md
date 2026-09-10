@@ -51,6 +51,25 @@ make docs-build    # mkdocs build --strict
 - `__init__.py` is the only re-export point, and holds no logic.
 - Every annotated module starts with `from __future__ import annotations`. Ruff's
   `required-imports` enforces this rather than leaving it to memory.
+- **The package root is a table of contents, not a drawer.** It holds
+  `__init__.py`, `version.py` and `utils.py`; everything this package does lives
+  in a subpackage named for a concern. Those are `declaration/` (what a user
+  writes and what refuses it), `relations/`, `generation/`, `loading/`,
+  `invariants/`, `databases/`, `backends/`, `scaling/`, the vocabulary
+  directories `derivations/`, `distributions/` and `keys/`, the value carriers in
+  `types/`, and the pytest surface in `fixtures/`. Three modules on one concern
+  earn a directory; below three they join the neighbouring concern rather than
+  sitting at the root. A name says what the code does, so `helpers/`, `core/`,
+  `common/` and `misc/` are refused -- each is the flat root again one level
+  down. An exception lives beside the code that raises it, or, where many
+  modules raise it, in the subpackage whose failure it names, which is why there
+  is no `exceptions/`.
+
+  This rule is asserted in `tests/test_package_layout.py` rather than trusted,
+  because prose is what failed the first time: the six rules above all govern a
+  *file*, every one of them was satisfied, and forty-two modules still piled up
+  at the package root. The test gates both halves -- the root allowlist, and
+  that no module name is used at two levels.
 
 ## The rules the design rests on
 

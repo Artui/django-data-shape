@@ -4,7 +4,7 @@
 that names a symbol which is not exported still builds, because mkdocstrings
 resolves the full dotted path and never consults ``__all__``. That is how three
 documented functions came to be reachable only as
-``django_data_shape.check_constraints.check_constraints`` while
+``django_data_shape.declaration.check_constraints.check_constraints`` while
 ``from django_data_shape import check_constraints`` silently handed back the
 *module* of the same name -- an import that succeeds and then fails at the call
 site with "module object is not callable". A missing entry drifts the other way

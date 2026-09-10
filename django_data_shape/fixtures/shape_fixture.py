@@ -7,10 +7,10 @@ from typing import Any
 import pytest
 from django.db import DEFAULT_DB_ALIAS, connections
 
-from django_data_shape.build import build
-from django_data_shape.build_result import BuildResult
+from django_data_shape.declaration.shape import Shape
 from django_data_shape.fixtures.skip_unless_postgres import skip_unless_postgres
-from django_data_shape.shape import Shape
+from django_data_shape.loading.build import build
+from django_data_shape.types.build_result import BuildResult
 
 
 # The return type is ``object`` on purpose. What ``pytest.fixture`` hands back
@@ -54,7 +54,7 @@ def shape_fixture(shape: Shape, *, using: str = DEFAULT_DB_ALIAS) -> object:
     the accident of argument order, and on the losing side of that order it
     would be rolled back with the test that happened to build it.
 
-    Yields the :class:`~django_data_shape.build_result.BuildResult`, so a test
+    Yields the :class:`~django_data_shape.types.build_result.BuildResult`, so a test
     can assert on the size of the world it was handed.
 
     **One caveat, and it is worth stating plainly**: a test marked
@@ -63,7 +63,7 @@ def shape_fixture(shape: Shape, *, using: str = DEFAULT_DB_ALIAS) -> object:
     reads this fixture is measuring an empty database. Keep transactional tests
     off the tables a shape owns, mark them ``serialized_rollback=True``, or
     build per test with
-    :func:`~django_data_shape.scaled_world.scaled_world` at factor 1 -- which
+    :func:`~django_data_shape.scaling.scaled_world.scaled_world` at factor 1 -- which
     undoes itself and therefore does not care.
 
     **One world per table.** A session world holds its rows for the whole run,

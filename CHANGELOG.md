@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Every module the package owns now lives in a subpackage named for a
+  concern.** The root held forty-five modules against four to eight in the
+  sibling libraries, and no rule had been broken: the structural rules all
+  governed a *file* -- one exported symbol, named after it, fully annotated --
+  and none governed a directory, so a package could satisfy every one of them
+  and still put everything it does in one place. The root now holds
+  `__init__.py`, `version.py` and `utils.py`.
+
+  The new directories are `declaration/` (what a user writes, and everything
+  that refuses it before a row exists), `relations/` (fan-out and paired edges,
+  declared and resolved against the keys that exist), `generation/`, `loading/`,
+  `invariants/`, `databases/`, `backends/`, `scaling/` and `types/`.
+  `infer_key_strategy` moved into the existing `keys/`. There is no
+  `exceptions/`: an exception stays beside the code that raises it, so
+  `DerivationQueriedDatabase` sits with the guard that raises it and
+  `UnsupportedBackend` with the two backend gates.
+
+  **No public import changes.** `__all__` is unchanged, name for name and in the
+  same order, and every symbol is still imported the same way -- the only paths
+  that moved are the ones a caller was never meant to reach into. The
+  `django_data_shape.fixtures` surface is untouched.
+
+- **`tests/test_package_layout.py` gates the layout**, asserting that the root
+  holds only the allowlisted modules and that no module name is used at two
+  levels. Prose is what failed here: a convention that names only files is
+  obeyed exactly as far as files go, and the drift it permitted was invisible
+  for twenty-one releases.
+
 ## [0.21.0] — 2026-09-06
 
 ### Added

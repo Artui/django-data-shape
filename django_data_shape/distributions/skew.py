@@ -6,7 +6,7 @@ import math
 from collections.abc import Mapping
 from typing import Any
 
-from django_data_shape.invalid_shape import InvalidShape
+from django_data_shape.declaration.invalid_shape import InvalidShape
 
 
 class Skew:

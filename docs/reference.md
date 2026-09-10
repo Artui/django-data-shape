@@ -1,50 +1,50 @@
 # API reference
 
-::: django_data_shape.shape.Shape
+::: django_data_shape.declaration.shape.Shape
 
-::: django_data_shape.table.Table
+::: django_data_shape.declaration.table.Table
 
-::: django_data_shape.fan_out.FanOut
+::: django_data_shape.relations.fan_out.FanOut
 
-::: django_data_shape.paired.Paired
+::: django_data_shape.relations.paired.Paired
 
-::: django_data_shape.fan_out_sizes.fan_out_sizes
+::: django_data_shape.relations.fan_out_sizes.fan_out_sizes
 
-::: django_data_shape.children_per_parent.ChildrenPerParent
+::: django_data_shape.types.children_per_parent.ChildrenPerParent
 
-::: django_data_shape.projection.Projection
+::: django_data_shape.declaration.projection.Projection
 
-::: django_data_shape.build.build
+::: django_data_shape.loading.build.build
 
-::: django_data_shape.build_result.BuildResult
+::: django_data_shape.types.build_result.BuildResult
 
-::: django_data_shape.table_result.TableResult
+::: django_data_shape.types.table_result.TableResult
 
 ## Invariants
 
 ::: django_data_shape.derivations.per_parent.PerParent
 
-::: django_data_shape.invariant.Invariant
+::: django_data_shape.invariants.invariant.Invariant
 
-::: django_data_shape.check_invariants.check_invariants
+::: django_data_shape.invariants.check_invariants.check_invariants
 
-::: django_data_shape.check_constraints.check_constraints
+::: django_data_shape.declaration.check_constraints.check_constraints
 
 ## Statistics and reuse
 
-::: django_data_shape.apply_statistics_targets.apply_statistics_targets
+::: django_data_shape.loading.apply_statistics_targets.apply_statistics_targets
 
-::: django_data_shape.shape_digest.shape_digest
+::: django_data_shape.databases.shape_digest.shape_digest
 
-::: django_data_shape.canonical.Canonical
+::: django_data_shape.types.canonical.Canonical
 
-::: django_data_shape.template_database.template_database
+::: django_data_shape.databases.template_database.template_database
 
-::: django_data_shape.clone_database.clone_database
+::: django_data_shape.databases.clone_database.clone_database
 
-::: django_data_shape.drop_database.drop_database
+::: django_data_shape.databases.drop_database.drop_database
 
-::: django_data_shape.require_clone_strategy.require_clone_strategy
+::: django_data_shape.backends.require_clone_strategy.require_clone_strategy
 
 ## The pytest surface
 
@@ -54,13 +54,13 @@
 
 ::: django_data_shape.fixtures.skip_unless_postgres.skip_unless_postgres
 
-::: django_data_shape.scale_protocol.ScaleProtocol
+::: django_data_shape.scaling.scale_protocol.ScaleProtocol
 
-::: django_data_shape.scaled_world.scaled_world
+::: django_data_shape.scaling.scaled_world.scaled_world
 
-::: django_data_shape.scaled_shape.scaled_shape
+::: django_data_shape.scaling.scaled_shape.scaled_shape
 
-::: django_data_shape.shape_from_factory.shape_from_factory
+::: django_data_shape.declaration.shape_from_factory.shape_from_factory
 
 ## Derivations
 
@@ -96,7 +96,7 @@
 
 ::: django_data_shape.keys.sql_keys.SqlKeys
 
-::: django_data_shape.sql_value.SqlValue
+::: django_data_shape.declaration.sql_value.SqlValue
 
 ::: django_data_shape.keys.disjoint.Disjoint
 
@@ -124,16 +124,16 @@
 
 ## Errors
 
-::: django_data_shape.invalid_shape.InvalidShape
+::: django_data_shape.declaration.invalid_shape.InvalidShape
 
-::: django_data_shape.unsupported_backend.UnsupportedBackend
+::: django_data_shape.backends.unsupported_backend.UnsupportedBackend
 
-::: django_data_shape.derivation_queried_database.DerivationQueriedDatabase
+::: django_data_shape.generation.derivation_queried_database.DerivationQueriedDatabase
 
-::: django_data_shape.shape_not_empty.ShapeNotEmpty
+::: django_data_shape.loading.shape_not_empty.ShapeNotEmpty
 
-::: django_data_shape.unhashable_shape.UnhashableShape
+::: django_data_shape.databases.unhashable_shape.UnhashableShape
 
-::: django_data_shape.invariant_violated.InvariantViolated
+::: django_data_shape.invariants.invariant_violated.InvariantViolated
 
-::: django_data_shape.world_changed.WorldChanged
+::: django_data_shape.relations.world_changed.WorldChanged
