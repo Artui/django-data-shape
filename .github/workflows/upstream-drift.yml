@@ -41,6 +41,35 @@ jobs:
   resolve-latest:
     name: resolve unpinned + test
     runs-on: ubuntu-latest
+    # The same service tests.yml gives its own jobs. Without it this workflow
+    # resolved the newest of everything, installed it, and then failed every
+    # Postgres-backed test on `connection refused` -- so it has never once
+    # reported on upstream drift, only on its own missing database. A job that
+    # cannot pass cannot fail informatively either: the issue it opens each week
+    # names a resolve that was never the problem.
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: django_data_shape
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    # Mirrors tests.yml. The unpinned resolve includes psycopg, so a release of
+    # it that breaks the connection is exactly the drift this is here to find,
+    # and it can only be found against a real server.
+    env:
+      PGHOST: localhost
+      PGPORT: "5432"
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      PGDATABASE: django_data_shape
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
