@@ -20,7 +20,7 @@ from django_data_shape.declaration.table import Table
 from django_data_shape.generation.generate_rows import generate_rows
 from django_data_shape.generation.refuse_queries import refuse_queries
 from django_data_shape.invariants.check_invariants import check_invariants
-from django_data_shape.keys.disjoint import Disjoint
+from django_data_shape.keys.is_disjoint import is_disjoint
 from django_data_shape.loading.apply_statistics_targets import apply_statistics_targets
 from django_data_shape.loading.shape_not_empty import ShapeNotEmpty
 from django_data_shape.relations.fan_out import FanOut
@@ -279,8 +279,11 @@ def _require_empty(connection: Any, table: Table | Projection) -> None:
     the rows were put there by whoever keeps the base, which is why the message
     names that cause too.
     """
-    keys = getattr(table, "keys", None)
-    if isinstance(keys, Disjoint) and keys.is_disjoint_from_existing_rows():
+    # The same reading scaled_world makes, from the same helper, so a table the
+    # world leaves in place is never one this refuses. A strategy implementing
+    # Disjoint and answering no is refused here
+    # (test_build_refuses_rows_where_the_strategy_says_it_is_not).
+    if is_disjoint(getattr(table, "keys", None)):
         return
     db_table = table.db_table
     with connection.cursor() as cursor:

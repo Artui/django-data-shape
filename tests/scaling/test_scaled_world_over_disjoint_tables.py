@@ -1,4 +1,4 @@
-"""A declared table with Disjoint keys is emptied when it points into what is.
+"""A scaled world over Disjoint tables: what it empties, and the keys it builds.
 
 A table whose keys are ``Disjoint`` is exempt from emptying, because its keys
 cannot collide with rows already there. That exemption used to hold even when
@@ -14,6 +14,16 @@ because its rows are declared rows and cannot outlive the parents they point at.
 One that references nothing being emptied keeps its rows, which is what the
 exemption is for.
 
+**And the world builds beside those rows with keys of its own.** A Disjoint key
+is a digest of the seed and the row, so over a session world built from the
+same shape a world used to make the session's keys again and fail on the
+primary key. Every Disjoint table a world builds now draws its keys from a
+stream distinct from the one ``build()`` uses for the same seed and table --
+the same stream at every factor, and another for a world opened inside a world.
+"Disjoint" is what the strategy answers, not whether it implements the
+protocol: a strategy answering no is emptied and keeps the stream ``build()``
+gives it, as the build refuses it for holding rows.
+
 Every test runs on both aliases, because the set of tables to empty is decided
 before either route's statements are chosen. The refusal is caught as
 ``Exception`` and its type checked by name, so this module still collects on a
@@ -23,12 +33,25 @@ tree without the fix and fails on its assertions there.
 from __future__ import annotations
 
 import contextlib
+from collections.abc import Callable
+from functools import partial
+from typing import cast
 
 import pytest
-from django.db import IntegrityError
+from django.db.models import Model
 
 import django_data_shape
-from django_data_shape import Constant, FanOut, Shape, Table, Zipf, build, scaled_world
+from django_data_shape import (
+    Constant,
+    FanOut,
+    KeyStrategy,
+    Shape,
+    Table,
+    UuidKeys,
+    Zipf,
+    build,
+    scaled_world,
+)
 from tests.testapp.models import (
     Company,
     Depot,
@@ -214,45 +237,72 @@ def _regions(label: str, regions: int) -> Shape:
     )
 
 
-# A Disjoint table pointing at nothing the world empties keeps its rows, and over
-# a session world declaring it those rows are the session's. Its keys are a
-# digest of the row and of the seed, which scaling keeps, so with the session's
-# seed the world makes the session's keys and the build collides with its rows.
-# Strict, so that whatever ends the collision has to remove the mark and say
-# what a world over such a table now sees.
-_SAME_SEED_COLLIDES = pytest.mark.xfail(
-    strict=True,
-    raises=IntegrityError,
-    reason="a Disjoint table nothing emptied points into keeps the session's rows",
-)
+# What each model's rows are labelled by, then the key each holds into its parent.
+_COLUMNS: dict[type[Model], tuple[str, ...]] = {
+    Tenant: ("name",),
+    TenantRecord: ("label", "tenant_id"),
+    Region: ("name",),
+    Depot: ("name", "region_id"),
+}
 
 
-@_SAME_SEED_COLLIDES
+def _pairs(model: type[Model], alias: str, label: str) -> list[tuple[object, ...]]:
+    """Every row of ``model`` carrying ``label``, as ``(pk, label[, parent])``, sorted."""
+    columns = _COLUMNS[model]
+    rows = model.objects.using(alias).filter(**{columns[0]: label}).values_list("pk", *columns)
+    return sorted(rows, key=str)
+
+
+def _pks(model: type[Model], alias: str, **where: object) -> set[object]:
+    return set(model.objects.using(alias).filter(**where).values_list("pk", flat=True))
+
+
 @pytest.mark.parametrize("alias", _ALIASES)
 def test_a_session_world_with_a_disjoint_root_sits_under_the_same_graph(alias: str) -> None:
+    # The tenants point at nothing the world empties, so they keep the
+    # session's rows and the world builds beside them. With the session's seed
+    # its keys were the session's, and the build failed on the primary key.
     build(_tenants("session", 50), using=alias, require_statistics=False)
-    session_tenants = sorted(Tenant.objects.using(alias).values_list("pk", flat=True), key=str)
+    tenants, records = _pairs(Tenant, alias, "session"), _pairs(TenantRecord, alias, "session")
 
     with scaled_world(_tenants("world", 2), 1, using=alias) as rows:
         assert rows == 10
+        # The session's tenants, untouched, and the world's two beside them.
+        assert _pairs(Tenant, alias, "session") == tenants
+        assert len(_pks(Tenant, alias, name="world")) == 2
+        # The records have integer keys, so they were emptied, and the world's
+        # point at tenants the table holds -- the session's included, since a
+        # fan-out reads every parent there. Checked here because Django's keys
+        # are deferred and the block is rolled back before any check would run.
+        assert _pairs(TenantRecord, alias, "session") == []
+        assert {tenant for _, _, tenant in _pairs(TenantRecord, alias, "world")} <= _pks(
+            Tenant, alias
+        )
+        assert TenantRecord.objects.using(alias).count() == 8
 
-    assert (
-        sorted(Tenant.objects.using(alias).values_list("pk", flat=True), key=str) == session_tenants
-    )
+    assert _pairs(Tenant, alias, "session") == tenants
+    assert _pairs(TenantRecord, alias, "session") == records
+    assert _pks(Tenant, alias, name="world") == set()
 
 
-@_SAME_SEED_COLLIDES
 @pytest.mark.parametrize("alias", _ALIASES)
 def test_a_session_world_keyed_by_uuids_throughout_sits_under_the_same_graph(alias: str) -> None:
+    # Every table is Disjoint and none points into anything emptied, so the
+    # world empties nothing at all and builds both tables beside the session's.
     build(_regions("session", 50), using=alias, require_statistics=False)
-    session_regions = sorted(Region.objects.using(alias).values_list("pk", flat=True), key=str)
+    regions, depots = _pairs(Region, alias, "session"), _pairs(Depot, alias, "session")
 
     with scaled_world(_regions("world", 2), 1, using=alias) as rows:
         assert rows == 6
+        assert _pairs(Region, alias, "session") == regions
+        assert _pairs(Depot, alias, "session") == depots
+        assert len(_pks(Region, alias, name="world")) == 2
+        assert {region for _, _, region in _pairs(Depot, alias, "world")} <= _pks(Region, alias)
+        assert len(_pks(Depot, alias, name="world")) == 4
 
-    assert (
-        sorted(Region.objects.using(alias).values_list("pk", flat=True), key=str) == session_regions
-    )
+    assert _pairs(Region, alias, "session") == regions
+    assert _pairs(Depot, alias, "session") == depots
+    assert Region.objects.using(alias).count() == 50
 
 
 @pytest.mark.parametrize("alias", _ALIASES)
@@ -267,3 +317,166 @@ def test_with_another_seed_a_disjoint_root_builds_beside_the_session_rows(alias:
         assert Tenant.objects.using(alias).count() == 52
         assert TenantRecord.objects.using(alias).filter(label="session").count() == 0
         assert TenantRecord.objects.using(alias).filter(tenant__name="session").exists()
+
+
+@pytest.mark.parametrize("alias", _ALIASES)
+def test_a_worlds_children_point_at_its_own_disjoint_keys(alias: str) -> None:
+    # A child reads its parents' keys from the table rather than computing
+    # them, so drawing the parents' keys from another stream needs nothing of
+    # the children. Over empty tables, so every depot can only point at a
+    # region of the world's -- and those are not the regions build() makes for
+    # the same seed, which is what the world's own stream means.
+    with scaled_world(_regions("world", 2), 1, using=alias):
+        regions = _pks(Region, alias)
+        pointed_at = {region for _, _, region in _pairs(Depot, alias, "world")}
+    build(_regions("built", 2), using=alias, require_statistics=False)
+
+    assert len(regions) == 2
+    assert pointed_at and pointed_at <= regions
+    assert not regions & _pks(Region, alias)
+
+
+@pytest.mark.parametrize("alias", _ALIASES)
+def test_a_worlds_disjoint_keys_are_the_same_at_every_factor(alias: str) -> None:
+    # The stream a world draws from does not depend on the factor, so row i
+    # has one key at every size, the way an integer key is i + 1 at every size.
+    # Over the session world, where that stream is what lets the world build.
+    build(_regions("session", 50), using=alias, require_statistics=False)
+    keys = {}
+    for factor in (1, 3):
+        with scaled_world(_regions("world", 2), factor, using=alias):
+            keys[factor] = _pks(Region, alias, name="world")
+
+    assert (len(keys[1]), len(keys[3])) == (2, 6)
+    assert keys[1] <= keys[3]
+
+
+@pytest.mark.parametrize("alias", _ALIASES)
+def test_a_world_inside_another_builds_beside_it_over_a_disjoint_table(alias: str) -> None:
+    # The inner world leaves the regions alone, as the outer one did, so it
+    # builds beside the outer world's rows -- from a stream that is its own
+    # too, or it would make the outer world's keys and fail on them.
+    with scaled_world(_regions("outer", 2), 1, using=alias):
+        outer = _pairs(Region, alias, "outer")
+        with scaled_world(_regions("inner", 2), 1, using=alias) as rows:
+            assert rows == 6
+            assert _pairs(Region, alias, "outer") == outer
+            assert len(_pks(Region, alias, name="inner")) == 2
+        assert _pairs(Region, alias, "outer") == outer
+        assert _pks(Region, alias, name="inner") == set()
+
+    assert Region.objects.using(alias).count() == 0
+
+
+@pytest.mark.parametrize("alias", _ALIASES)
+def test_a_world_whose_block_raised_leaves_the_next_one_its_keys(alias: str) -> None:
+    # A world counts the worlds open around it to pick its stream, and gives
+    # its place back however its block ends: otherwise every world after one
+    # whose block raised would draw as if nested, and its keys would move.
+    with scaled_world(_regions("world", 2), 1, using=alias):
+        before = _pks(Region, alias)
+    with pytest.raises(RuntimeError), scaled_world(_regions("world", 2), 1, using=alias):
+        raise RuntimeError
+    with scaled_world(_regions("world", 2), 1, using=alias):
+        after = _pks(Region, alias)
+
+    assert len(before) == 2
+    assert after == before
+
+
+class _Drawn:
+    """UUID keys that note the stream each is drawn from, and claim nothing.
+
+    Like :class:`~django_data_shape.keys.key_function.KeyFunction` in what
+    matters here: it does not implement ``Disjoint``, so it is read as a
+    strategy whose keys can collide.
+    """
+
+    def __init__(self) -> None:
+        self.streams: set[int] = set()
+
+    def key_for(self, row: int, stream: int) -> object:
+        self.streams.add(stream)
+        return UuidKeys().key_for(row, stream)
+
+
+class _Claimed(_Drawn):
+    """The same keys, from a strategy implementing ``Disjoint`` and answering as told.
+
+    A third party's strategy can implement the protocol and say no, and
+    ``build`` reads that answer: only a strategy that says yes is built beside
+    rows already there.
+    """
+
+    def __init__(self, disjoint: bool) -> None:
+        super().__init__()
+        self._disjoint = disjoint
+
+    def is_disjoint_from_existing_rows(self) -> bool:
+        return self._disjoint
+
+
+def _one_table(keys: KeyStrategy, label: str = "world") -> Shape:
+    return Shape(Table(Tenant, rows=2, keys=keys, name=Constant(label)), seed=5)
+
+
+@pytest.mark.parametrize("alias", _ALIASES)
+@pytest.mark.parametrize(
+    ("strategy", "own_stream"),
+    [
+        (_Drawn, False),
+        (partial(_Claimed, disjoint=False), False),
+        (partial(_Claimed, disjoint=True), True),
+    ],
+    ids=["claims-nothing", "says-it-is-not", "says-it-is"],
+)
+def test_only_a_strategy_that_says_it_is_disjoint_draws_from_the_worlds_stream(
+    alias: str, strategy: Callable[[], _Drawn], own_stream: bool
+) -> None:
+    # Everything else receives the stream build() gives it. The world's own
+    # stream is there to keep a Disjoint table's keys off the rows it leaves in
+    # place, and a table that is not Disjoint leaves none: it is emptied.
+    in_world, in_build = strategy(), strategy()
+    with scaled_world(_one_table(cast("KeyStrategy", in_world)), 1, using=alias):
+        ...
+    build(_one_table(cast("KeyStrategy", in_build)), using=alias, require_statistics=False)
+
+    assert len(in_world.streams) == len(in_build.streams) == 1
+    assert (in_world.streams != in_build.streams) is own_stream
+
+
+@pytest.mark.parametrize("alias", _ALIASES)
+def test_a_strategy_that_says_it_is_not_disjoint_is_emptied(alias: str) -> None:
+    # The world asked only whether the strategy implements Disjoint, while the
+    # build asks what it answers -- so a strategy saying no was left in place
+    # by the one and refused by the other, with ShapeNotEmpty.
+    tenant = Tenant.objects.using(alias).create(name="caller")
+
+    try:
+        with scaled_world(_one_table(_Claimed(disjoint=False)), 1, using=alias) as rows:
+            assert rows == 2
+            assert list(Tenant.objects.using(alias).values_list("name", flat=True)) == [
+                "world",
+                "world",
+            ]
+    except Exception as error:
+        pytest.fail(f"{type(error).__name__}: {error}")
+
+    assert list(Tenant.objects.using(alias).values_list("pk", "name")) == [(tenant.pk, "caller")]
+
+
+@pytest.mark.parametrize("alias", _ALIASES)
+def test_disjoint_keys_are_offered_for_a_strategy_that_says_it_is_not_disjoint(
+    alias: str,
+) -> None:
+    # Emptied like any table whose keys can collide, so a record the caller
+    # made on its tenant refuses the world -- and UuidKeys would take the
+    # table out of the emptying, so the refusal offers them.
+    tenant = Tenant.objects.using(alias).create(name="caller")
+    TenantRecord.objects.using(alias).create(tenant=tenant, label="caller")
+
+    with pytest.raises(Exception) as refused, contextlib.ExitStack() as entering:
+        entering.enter_context(scaled_world(_one_table(_Claimed(disjoint=False)), 1, using=alias))
+
+    assert refused.type is django_data_shape.ShapeReferenced
+    assert "give testapp_tenant Disjoint keys (UuidKeys or Md5Keys)" in str(refused.value)

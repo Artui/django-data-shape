@@ -70,11 +70,11 @@ def shape_fixture(shape: Shape, *, using: str = DEFAULT_DB_ALIAS) -> object:
     whole run, and :func:`~django_data_shape.fixtures.scale_fixture.scale_fixture`
     over the same graph still builds: each scaled world empties the tables it
     declares inside the transaction it rolls back, and this fixture's rows are
-    back afterwards. The exception is a declared table with ``Disjoint`` keys
-    that points at nothing the world empties, such as a UUID-keyed root: it
-    keeps this fixture's rows, and with the same seed the world's keys collide
-    with them, so the pytest page's section on session worlds is worth reading
-    before scaling a graph keyed by UUIDs. It removes the rows of its declared
+    back afterwards. A declared table with ``Disjoint`` keys that points at
+    nothing the world empties, such as a UUID-keyed root, is not emptied: it
+    keeps this fixture's rows, untouched, and the world builds beside them
+    with keys drawn from a stream of its own, so they are not this fixture's
+    even where the two shapes share a seed. It removes the rows of its declared
     tables and nothing else, so it should declare every table of this world
     that references one of its own -- a session row it would have to orphan is
     refused with :class:`~django_data_shape.scaling.shape_referenced.ShapeReferenced`,

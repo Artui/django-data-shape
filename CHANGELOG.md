@@ -169,10 +169,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   pointing at parents the world had deleted. The foreign keys that decide it
   are the models', so a `ForeignKey(db_constraint=False)` pulls its table in as
   well. A `Disjoint` table pointing at nothing the world empties keeps its
-  rows, which over a session world declaring it are the session's: the world's
-  keys are a digest of each row and the seed, so with the session's seed they
-  are the session's keys and the build fails on the primary key. The pytest
-  page and the docstrings say so.
+  rows, which over a session world declaring it are the session's, and the
+  world builds beside them with keys of its own. `UuidKeys` and `Md5Keys` make
+  each key from the row and a stream derived from the seed, which scaling
+  keeps, so in 0.21.0 a world over a session world built from the same shape
+  made the session's keys and failed on the primary key. Every `Disjoint`
+  table a world builds is now handed a stream of the world's own, never the
+  one `build()` uses for the same seed and table, so inside a world its keys
+  are not the ones `build()` gives the same declaration. That stream does not
+  depend on the factor, so row *i* has one key at every factor, as an integer
+  key does, and a world opened inside another over the same table draws from
+  another stream again. Foreign keys into such a table need nothing, since a
+  fan-out reads its parents' keys from the table. And a world now reads
+  `Disjoint` as `build()` does: a key strategy implementing the protocol whose
+  `is_disjoint_from_existing_rows()` answers no is emptied like any other,
+  where the world used to leave its rows in place for the build to refuse with
+  `ShapeNotEmpty`.
 
   **One behaviour changes: a scaled world declaring a parent over rows whose
   undeclared children reference it is now refused**, where 0.21.0 silently
@@ -194,8 +206,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   foreign key the database enforces is seen: `ForeignKey(db_constraint=False)`
   and `GenericForeignKey` are invisible to it. The refusal is made on every
   backend: PostgreSQL's catalogue answers it there, and Django's introspection
-  everywhere else, where a `DELETE` alone would have reached an undeclared table
-  through a database-level `ON DELETE`. Introspection reports each column of a
+  everywhere else. It runs before any `DELETE` on both, which is what keeps a
+  `DELETE` inside the declaration: one can reach past its table through a
+  database-level `ON DELETE`, such as the one Django 6.1's `DB_CASCADE`
+  creates, but by then no row outside the tables being emptied references
+  them, so all it can reach is declared rows being removed anyway. Introspection reports each column of a
   composite foreign key on its own, so off PostgreSQL such a key counts as soon
   as any column is set; Django never creates one.
 
