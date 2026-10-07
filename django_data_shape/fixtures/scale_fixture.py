@@ -56,7 +56,9 @@ def scale_fixture(shape: Shape, *, using: str = DEFAULT_DB_ALIAS) -> object:
     remove -- a session table this shape leaves out, or a row the test wrote --
     it refuses with :class:`~django_data_shape.scaling.shape_referenced.ShapeReferenced`
     and names the reference. Declare that table too, and a session world over
-    the same graph builds every time.
+    the same graph builds every time -- a declared table with ``Disjoint`` keys
+    included, which is emptied with the tables it points into rather than left
+    referencing rows the world removed.
 
     **Open a query capture inside the block, never around it.** Repeated here
     from :func:`~django_data_shape.scaling.scaled_world.scaled_world` and not merely
@@ -70,8 +72,9 @@ def scale_fixture(shape: Shape, *, using: str = DEFAULT_DB_ALIAS) -> object:
 
     A capture wrapped around ``world(factor)`` counts the build as well as the
     block. On PostgreSQL that is a fixed overhead -- nineteen statements for a
-    two-table shape over empty tables, five more over a session world declaring
-    the same tables, at every factor. Off PostgreSQL the rows go in as ordinary
+    two-table shape over empty tables and, over a session world declaring the
+    same tables, five more where another table references them, four where none
+    does, at every factor. Off PostgreSQL the rows go in as ordinary
     inserts, one statement per thousand, **so the count grows with the factor**
     and the assertion reads the loader's growth curve instead of its subject's.
 

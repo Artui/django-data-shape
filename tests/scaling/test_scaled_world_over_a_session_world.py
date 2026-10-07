@@ -19,6 +19,7 @@ from pathlib import Path
 
 import pytest
 from django.db import connection
+from django.test.utils import CaptureQueriesContext
 
 import django_data_shape
 from django_data_shape import (
@@ -91,12 +92,18 @@ def test_a_shape_whose_tables_all_keep_their_own_keys_empties_nothing() -> None:
 
     shape = Shape(Table(Tenant, rows=3, keys=UuidKeys(), name=Constant("built")))
 
-    with scaled_world(shape, 1, using=connection.alias):
+    with (
+        CaptureQueriesContext(connection) as captured,
+        scaled_world(shape, 1, using=connection.alias),
+    ):
         # Four: the caller's row is still there, beside the three built ones.
         assert Tenant.objects.count() == 4
         assert Tenant.objects.filter(name="made-by-the-caller").exists()
 
     assert Tenant.objects.count() == 1
+    # Not even the read of which declared tables hold rows: nothing a world
+    # could find there would be emptied on its own account.
+    assert [query["sql"] for query in captured if "EXISTS" in query["sql"]] == []
 
 
 def test_a_session_table_the_scaled_shape_leaves_out_is_refused_not_emptied() -> None:

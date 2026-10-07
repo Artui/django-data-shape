@@ -30,16 +30,37 @@ from django.db import connection, connections
 from django.test.utils import CaptureQueriesContext
 
 import django_data_shape
-from django_data_shape import Constant, FanOut, Shape, Table, UuidKeys, Zipf, build, scaled_world
+from django_data_shape import (
+    Constant,
+    FanOut,
+    KeyFunction,
+    Md5Keys,
+    Projection,
+    SequentialKeys,
+    Shape,
+    Table,
+    UuidKeys,
+    Zipf,
+    build,
+    scaled_world,
+)
 from tests.testapp.models import (
     Club,
     Company,
     Depot,
+    Event,
+    KeyedSession,
     MemberFee,
     OptionalChild,
     Region,
     Section,
     Session,
+    SessionNote,
+    ShortCode,
+    SlugPk,
+    Template,
+    TemplateSession,
+    UuidSession,
 )
 
 pytestmark = pytest.mark.django_db(databases=["default", "not_postgres"])
@@ -118,12 +139,17 @@ def test_a_fee_the_caller_made_refuses_the_world_naming_its_column(alias: str) -
         entering.enter_context(scaled_world(_sections_of(club), 1, using=alias))
 
     assert refused.type is django_data_shape.ShapeReferenced
-    message = str(refused.value)
-    # The three ways out, each named: declare the table, make the keys
-    # disjoint, or do not make the rows.
-    assert "Declare testapp_memberfee in the shape too" in message
-    assert "give testapp_section Disjoint keys" in message
+    message = " ".join(str(refused.value).split())
+    # The ways out that work, each named: declare the table, or do not make
+    # the rows.
+    assert (
+        "Declare testapp_memberfee in the shape too, so those rows are the world's; or" in message
+    )
     assert "do not create those rows" in message
+    # And not Disjoint keys, which a section's integer key cannot take:
+    # following that advice failed at the load, a UUID out of range for bigint
+    # on PostgreSQL and too large for an INTEGER on SQLite.
+    assert "Disjoint" not in message
     # Only references *into* a declared table. The club's own reference to the
     # fee is a row the world does not have to remove, so naming it would send
     # the reader after a table the world never touches.
@@ -190,6 +216,142 @@ def test_disjoint_keys_build_beside_rows_that_reference_the_declared_table(alias
         assert Depot.objects.using(alias).get().region_id == region.pk
 
     assert list(Region.objects.using(alias).values_list("name", flat=True)) == ["caller"]
+
+
+def _refusal(shape: Shape, alias: str = "default") -> str:
+    """The ``ShapeReferenced`` message entering a world over ``shape`` raises."""
+    with pytest.raises(Exception) as refused, contextlib.ExitStack() as entering:
+        entering.enter_context(scaled_world(shape, 1, using=alias))
+    assert refused.type is django_data_shape.ShapeReferenced
+    return " ".join(str(refused.value).split())
+
+
+def _callers_region(alias: str) -> Region:
+    region = Region.objects.using(alias).create(name="caller")
+    Depot.objects.using(alias).create(region=region, name="caller")
+    return region
+
+
+def _regions_by_sequence() -> Table:
+    # A UUID key with keys this package counts out rather than digests, so the
+    # declared regions are emptied -- and Disjoint keys are a way out.
+    return Table(Region, rows=2, keys=SequentialKeys(), name=Constant("world"))
+
+
+@pytest.mark.parametrize("alias", _ALIASES)
+def test_disjoint_keys_are_offered_for_a_uuid_key_that_does_not_have_them(alias: str) -> None:
+    _callers_region(alias)
+
+    message = _refusal(Shape(_regions_by_sequence(), seed=5), alias)
+
+    assert "(testapp_depot.region_id -> testapp_region)" in message
+    assert (
+        "give testapp_region Disjoint keys (UuidKeys or Md5Keys), so the world builds beside "
+        "the rows already there instead of emptying the table; or do not create those rows"
+    ) in message
+
+
+@pytest.mark.parametrize("alias", _ALIASES)
+def test_disjoint_keys_are_not_offered_unless_every_named_table_can_take_them(alias: str) -> None:
+    # Two declared tables, two references: the regions could take Disjoint
+    # keys and the sections could not, so giving them to the regions would
+    # leave the fee's reference to a section refused all the same.
+    _callers_region(alias)
+    club = _callers_club(alias, fee=True)
+
+    message = _refusal(Shape(_regions_by_sequence(), *_sections_of(club).tables, seed=5), alias)
+
+    assert "testapp_depot.region_id -> testapp_region" in message
+    assert _REFERENCE in message
+    assert "Disjoint" not in message
+
+
+@pytest.mark.parametrize("alias", _ALIASES)
+def test_disjoint_keys_are_not_offered_for_a_table_that_has_them(alias: str) -> None:
+    # The sessions are UUID-keyed and Disjoint already. They are emptied only
+    # because they point at events the world empties, so the caller's note on
+    # one is refused -- and advice to give them the keys they have would send
+    # the reader nowhere.
+    template = Template.objects.using(alias).create(name="caller")
+    event = Event.objects.using(alias).create(template=template, name="caller")
+    session = UuidSession.objects.using(alias).create(event=event, title="caller")
+    SessionNote.objects.using(alias).create(session=session, text="caller")
+    shape = Shape(
+        Table(Template, rows=1, name=Constant("world")),
+        Table(Event, rows=2, template=FanOut(Zipf()), name=Constant("world")),
+        Table(UuidSession, rows=3, event=FanOut(Zipf()), title=Constant("world")),
+        seed=5,
+    )
+
+    message = _refusal(shape, alias)
+
+    assert "(testapp_sessionnote.session_id -> testapp_uuidsession)" in message
+    assert "Disjoint" not in message
+
+
+@pytest.mark.skipif(connection.vendor != "postgresql", reason="a projection is PostgreSQL's")
+def test_disjoint_keys_are_not_offered_for_a_projected_table() -> None:
+    # A projected table's keys are never read by a scaled world, which empties
+    # it whatever they are -- so Md5Keys, a Disjoint strategy that also fits
+    # its UUID key, would change nothing. A plain table rather than a model
+    # holds the reference, because no model in the suite points at this one.
+    template = Template.objects.create(name="caller")
+    event = Event.objects.create(template=template, name="caller")
+    session = KeyedSession.objects.create(event=event, title="caller", minutes=1)
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "CREATE TABLE shape_keyed_note (session_id uuid REFERENCES testapp_keyedsession (id) "
+            "DEFERRABLE INITIALLY DEFERRED)"
+        )
+        cursor.execute("INSERT INTO shape_keyed_note VALUES (%s)", [session.pk])
+    shape = Shape(
+        Table(Template, rows=1, name=Constant("world")),
+        Table(
+            TemplateSession,
+            rows=2,
+            template=FanOut(Zipf()),
+            title=Constant("world"),
+            minutes=Constant(1),
+        ),
+        Table(Event, rows=2, template=FanOut(Zipf()), name=Constant("world")),
+        Projection(KeyedSession, per=Event, copying=TemplateSession, keys=Md5Keys()),
+        seed=5,
+    )
+
+    message = _refusal(shape)
+
+    assert "(shape_keyed_note.session_id -> testapp_keyedsession)" in message
+    assert "Disjoint" not in message
+
+
+@pytest.mark.skipif(connection.vendor != "postgresql", reason="the reference is built in SQL")
+@pytest.mark.parametrize(("model", "offered"), [(SlugPk, True), (ShortCode, False)])
+def test_disjoint_keys_are_offered_for_a_character_key_that_holds_them(
+    model: type[SlugPk | ShortCode], offered: bool
+) -> None:
+    # What the two strategies accept is whatever the primary key's own field
+    # accepts from a UUID. A character key with room for its 36 characters
+    # does -- both strategies load into SlugPk's on either backend -- so the
+    # advice is offered there, where a UUIDField-only rule would withhold it;
+    # one with room for eight does not, and the advice is withheld.
+    table = model._meta.db_table
+    model.objects.create(code="caller", name="caller")
+    with connection.cursor() as cursor:
+        cursor.execute(
+            f"CREATE TABLE shape_code_note (code varchar(50) REFERENCES {table} (code) "
+            "DEFERRABLE INITIALLY DEFERRED)"
+        )
+        cursor.execute("INSERT INTO shape_code_note VALUES ('caller')")
+    shape = Shape(
+        Table(model, rows=2, keys=KeyFunction(lambda row: f"code-{row}"), name=Constant("world")),
+        seed=5,
+    )
+
+    message = _refusal(shape)
+
+    assert f"(shape_code_note.code -> {table})" in message
+    assert (f"give {table} Disjoint keys (UuidKeys or Md5Keys)" in message) is offered
+    assert ("Disjoint" in message) is offered
 
 
 @pytest.mark.parametrize("alias", _ALIASES)
@@ -322,3 +484,110 @@ def test_a_key_from_a_parent_the_world_declares_is_named_as_the_worlds_doing() -
         entering.enter_context(scaled_world(shape, 1))
 
     assert "if testapp_club is declared in the same shape" in " ".join(str(refused.value).split())
+
+
+@pytest.mark.skipif(connection.vendor != "postgresql", reason="the constraint is dropped in SQL")
+def test_a_reference_the_database_does_not_enforce_is_not_seen() -> None:
+    # What a ForeignKey(db_constraint=False) leaves in the database, made here
+    # by dropping the fee's constraint inside the test's transaction: a column
+    # holding a section's key and nothing saying so. A GenericForeignKey is the
+    # same case. The refusal reads the constraints, so it does not see this
+    # one, and the caller's fee ends up pointing at a section the world built
+    # under the key the caller's section had.
+    with connection.cursor() as cursor:
+        constraints = connection.introspection.get_constraints(cursor, "testapp_memberfee")
+        (foreign_key,) = (name for name, info in constraints.items() if info["foreign_key"])
+        cursor.execute(
+            f"ALTER TABLE testapp_memberfee DROP CONSTRAINT {connection.ops.quote_name(foreign_key)}"
+        )
+    club = _callers_club("default", fee=True)
+    (section,) = Section.objects.values_list("pk", flat=True)
+
+    with scaled_world(_sections_of(club), 1):
+        fee = MemberFee.objects.get()
+        assert fee.section_id == section
+        assert Section.objects.get(pk=section).name == "world"
+
+    assert _callers_rows("default") == [[("caller", None)], [("caller", "caller")], [("caller", 7)]]
+
+
+def _delete_trigger_on_companies(timing: str, body: str) -> None:
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "CREATE FUNCTION shape_on_delete() RETURNS trigger LANGUAGE plpgsql AS "
+            f"$$BEGIN {body} END$$"
+        )
+        cursor.execute(
+            f"CREATE TRIGGER shape_on_delete {timing} DELETE ON testapp_company "
+            "FOR EACH ROW EXECUTE FUNCTION shape_on_delete()"
+        )
+
+
+@pytest.mark.skipif(connection.vendor != "postgresql", reason="the trigger is PL/pgSQL")
+def test_a_delete_trigger_on_a_declared_table_runs_and_is_rolled_back() -> None:
+    # The DELETE route fires row-level triggers, which TRUNCATE never did: an
+    # audit trigger on a declared table writes into a table the shape does not
+    # declare, inside the block. The world's own statements still change no
+    # such table, and the trigger's write goes with the rollback.
+    with connection.cursor() as cursor:
+        cursor.execute("CREATE TABLE shape_audit (id bigint)")
+    _delete_trigger_on_companies("AFTER", "INSERT INTO shape_audit VALUES (OLD.id); RETURN OLD;")
+    company = Company.objects.create(name="caller")
+    OptionalChild.objects.create(company=None, label="caller")
+
+    def audited() -> list[int]:
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT id FROM shape_audit")
+            return [row[0] for row in cursor.fetchall()]
+
+    with scaled_world(Shape(Table(Company, rows=2, name=Constant("world"))), 1):
+        assert audited() == [company.pk]
+
+    assert audited() == []
+    assert list(Company.objects.values_list("pk", "name")) == [(company.pk, "caller")]
+
+
+@pytest.mark.skipif(connection.vendor != "postgresql", reason="the trigger is PL/pgSQL")
+def test_a_delete_trigger_that_keeps_its_rows_leaves_the_build_refused() -> None:
+    # A BEFORE DELETE trigger returning null is how a soft delete is written,
+    # and it keeps the row the world's DELETE meant to remove. The build then
+    # meets a table that is not empty and refuses it, as it would any other.
+    _delete_trigger_on_companies("BEFORE", "RETURN NULL;")
+    company = Company.objects.create(name="caller")
+    OptionalChild.objects.create(company=None, label="caller")
+
+    with (
+        pytest.raises(Exception, match="testapp_company already holds rows") as refused,
+        contextlib.ExitStack() as entering,
+    ):
+        entering.enter_context(
+            scaled_world(Shape(Table(Company, rows=2, name=Constant("world"))), 1)
+        )
+
+    assert refused.type is django_data_shape.ShapeNotEmpty
+    assert list(Company.objects.values_list("pk", "name")) == [(company.pk, "caller")]
+
+
+def test_off_postgresql_a_composite_key_counts_when_any_column_is_set() -> None:
+    # The one place the two readings of a reference differ. PostgreSQL's
+    # catalogue reads a composite foreign key whole, so one column null means
+    # no reference (the composite test above); introspection reports each
+    # column on its own, so here the column that is set is a reference. Django
+    # never creates a composite key, so it is documented rather than read.
+    sqlite = connections["not_postgres"]
+    company = Company.objects.using("not_postgres").create(name="caller")
+    with sqlite.cursor() as cursor:
+        cursor.execute("CREATE UNIQUE INDEX shape_pair_key ON testapp_company (id, name)")
+        cursor.execute(
+            "CREATE TABLE shape_pair (company_id bigint, company_name varchar(200), "
+            "FOREIGN KEY (company_id, company_name) REFERENCES testapp_company (id, name))"
+        )
+        cursor.execute("INSERT INTO shape_pair VALUES (%s, NULL)", [company.pk])
+    try:
+        message = _refusal(Shape(Table(Company, rows=2, name=Constant("world"))), "not_postgres")
+    finally:
+        with sqlite.cursor() as cursor:
+            cursor.execute("DROP TABLE shape_pair")
+            cursor.execute("DROP INDEX shape_pair_key")
+
+    assert "(shape_pair.company_id -> testapp_company)" in message

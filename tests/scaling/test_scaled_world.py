@@ -187,7 +187,8 @@ def test_it_also_undoes_a_world_it_opened_the_transaction_for() -> None:
 # CONSTRAINTS ALL IMMEDIATE, then ALL DEFERRED -- because PostgreSQL refuses to
 # truncate a table a caller's deferred check is still pending against. Two
 # statements whatever the shape and whatever the factor, so still a constant,
-# and PostgreSQL only, because the DELETE path has no such refusal.
+# and PostgreSQL only. (The DELETE route fires them too, after its DELETEs, for
+# the build's ALTER TABLE; none of the figures here takes that route.)
 #
 # And down by two on PostgreSQL, and by one off it, when a world stopped emptying
 # tables that hold nothing. Over empty tables -- which is what every measurement
@@ -204,6 +205,9 @@ _WRAPPED_STATEMENTS = _POSTGRES_STATEMENTS - 2
 # key into them, the read of whether any table holding one holds rows, the two
 # constraint-mode statements, and the TRUNCATE. Per world, never per row.
 _EMPTYING_STATEMENTS = 5
+# And one fewer where no table references the declared ones, as none references
+# an order: with no referencing table there is nothing to ask about rows in.
+_UNREFERENCED_EMPTYING_STATEMENTS = _EMPTYING_STATEMENTS - 1
 _PORTABLE_STATEMENTS = 11
 _ROWS_PER_INSERT = 1000
 
@@ -266,6 +270,26 @@ def test_and_over_a_session_world_the_emptying_adds_a_fixed_handful() -> None:
 @pytest.mark.skipif(
     connection.vendor != "postgresql", reason="the COPY route needs PostgreSQL to be measured"
 )
+def test_and_one_fewer_where_nothing_references_the_declared_tables() -> None:
+    # The handful depends on the schema, not only on the world: the read of
+    # whether any referencing table holds rows is skipped when there is no
+    # referencing table to read. Measured as a difference over one shape, so
+    # it is the emptying alone and not the rest of a world's cost.
+    shape = _orders(rows=10)
+    over_empty = _statements(shape, 1, DEFAULT_DB_ALIAS)
+    build(_orders(rows=7), require_statistics=False)
+
+    assert _statements(shape, 1, DEFAULT_DB_ALIAS) - over_empty == (
+        _UNREFERENCED_EMPTYING_STATEMENTS
+    )
+    assert _statements(shape, 5, DEFAULT_DB_ALIAS) - over_empty == (
+        _UNREFERENCED_EMPTYING_STATEMENTS
+    )
+
+
+@pytest.mark.skipif(
+    connection.vendor != "postgresql", reason="the COPY route needs PostgreSQL to be measured"
+)
 def test_and_a_capture_built_on_execute_wrapper_sees_two_fewer() -> None:
     # The second figure the docstring quotes, and the one a consumer counting
     # through the hook rather than the debug cursor will read. It was quoted
@@ -277,7 +301,7 @@ def test_and_a_capture_built_on_execute_wrapper_sees_two_fewer() -> None:
     assert _wrapped_statements(shape, 5, DEFAULT_DB_ALIAS) == _WRAPPED_STATEMENTS
 
 
-_SPELLED_OUT = {5: "five", 17: "seventeen", 19: "nineteen"}
+_SPELLED_OUT = {4: "four", 5: "five", 17: "seventeen", 19: "nineteen"}
 
 
 def test_the_figure_the_prose_quotes_is_the_one_measured() -> None:
@@ -295,8 +319,12 @@ def test_the_figure_the_prose_quotes_is_the_one_measured() -> None:
 
     assert [name for name, text in quoted_in.items() if figure not in " ".join(text.split())] == []
     # The cost of emptying a session world's tables first, quoted in the same
-    # three places beside it.
-    emptying = f"{_SPELLED_OUT[_EMPTYING_STATEMENTS]} more"
+    # three places beside it -- both figures, because which one a world pays
+    # depends on whether another table references the declared ones.
+    emptying = (
+        f"{_SPELLED_OUT[_EMPTYING_STATEMENTS]} more where another table references them, "
+        f"{_SPELLED_OUT[_UNREFERENCED_EMPTYING_STATEMENTS]} where none does"
+    )
     assert [
         name for name, text in quoted_in.items() if emptying not in " ".join(text.split())
     ] == []

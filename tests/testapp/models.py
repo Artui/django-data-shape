@@ -123,6 +123,18 @@ class SlugPk(models.Model):
     name = models.CharField(max_length=50)
 
 
+class ShortCode(models.Model):
+    """A character primary key too short for a UUID's 36 characters.
+
+    Beside ``SlugPk``, whose key has room for one: what decides whether
+    ``Disjoint`` keys are a way out of a scaled world's refusal is whether the
+    key accepts what those strategies make, and this one does not.
+    """
+
+    code = models.CharField(max_length=8, primary_key=True)
+    name = models.CharField(max_length=50)
+
+
 class Referred(models.Model):
     """A model with an optional self-relation, which may be left undeclared."""
 
@@ -402,6 +414,22 @@ class UuidSession(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     event = models.ForeignKey(Event, on_delete=models.CASCADE)
     title = models.CharField(max_length=50)
+
+
+class SessionNote(models.Model):
+    """A UUID-keyed note on a UUID-keyed session, so two Disjoint tables deep.
+
+    ``UuidSession`` references ``Event`` and this references the session, so a
+    scaled world declaring all three over rows in each reaches this table only
+    through the session: it has to be emptied because a table that has to be
+    emptied is what it points at. The key is nullable so that a note can sit
+    beside an empty session table, which is the case where it must not be
+    reached at all.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    session = models.ForeignKey(UuidSession, null=True, on_delete=models.CASCADE)
+    text = models.CharField(max_length=50)
 
 
 class DualSession(models.Model):

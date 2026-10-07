@@ -4,16 +4,21 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Any, NamedTuple
+from typing import Any, NamedTuple, cast
 
+from django.core.exceptions import ValidationError
 from django.db import DEFAULT_DB_ALIAS, connections, transaction
+from django.db.models import Model
 
+from django_data_shape.declaration.projection import Projection
 from django_data_shape.declaration.shape import Shape
+from django_data_shape.declaration.table import Table
 from django_data_shape.keys.disjoint import Disjoint
+from django_data_shape.keys.uuid_keys import UuidKeys
 from django_data_shape.loading.build import build
 from django_data_shape.scaling.scaled_shape import scaled_shape
 from django_data_shape.scaling.shape_referenced import ShapeReferenced
-from django_data_shape.utils import reset_sequence
+from django_data_shape.utils import primary_key_field, reset_sequence
 
 
 @contextmanager
@@ -54,10 +59,11 @@ def scaled_world(shape: Shape, factor: int, *, using: str = DEFAULT_DB_ALIAS) ->
     rows, the emptiness check, the statistics-target read, the parent key read,
     the sequence resets, the ``ANALYZE`` and the savepoints -- is counted per
     table or per world, never per row. Over a session world declaring the same
-    tables, emptying them first adds five more -- the read of what references
-    them, the check that none of it holds rows, the two statements firing
-    pending foreign-key checks, and the ``TRUNCATE`` -- and that too is the same
-    at every factor.
+    tables, emptying them first adds five more where another table references
+    them, four where none does -- the read of what references them, the check
+    that none of it holds rows (which has nothing to read when nothing
+    references them), the two statements firing pending foreign-key checks, and
+    the ``TRUNCATE`` -- and that too is the same at every factor.
 
     That nineteen is counted with ``CaptureQueriesContext`` -- what
     ``django_assert_num_queries`` reads -- inside a non-transactional ``django_db``
@@ -85,13 +91,26 @@ def scaled_world(shape: Shape, factor: int, *, using: str = DEFAULT_DB_ALIAS) ->
     the enclosing test transaction usable afterwards. Outside one it is an
     ordinary transaction rollback, so the same code is correct in both places.
 
-    **The declared tables are emptied first, and nothing else is: a world never
-    changes a table its shape does not declare,** not even for the life of the
-    block. A declared table that already holds rows -- a session world's, or
-    the caller's own -- is emptied, inside the transaction the block rolls
-    back, so they come back afterwards. A table whose keys are
-    :class:`~django_data_shape.keys.disjoint.Disjoint` is not emptied at all,
-    and the world builds beside the rows already there.
+    **The declared tables are emptied first, and nothing else is: no statement a
+    world issues changes a table its shape does not declare,** not even for the
+    life of the block. A declared table that already holds rows -- a session
+    world's, or the caller's own -- is emptied, inside the transaction the
+    block rolls back, so they come back afterwards. A table whose keys are
+    :class:`~django_data_shape.keys.disjoint.Disjoint` is not emptied, and the
+    world builds beside the rows already there -- unless it has a foreign key
+    into a declared table that is being emptied, directly or through another
+    such table, and holds rows. Then it is emptied too: its rows are declared
+    rows, and they cannot outlive the parents they point at. Over the same
+    graph, a session world under a scaled world therefore needs no arrangement
+    whatever its keys.
+
+    What the world's statements set off is another matter. A row-level
+    ``DELETE`` trigger on a declared table runs when the world empties that
+    table by ``DELETE`` (see below), where ``TRUNCATE`` fires none: an audit
+    trigger writing into an undeclared table writes there, and that write is
+    rolled back with the rest of the block; a ``BEFORE DELETE`` trigger that
+    returns null keeps its rows, and the build then refuses the table with
+    :class:`~django_data_shape.loading.shape_not_empty.ShapeNotEmpty`.
 
     **Where a row the world did not make references a row it must remove, the
     world refuses**, with
@@ -99,12 +118,18 @@ def scaled_world(shape: Shape, factor: int, *, using: str = DEFAULT_DB_ALIAS) ->
     it removes anything. Removing the row would leave the reference pointing at
     nothing or take the referencing row with it, and either would change a
     table the shape does not declare. The message names each reference as
-    ``referencing_table.column -> declared_table`` and the three ways out:
-    declare the referencing table too, so its rows are the world's; give the
-    declared table ``Disjoint`` keys; or do not create those rows in that test.
-    A reference left null is not one. The refusal is the same on every
-    backend: PostgreSQL's catalogue answers it there, Django's introspection
-    everywhere else.
+    ``referencing_table.column -> declared_table`` and the ways out: declare
+    the referencing table too, so its rows are the world's; give the declared
+    table ``Disjoint`` keys -- offered only where every table named can take
+    them, which an integer primary key cannot; or do not create those rows in
+    that test. A reference left null is not one. Only a foreign key the
+    database enforces is seen: a ``ForeignKey(db_constraint=False)`` and a
+    ``GenericForeignKey`` are invisible to the refusal, so a row holding one
+    is left pointing at whatever the world puts under that key. PostgreSQL's
+    catalogue answers the refusal there and Django's introspection everywhere
+    else, which reports each column of a composite foreign key on its own, so
+    off PostgreSQL a composite key counts as a reference when any of its
+    columns is set rather than all of them. Django never creates one.
 
     On PostgreSQL the emptying is one ``TRUNCATE`` when nothing outside the
     declaration holds rows, which is the case a session world under a scaled
@@ -124,8 +149,11 @@ def scaled_world(shape: Shape, factor: int, *, using: str = DEFAULT_DB_ALIAS) ->
     naming the constraint, rather than whenever the enclosing transaction next
     checks. Otherwise -- some undeclared table holds rows, none of them
     referencing a declared one -- and off PostgreSQL always, each declared
-    table holding rows is emptied by one ``DELETE``, children first, and nothing
-    is fired first.
+    table holding rows is emptied by one ``DELETE``, children first. On
+    PostgreSQL the pending checks are fired after those ``DELETE`` statements,
+    since each row a ``DELETE`` removes from a referenced table queues a check
+    of its own, and PostgreSQL refuses the build's
+    ``ALTER TABLE ... SET STATISTICS`` on a table with checks still queued.
 
     One thing the rollback does not undo, because the database will not: an
     identity sequence moved past the keys a build assigned stays moved, since
@@ -169,6 +197,8 @@ class _Reference(NamedTuple):
     a message does. They differ only off PostgreSQL, where the name comes from
     introspection bare and has to be quoted; PostgreSQL's catalogue hands back
     a name already quoted and qualified wherever the table needs it.
+    ``declared`` is the candidate's ``db_table`` as declared, on every backend,
+    which is what lets the refusal find the declaration it is about.
     """
 
     sql: str
@@ -199,7 +229,7 @@ def _empty_declared_tables(shape: Shape, using: str) -> None:
     is left alone, mirroring the exemption ``build`` makes for the same reason:
     those keys cannot collide with a caller's rows, so the hybrid this package
     documents -- parents made by your code, children made here -- must keep
-    working.
+    working. Unless it points into what is emptied: see :func:`_candidates`.
 
     **Only a declared table that holds a row needs emptying** -- a
     *candidate* -- and a world with none issues no statement after the read
@@ -237,25 +267,37 @@ def _empty_declared_tables(shape: Shape, using: str) -> None:
     (``test_over_a_session_world_the_emptying_is_one_truncate_naming_what_references_it``).
     Otherwise some referencing table holds rows, and after the refusal check
     the candidates are emptied by ``DELETE`` instead, children before parents
-    (``test_the_delete_route_empties_children_before_parents``).
+    (``test_the_delete_route_empties_children_before_parents``), and on
+    PostgreSQL the checks those statements queue are fired after them
+    (``test_statistics_on_the_parent_survive_the_delete_route``).
 
-    **Off PostgreSQL the same refusal is made through Django's introspection**,
+    **Off PostgreSQL the refusal is made through Django's introspection**,
     which reads every table's foreign keys -- a cost paid only by a world whose
     declared tables already hold rows, since one over empty tables stops at the
-    first read. It is the same rule on every backend, so a world never changes
-    a table its shape does not declare on any of them, where the ``DELETE``
-    alone would have reached one through a database-level ``ON DELETE``, or
-    left its rows pointing at keys the world then hands to rows of its own.
+    first read. It is the same rule, so a world's ``DELETE`` does not reach an
+    undeclared table through a database-level ``ON DELETE``, or leave its rows
+    pointing at keys the world then hands to rows of its own. The reading
+    differs in one place: introspection reports each column of a composite
+    foreign key on its own, so a composite key counts there as soon as any
+    column is set (``test_off_postgresql_a_composite_key_counts_when_any_column_is_set``).
+    Django never creates one.
     """
     connection = connections[using]
-    declared = [
-        table.db_table
-        for table in shape.tables
-        if not isinstance(getattr(table, "keys", None), Disjoint)
-    ]
+    if all(_keeps_its_keys(table) for table in shape.tables):
+        # Nothing here is ever emptied on its own account, so there is nothing
+        # to read either: a shape declaring only Disjoint tables issues no
+        # statement at all
+        # (test_a_shape_whose_tables_all_keep_their_own_keys_empties_nothing).
+        return
     with connection.cursor() as cursor:
-        held = _exists(cursor, [(connection.ops.quote_name(name), "") for name in declared])
-        candidates = [name for name, holds in zip(declared, held, strict=True) if holds]
+        # Every declared table in the one read, Disjoint ones included, because
+        # whether a Disjoint table holds rows decides whether it joins the
+        # candidates below -- and asking in the same statement costs nothing.
+        held = _exists(
+            cursor, [(connection.ops.quote_name(table.db_table), "") for table in shape.tables]
+        )
+        holding = {table.db_table for table, holds in zip(shape.tables, held, strict=True) if holds}
+        candidates = _candidates(shape, holding)
         if not candidates:
             return
         if connection.vendor == "postgresql":
@@ -278,9 +320,9 @@ def _empty_declared_tables(shape: Shape, using: str) -> None:
                 # a constraint declared INITIALLY IMMEDIATE if it outlived the
                 # block -- it does not, because the mode is transaction state
                 # and rolling back this block's savepoint restores it with
-                # everything else. Only on this route: DELETE has no such
-                # refusal, and SQLite's version of this call scans every table
-                # in the database.
+                # everything else. Before the statement on this route, because
+                # TRUNCATE is what refuses; the DELETE route below fires them
+                # after its statements instead, for the build's ALTER TABLE.
                 connection.check_constraints()
                 # TRUNCATE is transactional on PostgreSQL, so it rolls back with
                 # the rest of the block. No CASCADE: the closure is listed, so
@@ -293,17 +335,91 @@ def _empty_declared_tables(shape: Shape, using: str) -> None:
                 return
         else:
             references = _referencing_tables(connection, cursor, candidates)
-        _refuse_held_references(connection, cursor, references)
+        _refuse_held_references(connection, cursor, references, shape)
         # DELETE, because TRUNCATE cannot remove the declared rows here without
         # taking a table that references them along: its unit is a set closed
         # under references, and one of those tables holds rows that are not
         # this world's. The refusal above has just established that none of
         # those rows references a candidate, so removing every candidate row
         # leaves them untouched and nothing dangling. Children before parents,
-        # in the declaration's own order reversed. DELETE runs with trigger
-        # events pending, so this route fires nothing first.
+        # in the declaration's own order reversed.
         for name in reversed(candidates):
             cursor.execute(f"DELETE FROM {connection.ops.quote_name(name)}")
+        if connection.vendor == "postgresql":
+            # Fired after the DELETEs, where the TRUNCATE route fires them
+            # before its statement, and for a different refusal. DELETE itself is
+            # allowed with trigger events pending -- but every row it removes from
+            # a referenced table queues a deferred foreign-key check of its own,
+            # on top of any the caller's writes left, and PostgreSQL refuses
+            # ALTER TABLE on a table with events pending. The build's
+            # ALTER TABLE ... SET STATISTICS, for a table declaring
+            # statistics=, is the next statement to meet them
+            # (test_statistics_on_the_parent_survive_the_delete_route and its
+            # two siblings). Every check passes: the refusal above has ruled
+            # out a reference from outside the declaration, and the children
+            # went first. Off PostgreSQL nothing refuses a pending check, and
+            # SQLite's version of this call scans every table in the database.
+            connection.check_constraints()
+
+
+def _keeps_its_keys(table: Table | Projection) -> bool:
+    """Whether ``table`` builds beside rows already there rather than being emptied.
+
+    A :class:`~django_data_shape.declaration.projection.Projection` has no
+    ``keys`` to ask, and its rows come from a statement, so it never does.
+    """
+    return isinstance(getattr(table, "keys", None), Disjoint)
+
+
+def _candidates(shape: Shape, holding: set[str]) -> list[str]:
+    """The declared tables to empty, in declaration order, given which hold rows.
+
+    Every declared table holding rows whose keys are not
+    :class:`~django_data_shape.keys.disjoint.Disjoint` -- and then every
+    Disjoint one holding rows that has a foreign key into that set, repeated
+    until nothing more joins. A Disjoint table is exempt from emptying because
+    its keys cannot collide with rows already there, which is a reason to
+    leave its rows beside the world's and no reason to leave them pointing at
+    parents the world removes. Its rows are declared rows, so removing them
+    stays inside the rule this function keeps; leaving them would make the
+    world refuse its own declaration, naming a table the shape declares as if
+    it were somebody else's.
+
+    Decided by schema and not row by row, like the ``TRUNCATE`` closure: a
+    Disjoint table joins when one of its model's foreign keys points into the
+    set, whatever its rows hold there. Read from the models rather than the
+    database, so it costs no statement.
+
+    Each condition fails a test of its own when it is removed, which a branch
+    gate cannot show. Joining every Disjoint table, rather than one with a key
+    into the set, fails
+    ``test_a_disjoint_parent_the_world_does_not_reach_keeps_its_rows``. Joining
+    one that holds no rows fails
+    ``test_an_empty_disjoint_table_carries_nothing_into_the_set``, where a
+    table holding rows would follow it in. Stopping after one round, so that
+    only keys into the first set count, fails
+    ``test_a_disjoint_table_reached_through_another_joins_too``. Without the
+    set difference the loop never ends, and
+    ``test_a_session_world_with_a_disjoint_child_sits_under_the_same_graph``
+    never returns.
+    """
+    tables = [table for table in shape.tables if table.db_table in holding]
+    joined = {table.db_table for table in tables if not _keeps_its_keys(table)}
+    while (
+        joining := {table.db_table for table in tables if _foreign_key_targets(table) & joined}
+        - joined
+    ):
+        joined |= joining
+    return [table.db_table for table in shape.tables if table.db_table in joined]
+
+
+def _foreign_key_targets(table: Table | Projection) -> set[str]:
+    """The tables ``table``'s model holds a foreign key into, by ``db_table``."""
+    return {
+        cast("type[Model]", field.related_model)._meta.db_table
+        for field in table.model._meta.concrete_fields
+        if field.is_relation
+    }
 
 
 def _exists(cursor: Any, probes: list[tuple[str, str]]) -> list[bool]:
@@ -311,8 +427,9 @@ def _exists(cursor: Any, probes: list[tuple[str, str]]) -> list[bool]:
 
     One statement however many tables there are, so what a world costs stays
     a property of the world rather than of the schema. No statement at all for
-    no probes, which is how a shape declaring only ``Disjoint`` tables reaches
-    nothing.
+    no probes, which is how a candidate nothing references costs one read
+    fewer: its closure is empty, and so is the question of whether it holds
+    rows (``test_and_one_fewer_where_nothing_references_the_declared_tables``).
     """
     if not probes:
         return []
@@ -327,7 +444,11 @@ def _exists(cursor: Any, probes: list[tuple[str, str]]) -> list[bool]:
 # foreign keys backwards, transitively -- the set TRUNCATE ... CASCADE takes,
 # computed the way PostgreSQL computes it, from the constraints rather than the
 # rows. A key from a candidate is left out: a candidate's own rows are the
-# world's, and a reference between two of them is removed with both.
+# world's, and a reference between two of them is removed with both. The
+# referenced table comes back as its position among the candidates, or null
+# for a table that is not one, so the caller can name it exactly as it was
+# declared: regclass text quotes and qualifies a name wherever it must, and a
+# declared table is matched to its declaration by that name.
 _REFERENCING_CLOSURE = """
 WITH RECURSIVE reached (relid) AS (
     SELECT unnest(%(candidates)s::regclass[])::oid
@@ -339,8 +460,7 @@ WITH RECURSIVE reached (relid) AS (
 )
 SELECT
     foreign_key.conrelid::regclass::text,
-    foreign_key.confrelid::regclass::text,
-    foreign_key.confrelid = ANY (%(candidates)s::regclass[]),
+    array_position(%(candidates)s::regclass[], foreign_key.confrelid::regclass),
     ARRAY(
         SELECT attribute.attname
         FROM unnest(foreign_key.conkey) WITH ORDINALITY AS key (attnum, position)
@@ -352,7 +472,7 @@ FROM pg_constraint AS foreign_key
 JOIN reached ON foreign_key.confrelid = reached.relid
 WHERE foreign_key.contype = 'f'
   AND NOT foreign_key.conrelid = ANY (%(candidates)s::regclass[])
-ORDER BY 1, 2, foreign_key.conname
+ORDER BY 1, foreign_key.confrelid::regclass::text, foreign_key.conname
 """
 
 
@@ -377,9 +497,9 @@ def _referencing_closure(
     # into the closure comes back once per key.
     closure = list(dict.fromkeys(referencing for referencing, *_ in keys))
     references = [
-        _Reference(referencing, referencing, tuple(columns), referenced)
-        for referencing, referenced, into_candidate, columns in keys
-        if into_candidate
+        _Reference(referencing, referencing, tuple(columns), candidates[position - 1])
+        for referencing, position, columns in keys
+        if position is not None
     ]
     return closure, references
 
@@ -407,7 +527,9 @@ def _referencing_tables(connection: Any, cursor: Any, candidates: list[str]) -> 
     return references
 
 
-def _refuse_held_references(connection: Any, cursor: Any, references: list[_Reference]) -> None:
+def _refuse_held_references(
+    connection: Any, cursor: Any, references: list[_Reference], shape: Shape
+) -> None:
     """Raise :class:`ShapeReferenced` if any row holds one of ``references``.
 
     A row references something only when every column of the key is set --
@@ -415,6 +537,10 @@ def _refuse_held_references(connection: Any, cursor: Any, references: list[_Refe
     them null, and Django's keys are single columns, where the two readings
     agree. Every reference that holds a row is named, not the first: a test
     setup that made one undeclared child usually made several.
+
+    The ``Disjoint`` way out is offered only where taking it would work for
+    every declared table the message names, since each way out is offered as
+    one that ends the refusal on its own; see :func:`_disjoint_keys_fit`.
     """
     quote = connection.ops.quote_name
     held = _exists(
@@ -436,16 +562,64 @@ def _refuse_held_references(connection: Any, cursor: Any, references: list[_Refe
         for reference in found
     )
     referencing = " and ".join(dict.fromkeys(reference.table for reference in found))
-    declared = " and ".join(dict.fromkeys(reference.declared for reference in found))
+    names = list(dict.fromkeys(reference.declared for reference in found))
+    declared = " and ".join(names)
+    by_name = {table.db_table: table for table in shape.tables}
+    # Every named table, not any: following the advice for one of two leaves
+    # the other's reference refused, so the advice would not be a way out
+    # (test_disjoint_keys_are_not_offered_unless_every_named_table_can_take_them).
+    disjoint = (
+        f"give {declared} Disjoint keys (UuidKeys or Md5Keys), so the world builds beside the "
+        "rows already there instead of emptying the table; "
+        if all(_disjoint_keys_fit(by_name[name]) for name in names)
+        else ""
+    )
     raise ShapeReferenced(
         f"A scaled world cannot empty {declared} without changing a table its shape does not "
         f"declare: rows it did not make reference the rows it would remove ({named}). A world "
         "removes the rows of the tables it declares and nothing else, so it refuses rather than "
         "leave those references pointing at nothing or take their rows along. "
-        f"Declare {referencing} in the shape too, so those rows are the world's; give {declared} "
-        "Disjoint keys (UuidKeys or Md5Keys), so the world builds beside the rows already there "
-        "instead of emptying the table; or do not create those rows in this test."
+        f"Declare {referencing} in the shape too, so those rows are the world's; {disjoint}"
+        "or do not create those rows in this test."
     )
+
+
+# A key of the kind both Disjoint strategies make. UuidKeys and Md5Keys each
+# return a uuid.UUID -- different digests, the same type -- which the loader
+# hands to the primary key's get_db_prep_save, so one stands for both. Its text
+# form is what is checked, because to_python's contract is to accept a string
+# and to refuse one it cannot parse with a ValidationError, where a field handed
+# an object it never expected may raise anything.
+_DISJOINT_KEY = str(UuidKeys().key_for(0, 0))
+
+
+def _disjoint_keys_fit(table: Table | Projection) -> bool:
+    """Whether giving ``table`` Disjoint keys would take it out of the emptying.
+
+    Not for a :class:`~django_data_shape.declaration.projection.Projection`,
+    whose keys a scaled world never reads, so it is emptied whatever they are
+    (``test_disjoint_keys_are_not_offered_for_a_projected_table``); and not for
+    a table whose keys already are Disjoint, which is emptied only because it
+    references another candidate
+    (``test_disjoint_keys_are_not_offered_for_a_table_that_has_them``). Both
+    disjuncts were removed in turn and the test named beside each failed.
+
+    Otherwise only where the primary key accepts the keys those strategies
+    make, as the field's own validation decides. A ``UUIDField`` does, and so
+    does a text column that can hold a UUID's 36 characters
+    (``test_disjoint_keys_are_offered_for_a_character_key_that_holds_them``);
+    an integer key never does, and following the advice there used to fail at
+    the load, out of range for ``bigint`` on PostgreSQL and too large for an
+    ``INTEGER`` on SQLite (``test_a_fee_the_caller_made_refuses_the_world_naming_its_column``).
+    """
+    keys = getattr(table, "keys", None)
+    if keys is None or isinstance(keys, Disjoint):
+        return False
+    try:
+        primary_key_field(table.model).clean(_DISJOINT_KEY, None)
+    except ValidationError:
+        return False
+    return True
 
 
 def _reset_declared_sequences(shape: Shape, using: str) -> None:

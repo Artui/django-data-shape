@@ -7,8 +7,14 @@ queued against it. An insert into a parent alone queues nothing, which is why a
 suite that only ever wrote parents before entering a world never met it; the
 usual way in is a factory's ``SubFactory`` in the test's own setup.
 
-PostgreSQL only, because the failure is PostgreSQL's: off it the declared tables
-are emptied by ``DELETE``, which has no such refusal and is untouched by the fix.
+The same queue meets the other emptying route later. ``DELETE`` runs with
+checks pending, but every row it removes from a referenced table queues one of
+its own, and PostgreSQL refuses ``ALTER TABLE`` on a table with checks still
+queued -- which is the statement the build issues for a table declaring
+``statistics=``. So the world fires them after its ``DELETE``s too.
+
+PostgreSQL only, because the failure is PostgreSQL's: nothing else refuses a
+statement for checks still queued.
 """
 
 from __future__ import annotations
@@ -21,7 +27,7 @@ from django.test.utils import CaptureQueriesContext
 
 import django_data_shape
 from django_data_shape import Constant, FanOut, Shape, Table, Zipf, scaled_world
-from tests.testapp.models import Company, Session
+from tests.testapp.models import Club, Company, OptionalChild, Section, Session
 
 pytestmark = [
     pytest.mark.django_db,
@@ -32,10 +38,12 @@ pytestmark = [
 ]
 
 
-def _company_and_sessions() -> Shape:
+def _company_and_sessions(
+    company: dict[str, int] | None = None, session: dict[str, int] | None = None
+) -> Shape:
     return Shape(
-        Table(Company, rows=4, name=Constant("world")),
-        Table(Session, rows=8, label=Constant("world"), company=FanOut(Zipf())),
+        Table(Company, rows=4, name=Constant("world"), statistics=company),
+        Table(Session, rows=8, label=Constant("world"), company=FanOut(Zipf()), statistics=session),
         seed=3,
     )
 
@@ -148,3 +156,86 @@ def test_a_violation_the_caller_wrote_surfaces_at_entry_under_its_name() -> None
         # queued check would fail the test there. Deleting the row is enough:
         # PostgreSQL skips a queued check whose row no longer exists.
         Session.objects.filter(pk=orphan).delete()
+
+
+def _onto_the_delete_route() -> None:
+    """An undeclared row referencing a declared table through a null key.
+
+    It holds a row in a table that references the companies, so a ``TRUNCATE``
+    of them would have to take it along, and the world empties by ``DELETE``
+    instead -- with nothing to refuse, because a null key references nothing.
+    """
+    OptionalChild.objects.create(company=None, label="caller")
+
+
+def _attstattarget(table: str, column: str) -> int:
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT attstattarget FROM pg_attribute WHERE attrelid = %s::regclass AND attname = %s",
+            [table, column],
+        )
+        return cursor.fetchone()[0]
+
+
+def test_statistics_on_the_parent_survive_the_delete_route() -> None:
+    # The caller wrote a parent and no child, so nothing of the caller's is queued
+    # against the companies: what the build's ALTER TABLE met was the check the world's own
+    # DELETE of a referenced row had queued.
+    company = Company.objects.create(name="caller")
+    _onto_the_delete_route()
+
+    with (
+        CaptureQueriesContext(connection) as captured,
+        scaled_world(_company_and_sessions(company={"name": 200}), 1) as rows,
+    ):
+        assert rows == 12
+        assert _attstattarget("testapp_company", "name") == 200
+
+    assert 'DELETE FROM "testapp_company"' in [query["sql"] for query in captured]
+    assert list(Company.objects.values_list("pk", "name")) == [(company.pk, "caller")]
+
+
+def test_statistics_on_the_child_survive_the_delete_route() -> None:
+    # Here the queue is the caller's: the session written in setup left its
+    # check pending on testapp_session, which the DELETE removes the row of
+    # and does not fire.
+    company, session = _caller_writes_a_parent_and_a_child()
+    _onto_the_delete_route()
+
+    with (
+        CaptureQueriesContext(connection) as captured,
+        scaled_world(_company_and_sessions(session={"label": 200}), 1) as rows,
+    ):
+        assert rows == 12
+        assert _attstattarget("testapp_session", "label") == 200
+
+    assert 'DELETE FROM "testapp_session"' in [query["sql"] for query in captured]
+    assert list(Session.objects.values_list("pk", "company_id", "label")) == [
+        (session.pk, company.pk, "caller")
+    ]
+
+
+def test_statistics_on_a_section_survive_a_world_over_the_callers_club() -> None:
+    # The reported case, once its Section declares statistics=: the caller's
+    # club is referenced by the caller's section, so the world empties the
+    # sections by DELETE, and the fan-out is narrowed to the caller's club.
+    club = Club.objects.create(name="caller")
+    section = Section.objects.create(club=club, name="caller")
+    shape = Shape(
+        Table(
+            Section,
+            rows=3,
+            name=Constant("world"),
+            club=FanOut(Zipf(), parents=[club.pk]),
+            statistics={"name": 200},
+        ),
+        seed=5,
+    )
+
+    with scaled_world(shape, 1) as rows:
+        assert rows == 3
+        assert list(Section.objects.values_list("club_id", "name")) == [(club.pk, "world")] * 3
+
+    assert list(Section.objects.values_list("pk", "club_id", "name")) == [
+        (section.pk, club.pk, "caller")
+    ]

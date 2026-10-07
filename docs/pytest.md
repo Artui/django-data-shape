@@ -94,14 +94,19 @@ its declared tables inside the transaction it rolls back, so inside the block it
 sees only its own world, and the session rows are back after it. That is the
 shape a first consumer arrives with -- a big session world for plan assertions,
 small scaled worlds for growth assertions over the same flow -- and over the
-same graph it needs no arrangement.
+same graph it needs no arrangement. That includes a declared table with
+`Disjoint` keys, which a world otherwise leaves alone and builds beside: when it
+holds rows and has a foreign key into a declared table the world empties --
+directly, or through another such table -- it is emptied too, because its rows
+are declared rows and cannot outlive the parents they point at. A `Disjoint`
+table pointing at nothing the world empties keeps its rows.
 
-A scaled world removes the rows of its declared tables **and nothing else**, so
-it never changes a table its shape does not declare, even for the life of the
-block. Where a row it did not make references a row it would have to remove --
-a session table the scaled shape leaves out, or a row the test wrote -- it
-refuses before removing anything, rather than leave the reference pointing at
-nothing:
+A scaled world removes the rows of its declared tables **and nothing else**:
+no statement it issues changes a table its shape does not declare, even for the
+life of the block. Where a row it did not make references a row it would have to
+remove -- a session table the scaled shape leaves out, or a row the test wrote
+-- it refuses before removing anything, rather than leave the reference pointing
+at nothing:
 
 ```text
 A scaled world cannot empty testapp_company without changing a table its shape
@@ -110,11 +115,22 @@ does not declare: rows it did not make reference the rows it would remove
 ```
 
 The refusal is `ShapeReferenced`, and its message names each reference and the
-three ways out: declare the referencing table in the scaled shape too, so its
-rows are the world's; give the declared table `Disjoint` keys (`UuidKeys` or
-`Md5Keys`), so the world builds beside the rows already there instead of
-emptying the table; or do not create those rows in that test. A foreign key
-left null is not a reference, and the refusal is made on every backend.
+ways out: declare the referencing table in the scaled shape too, so its rows are
+the world's, or do not create those rows in that test. Where every declared
+table it names can take them, it offers a third: give those tables `Disjoint`
+keys (`UuidKeys` or `Md5Keys`), so the world builds beside the rows already
+there instead of emptying them. Both strategies make UUIDs, so that one is
+offered only where the primary key accepts a UUID -- a `UUIDField`, or a text
+column with room for one -- and never for an integer key, a projected table, or
+a table whose keys are `Disjoint` already.
+
+A foreign key left null is not a reference, and only a foreign key the database
+enforces is seen: a `ForeignKey(db_constraint=False)` or a `GenericForeignKey`
+is invisible to the refusal, so its row is left pointing at whatever the world
+puts under that key. The refusal is made on every backend, from PostgreSQL's
+catalogue there and Django's introspection elsewhere. The two read a composite
+foreign key differently -- off PostgreSQL it counts when any of its columns is
+set rather than all of them -- but Django never creates one.
 
 What is still refused is a second *build* over rows that stay: two
 session-scoped `shape_fixture`s over one model, or `build()` called directly over
@@ -226,7 +242,16 @@ Before the `TRUNCATE`, the foreign-key checks Django leaves deferred on the
 test's own writes are fired, because PostgreSQL refuses to truncate a table with
 checks still pending. A row that genuinely breaks a constraint therefore raises
 `IntegrityError` on the way into the world, naming the constraint, rather than
-at the end of the test.
+at the end of the test. After the `DELETE`s they are fired too, because each row
+a `DELETE` removes from a referenced table queues a check of its own, and
+PostgreSQL refuses the `ALTER TABLE ... SET STATISTICS` a table declaring
+`statistics=` is built with while checks are pending.
+
+A `DELETE` fires row-level `DELETE` triggers, which `TRUNCATE` does not. A
+trigger on a declared table runs inside the world: an audit trigger writing into
+an undeclared table writes there, and the write is rolled back with the block;
+a `BEFORE DELETE` trigger that returns null keeps its rows, and the build then
+refuses the table with `ShapeNotEmpty`.
 
 Outside a fixture, the same thing is a context manager:
 
@@ -266,8 +291,9 @@ table however many rows it carries, and everything else a world emits -- the
 read of which declared tables hold rows, the emptiness check, the
 statistics-target read, the parent key read, the sequence resets, the `ANALYZE`
 and the savepoints -- is counted per table or per world, never per row. Over a
-session world declaring the same tables, emptying them adds five more, the same
-at every factor. Off PostgreSQL it is neither mild nor fixed: the inserts are
+session world declaring the same tables, emptying them adds five more where
+another table references them, four where none does, the same at every factor.
+Off PostgreSQL it is neither mild nor fixed: the inserts are
 ordinary statements, one per thousand rows, so the count a capture sees **grows
 with the factor**, and a growth assertion measuring from outside the block would
 read the loader's curve as its subject's.
