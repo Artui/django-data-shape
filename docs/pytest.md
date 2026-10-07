@@ -86,25 +86,86 @@ order they are usually right:
 - build per test with `scaled_world(shape, 1)`, which undoes itself and
   therefore does not care.
 
-### The two fixtures do not share a table
+### A scaled world can sit over a session world
 
-A session world holds its rows for the whole run. A scaled world is built from
-empty every time. Point both at one model and the second one is refused:
+A session world holds its rows for the whole run, and a scaled world is built
+from empty every time. They can still point at one model: a scaled world empties
+its declared tables inside the transaction it rolls back, so inside the block
+those tables hold only its own world, and the session rows are back after it.
+That is the shape a first consumer arrives with -- a big session world for plan
+assertions, small scaled worlds for growth assertions over the same flow.
+
+A declared table with `Disjoint` keys is the exception, because a world leaves
+it alone and builds beside its rows. When it holds rows and has a foreign key
+into a declared table the world empties -- directly, or through another such
+table -- it is emptied too, because its rows are declared rows and cannot
+outlive the parents they point at. That join reads the models' foreign keys,
+not the database's, so a `ForeignKey(db_constraint=False)` pulls a table in,
+and a row referencing that table is then refused where the database's own keys
+would have left nothing to refuse.
+
+A `Disjoint` table pointing at nothing the world empties -- a UUID-keyed root,
+or every table of a graph keyed by UUIDs throughout -- keeps its rows, and over
+a session world declaring it those rows are the session's. The world's keys are
+a digest of each row's position and the shape's seed, and scaling keeps the
+seed, so with the session's seed the world makes the session's keys and the
+build fails on the primary key with `IntegrityError`. With another seed it
+builds, and a table fanned out over that one draws parents from the session's
+rows as well as the world's. Over the same graph, then, a session world needs no
+arrangement unless the graph has such a table.
+
+A scaled world removes the rows of its declared tables **and nothing else**:
+no statement it issues changes a table its shape does not declare, even for the
+life of the block. Where a row it did not make references a row it would have to
+remove -- a session table the scaled shape leaves out, or a row the test wrote
+-- it refuses before removing anything, rather than leave the reference pointing
+at nothing:
+
+```text
+A scaled world cannot empty testapp_company without changing a table its shape
+does not declare: rows it did not make reference the rows it would remove
+(testapp_session.company_id -> testapp_company). ...
+```
+
+The refusal is `ShapeReferenced`, and its message names each reference and the
+ways out: declare the referencing table in the scaled shape too, so its rows are
+the world's, or do not create those rows in that test. Where every declared
+table it names can take them, it offers a third: give those tables `Disjoint`
+keys (`UuidKeys` or `Md5Keys`), so the world builds beside the rows already
+there instead of emptying them. Both strategies make UUIDs, so that one is
+offered only where the primary key accepts a UUID -- a `UUIDField`, or a text
+column with room for one -- and never for an integer key, a primary key that is
+itself a foreign key, a projected table, or a table whose keys are `Disjoint`
+already. Nor is it offered for a table with a foreign key into another table the
+world empties, since with `Disjoint` keys that key would pull it back into the
+emptying and the refusal would come back unchanged.
+
+A foreign key left null is not a reference, and only a foreign key the database
+enforces is seen: a `ForeignKey(db_constraint=False)` or a `GenericForeignKey`
+is invisible to the refusal, so its row is left pointing at whatever the world
+puts under that key. The refusal is made on every backend, from PostgreSQL's
+catalogue there and Django's introspection elsewhere. The two read a composite
+foreign key differently -- off PostgreSQL it counts when any of its columns is
+set rather than all of them -- but Django never creates one.
+
+What is still refused is a second *build* over rows that stay: two
+session-scoped `shape_fixture`s over one model, or `build()` called directly over
+a session world's table. The second one meets the first one's rows:
 
 ```text
 testapp_order already holds rows, and this package assigns primary keys from 1,
 so building over them would collide. If nothing in the test wrote them, the
 usual cause is a world that was already there: a session-scoped shape_fixture
-over this model holds its rows for the whole run, and a scaled world cannot
-build over them. Give the two different models, or empty this table first.
+over this model holds its rows for the whole run, so a second build over it --
+another shape_fixture, or build() called directly -- meets them; and a template
+started from a base database keeps the rows the base holds, apart from the
+tables it rebuilds for apps without migrations. Build the second world inside
+scaled_world, which empties the declared tables and puts them back; give the two
+different models; or empty this table first, in the base if that is where the
+rows came from.
 ```
 
-That is the shape a first consumer arrives with -- a big session world for plan
-assertions, small scaled worlds for growth assertions -- so it is worth saying
-before the message has to. **They compose over a graph by taking different
-models**, not by taking turns over one: the session world gets the tables a plan
-assertion needs to be big, the scale harness gets the tables a growth assertion
-counts.
+Give the two different models, or make the second one a scaled world.
 
 ### And it is there for tests that never asked for it
 
@@ -134,8 +195,8 @@ files that never mention `shape_fixture`.
 
 Three ways out, in the order they are usually right:
 
-- **give a session world models nothing else uses.** The same rule as the one
-  above, for the same reason: a session world owns its tables for the whole run;
+- **give a session world models nothing else uses.** A session world owns its
+  tables for the whole run;
 - scope the other test's assertions rather than counting the table —
   `filter(...)` on something the shape does not produce, or assert against
   `an_order.pk` rather than a count;
@@ -184,6 +245,45 @@ remember either. Each world is built inside that transaction and undone by
 rolling back to a savepoint, so the next factor starts from an empty table and
 the test's own transaction survives.
 
+A world first empties the tables its shape declares that hold rows, inside
+that same transaction, and changes no other table: rows the test wrote in a
+declared table are gone inside the block and back after it, and a row the test
+wrote that *references* a declared table is refused, as above, rather than
+emptied or orphaned. On PostgreSQL the emptying is one `TRUNCATE` listing the
+declared tables and every table that references them, when none of those holds
+rows, and otherwise a `DELETE` per declared table holding rows. Never
+`TRUNCATE ... CASCADE`, which follows foreign keys by schema rather than by row:
+through a chain of keys leading from a declared child back to its own parent, it
+emptied the parent too.
+Before the `TRUNCATE`, the foreign-key checks Django leaves deferred on the
+test's own writes are fired, because PostgreSQL refuses to truncate a table with
+checks still pending. A row that genuinely breaks a constraint therefore raises
+`IntegrityError` on the way into the world, naming the constraint, rather than
+at the end of the test. After the `DELETE`s they are fired too, so a row outside
+the declaration that breaks a constraint raises on the way in on either route.
+The build fires them again before the `ALTER TABLE ... SET STATISTICS` a table
+declaring `statistics=` is built with, because PostgreSQL refuses it while checks
+are pending: each row a `DELETE` removes from a referenced table queues one, and
+a world that empties nothing leaves the test's own queued.
+
+The two routes part on a row in a declared table that breaks a constraint, such
+as an orphan the test wrote. The `TRUNCATE` route checks it before the
+statement and raises `IntegrityError`. The `DELETE` route removes the row
+before it fires the checks, PostgreSQL skips a check whose row is gone, and the
+world builds; the orphan is back after the block.
+
+Firing the checks ends with `SET CONSTRAINTS ALL DEFERRED`, on either route, so
+from there until the block ends every deferrable constraint is deferred -- one
+declared `INITIALLY IMMEDIATE` included -- and the test's own code inside the
+block runs under that. The mode is transaction state, so the rollback that ends
+the block restores the test's.
+
+A `DELETE` fires row-level `DELETE` triggers, which `TRUNCATE` does not. A
+trigger on a declared table runs inside the world: an audit trigger writing into
+an undeclared table writes there, and the write is rolled back with the block;
+a `BEFORE DELETE` trigger that returns null keeps its rows, and the build then
+refuses the table with `ShapeNotEmpty`.
+
 Outside a fixture, the same thing is a context manager:
 
 ```python
@@ -216,11 +316,15 @@ def test_the_dashboard_query_does_not_grow(world, django_assert_num_queries):
                 dashboard()
 ```
 
-On PostgreSQL the hazard is mild and fixed -- fourteen statements for a two-table
-shape, at every factor, because `COPY` does not pass through Django's
-`execute_wrapper` and only
-the emptiness check, the parent key read, the sequence reset, the `ANALYZE` and
-the savepoints do. Off PostgreSQL it is neither mild nor fixed: the inserts are
+On PostgreSQL the hazard is mild and fixed -- nineteen statements for a
+two-table shape over empty tables, at every factor, because one `COPY` loads a
+table however many rows it carries, and everything else a world emits -- the
+read of which declared tables hold rows, the emptiness check, the
+statistics-target read, the parent key read, the sequence resets, the `ANALYZE`
+and the savepoints -- is counted per table or per world, never per row. Over a
+session world declaring the same tables, emptying them adds five more where
+another table references them, four where none does, the same at every factor.
+Off PostgreSQL it is neither mild nor fixed: the inserts are
 ordinary statements, one per thousand rows, so the count a capture sees **grows
 with the factor**, and a growth assertion measuring from outside the block would
 read the loader's curve as its subject's.

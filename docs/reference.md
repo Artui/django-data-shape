@@ -132,7 +132,11 @@
 
 ::: django_data_shape.loading.shape_not_empty.ShapeNotEmpty
 
+::: django_data_shape.scaling.shape_referenced.ShapeReferenced
+
 ::: django_data_shape.databases.unhashable_shape.UnhashableShape
+
+::: django_data_shape.databases.unusable_base.UnusableBase
 
 ::: django_data_shape.invariants.invariant_violated.InvariantViolated
 

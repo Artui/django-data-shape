@@ -123,6 +123,18 @@ class SlugPk(models.Model):
     name = models.CharField(max_length=50)
 
 
+class ShortCode(models.Model):
+    """A character primary key too short for a UUID's 36 characters.
+
+    Beside ``SlugPk``, whose key has room for one: what decides whether
+    ``Disjoint`` keys are a way out of a scaled world's refusal is whether the
+    key accepts what those strategies make, and this one does not.
+    """
+
+    code = models.CharField(max_length=8, primary_key=True)
+    name = models.CharField(max_length=50)
+
+
 class Referred(models.Model):
     """A model with an optional self-relation, which may be left undeclared."""
 
@@ -402,6 +414,22 @@ class UuidSession(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     event = models.ForeignKey(Event, on_delete=models.CASCADE)
     title = models.CharField(max_length=50)
+
+
+class SessionNote(models.Model):
+    """A UUID-keyed note on a UUID-keyed session, so two Disjoint tables deep.
+
+    ``UuidSession`` references ``Event`` and this references the session, so a
+    scaled world declaring all three over rows in each reaches this table only
+    through the session: it has to be emptied because a table that has to be
+    emptied is what it points at. The key is nullable so that a note can sit
+    beside an empty session table, which is the case where it must not be
+    reached at all.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    session = models.ForeignKey(UuidSession, null=True, on_delete=models.CASCADE)
+    text = models.CharField(max_length=50)
 
 
 class DualSession(models.Model):
@@ -1029,3 +1057,139 @@ class Shipment(models.Model):
     requested_amount = models.IntegerField()
     approved_amount = models.IntegerField()
     settled_amount = models.IntegerField()
+
+
+class Club(models.Model):
+    """A parent that a chain of foreign keys leads back to from its own child.
+
+    ``Section`` points at a club, ``MemberFee`` at a section, and a club at the
+    fee it has selected -- the loop an application with billing grows without
+    anyone drawing it. It is what a scaled world declaring only ``Section`` has
+    to leave alone: every table here references a section transitively, so a
+    statement that empties by schema rather than by row reaches the clubs
+    through the fees, whatever rows the fees hold.
+    """
+
+    name = models.CharField(max_length=50)
+    selected_fee = models.ForeignKey(
+        "MemberFee", null=True, on_delete=models.SET_NULL, related_name="+"
+    )
+
+
+class Section(models.Model):
+    """The declared child in a scaled world over a caller's clubs."""
+
+    club = models.ForeignKey(Club, on_delete=models.CASCADE, related_name="sections")
+    name = models.CharField(max_length=50)
+
+
+class MemberFee(models.Model):
+    """An undeclared table holding a foreign key into the declared one."""
+
+    section = models.ForeignKey(Section, on_delete=models.CASCADE, related_name="fees")
+    amount = models.IntegerField()
+
+
+class Badge(models.Model):
+    """The end of a many-to-many relation that does not declare it.
+
+    ``Wearer.badges`` gives the pair a through table Django creates itself, and
+    ``Wearer.awards`` one declared as a model of its own, ``Award``. The
+    difference is what a template from a base turns on: ``migrate
+    --run-syncdb`` makes the auto-created table only while making the model
+    that declares the relation, so the copy drops and remakes it with that
+    model, while the declared one is a model like any other and is judged as
+    one.
+    """
+
+    name = models.CharField(max_length=50)
+
+
+class Wearer(models.Model):
+    """The end that declares both relations to ``Badge``."""
+
+    name = models.CharField(max_length=50)
+    badges = models.ManyToManyField(Badge, related_name="wearers")
+    awards = models.ManyToManyField(Badge, through="Award", related_name="awarded_to")
+
+
+class Award(models.Model):
+    """The through model ``Wearer.awards`` declares rather than leaving to Django."""
+
+    wearer = models.ForeignKey(Wearer, on_delete=models.CASCADE, related_name="+")
+    badge = models.ForeignKey(Badge, on_delete=models.CASCADE, related_name="+")
+
+
+class Thread(models.Model):
+    """A UUID-keyed table with a key into itself and one the database never sees.
+
+    The key into itself is for the ``Disjoint`` advice a scaled world's refusal
+    offers: giving a table those keys takes it out of the emptying unless one
+    of its keys points into another table being emptied, and a key into itself
+    is not one, because a table that is not emptied cannot pull itself back in.
+
+    The key into ``Company`` has no constraint behind it, and a scaled world
+    decides which ``Disjoint`` tables to empty from the models' keys rather
+    than the database's, so it still pulls this table in with the companies.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    parent = models.ForeignKey("self", null=True, on_delete=models.CASCADE, related_name="+")
+    company = models.ForeignKey(
+        Company, null=True, db_constraint=False, on_delete=models.DO_NOTHING, related_name="+"
+    )
+    title = models.CharField(max_length=50)
+
+
+class TenantProfile(models.Model):
+    """A primary key that is itself a one-to-one key into a UUID-keyed table.
+
+    A UUID fits the column, and still no key a ``Disjoint`` strategy makes is a
+    tenant's, so the advice to use one is never offered for it. Asking the
+    field whether it accepts one would run ``ForeignKey.validate``'s existence
+    query, against whichever database the router names rather than the world's.
+    """
+
+    tenant = models.OneToOneField(
+        Tenant, primary_key=True, on_delete=models.CASCADE, related_name="+"
+    )
+    text = models.CharField(max_length=50)
+
+
+class StrictCodeField(models.CharField):
+    """A character field whose ``to_python`` refuses with a plain exception.
+
+    Django's contract is a ``ValidationError``, and a third-party field does not
+    always keep it. ``refusal`` is a class attribute so that one model can stand
+    for a field raising either of the two such exceptions a scaled world catches.
+    """
+
+    refusal: type[Exception] = ValueError
+
+    def to_python(self, value: object) -> object:
+        text = super().to_python(value)
+        if text is not None and not str(text).startswith("code-"):
+            raise self.refusal(f"{text!r} is not a code")
+        return text
+
+
+class StrictCode(models.Model):
+    """A primary key on a ``StrictCodeField``, which refuses a UUID's text form."""
+
+    code = StrictCodeField(max_length=50, primary_key=True)
+    name = models.CharField(max_length=50)
+
+
+class Remark(models.Model):
+    """A row that references one of the three tables above, and none of them is declared.
+
+    Each key is nullable, so a test sets the one it is about and the others
+    reference nothing.
+    """
+
+    thread = models.ForeignKey(Thread, null=True, on_delete=models.CASCADE, related_name="+")
+    profile = models.ForeignKey(
+        TenantProfile, null=True, on_delete=models.CASCADE, related_name="+"
+    )
+    code = models.ForeignKey(StrictCode, null=True, on_delete=models.CASCADE, related_name="+")
+    text = models.CharField(max_length=50)

@@ -7,6 +7,98 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`template_database(shape, base=...)` starts a template from a database
+  that is already migrated.** A template was always built into an empty
+  database that `migrate` replayed the whole history into, and on a project
+  with a long one that replay is most of the cost: a consumer with about 330
+  migrations measured thirteen and a half minutes of `migrate` against about a
+  minute to build a 4.4-million-row shape, paid again by every template a
+  change to the declaration makes. With a base, the template starts as
+  `CREATE DATABASE ... TEMPLATE <base>`: the tables `migrate` builds for apps
+  without migrations are rebuilt from the models, and everything else the base
+  holds is carried as it is. Apps with migrations are brought forward by their
+  history: `migrate --run-syncdb` still runs over the copy, applying whatever
+  the base has yet to and firing `post_migrate`. Apps without migrations have
+  no history, so the tables `run_syncdb` makes for them -- their managed
+  models' tables and the many-to-many tables Django creates for those models'
+  relations, read the way `run_syncdb` reads them, router and models module
+  included, and found under the name PostgreSQL stores, which cuts a
+  `db_table` longer than 63 bytes -- are dropped from the copy first and made
+  again from the current models, as in an empty database. `run_syncdb` never alters an existing table, so a table the
+  base made from an older model would otherwise survive under a key naming the
+  new one. The base's rows in those tables do not carry over; the rest of its
+  rows, an unmanaged model's table and the tables of an app no longer installed
+  are carried. A foreign key or view in the base that points into a rebuilt
+  table stops the drop, which runs without `CASCADE` so that nothing is
+  removed silently, and is refused as `UnusableBase` from the copy.
+  `base=None`, the default, behaves and keys exactly as before.
+
+  **A base behind the migrations on disk is migrated forward in the copy; only
+  a history migrating cannot repair is refused**, with the new `UnusableBase`,
+  before anything is created. Migrating forward always ends at the checkout's schema for the
+  apps with migrations, whatever prefix of their history the base holds, and
+  the others are rebuilt, so the key stays sound without the
+  base's applied migrations entering it -- the same reason Django's own
+  PostgreSQL `TEST: {"TEMPLATE": ...}` can migrate a copy forward. A base far
+  behind pays its `migrate` once per key, never more than building from empty,
+  and the base a project has most often, one behind because a branch added a
+  migration, builds rather than being refused. *Ahead* is an applied migration
+  of an installed app that no migration on disk is or replaces: of the
+  histories a base can record, the one migrating cannot bring to the
+  checkout's schema, since a branch
+  migration that adds only an index would otherwise build silently and skew
+  plan assertions. The rows a squash leaves behind while it still lists them in
+  `replaces`, once all of them are applied, and the rows of an app that is no
+  longer installed, are not ahead. The message names up to three migrations
+  and both remedies: `manage.py migrate <app> --prune` for rows left by
+  squashed migrations deleted after their squash's `replaces` was removed, and
+  migrating the base back or recreating it for a migration from another
+  branch. Where `--prune` would decline, because a squash on disk still lists
+  in `replaces` a migration the base records as applied and that is gone from
+  disk -- one of the app being pruned from Django 5.1, of any app before -- it
+  names the squash and says to finish it first, and nowhere else, since
+  finishing a squash whose replaced files are still on disk splits the app
+  into two leaf migrations. Two
+  histories `migrate` would mishandle are refused too: a squash applied to the
+  base only in part, when a replaced migration it has yet to apply is gone
+  from disk -- Django then runs neither the squash nor the rest of what it
+  replaces, so the template would silently lack them, read off the graph
+  Django's loader builds, so that from Django 6.0 a squash of a squash is
+  judged over everything under it -- and a base holding the tables of an app
+  with a migration on disk that it records no applied migration for, which
+  `migrate` would try to create again: one with no `django_migrations` table,
+  one restored from `pg_dump --schema-only`, which brings that table back
+  empty, or one made before the app had migrations. An app whose migrations
+  would create nothing, such as a `0001_initial` holding only
+  `SeparateDatabaseAndState` state operations, is refused the same way,
+  although `migrate` would accept it. A base that does not
+  exist, one that does not accept connections, a name holding a double quote
+  -- which Django's quoting cannot carry intact, so the database checked and
+  the database copied could differ -- and a template this package made or the
+  partial of one are each refused by name rather than failing inside Django or
+  the server. Only a name the package generates counts as a template, so a
+  database of your own whose name starts `data_shape_` is not mistaken for one.
+
+  The key also takes the base's name and its database oid, so dropping and
+  recreating a base -- the usual way one restored from a dump is refreshed,
+  with the rows of `django_migrations` alongside the schema -- is a new
+  template. The base is checked on a cache hit too. Rows
+  the base holds become template content; changing them in place, by hand or
+  by migrating the base, neither of which moves its name or oid, is not seen
+  by the key, and is stated beside the
+  existing `RunSQL` gap with the same remedy, `drop_database`. One case no
+  check can see is stated too: a migration regenerated under a name the base
+  has already applied is skipped by `migrate`, so the copy keeps the version
+  the base ran; recreating the base is the remedy. Nor can one more: SQL an
+  applied migration of an app with migrations ran against a table of an app
+  without them -- an index, a trigger, a policy, a grant or a comment -- is
+  lost when the copy rebuilds that table, and recreating the base does not
+  help, so that template is built from empty with `base=None`. The process's
+  own connection is closed before the copy, so a project whose test database
+  is the base can pass it as one.
+
 ### Changed
 
 - **Every module the package owns now lives in a subpackage named for a
@@ -36,6 +128,153 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   levels. Prose is what failed here: a convention that names only files is
   obeyed exactly as far as files go, and the drift it permitted was invisible
   for twenty-one releases.
+
+### Fixed
+
+- **A scaled world no longer empties tables it does not declare, including
+  parents reached through a chain of foreign keys.** On PostgreSQL the emptying
+  was `TRUNCATE ... CASCADE`, and `CASCADE` follows foreign keys by schema,
+  transitively, whatever the rows hold. In an application whose billing points
+  back at its clubs -- a section belongs to a club, a fee to a section, and a
+  club references its selected fee -- a shape declaring only `Section` emptied
+  the clubs too. A fan-out narrowed to a club the caller had made, with
+  `parents=`, was then refused with `InvalidShape` for naming a key that was
+  "not a row of" the club table, blaming the caller's key for the package's own
+  statement; without `parents=` nothing was refused, and tables the caller had
+  filled were silently empty for the life of the block.
+
+  A world now removes the rows of its declared tables and nothing else, and no
+  statement it issues changes a table its shape does not declare, even inside
+  the block. On PostgreSQL it reads, from `pg_constraint`, every table
+  referencing a declared table that holds rows -- the set `CASCADE` would have
+  taken -- and when none of those holds rows it issues one `TRUNCATE` that
+  lists them all, without `CASCADE`: nothing outside the declaration loses a
+  row, and a list that ever missed a table would be refused by PostgreSQL
+  rather than silently widened. That is the route a session world under a
+  scaled world over the same graph takes every time. Otherwise each declared
+  table is emptied by `DELETE`, children first, and every undeclared row stays
+  where it was. A `DELETE` fires row-level `DELETE` triggers, which `TRUNCATE`
+  did not: a trigger on a declared table runs inside the world, and what it
+  writes elsewhere is rolled back with the block, while a `BEFORE DELETE`
+  trigger that keeps its rows leaves the build refusing the table with
+  `ShapeNotEmpty`. A world over empty tables issues no emptying statement and
+  fires no foreign-key checks.
+
+  A declared table with `Disjoint` keys is still left alone and built beside --
+  unless it holds rows and has a foreign key into a declared table the world
+  empties, directly or through another such table. Then it is emptied too, since
+  its rows are declared rows and cannot outlive the parents they point at. In
+  0.21.0 `CASCADE` emptied such a table on PostgreSQL, along with everything
+  else referencing the declared tables, and off PostgreSQL its rows were left
+  pointing at parents the world had deleted. The foreign keys that decide it
+  are the models', so a `ForeignKey(db_constraint=False)` pulls its table in as
+  well. A `Disjoint` table pointing at nothing the world empties keeps its
+  rows, which over a session world declaring it are the session's: the world's
+  keys are a digest of each row and the seed, so with the session's seed they
+  are the session's keys and the build fails on the primary key. The pytest
+  page and the docstrings say so.
+
+  **One behaviour changes: a scaled world declaring a parent over rows whose
+  undeclared children reference it is now refused**, where 0.21.0 silently
+  emptied them on PostgreSQL and left them pointing at nothing elsewhere.
+  Removing the parent's rows would leave those references pointing at nothing
+  or take the children along, so the world raises the new `ShapeReferenced`
+  before removing anything, naming each reference as
+  `referencing_table.column -> declared_table` and the ways out: declare that
+  table in the shape too, so its rows are the world's, or do not create those
+  rows in the test. Where following it would end the refusal, it also offers
+  `Disjoint` keys, so the world builds beside the rows already there: only
+  where every declared table it names has a primary key that accepts the UUIDs
+  `UuidKeys` and `Md5Keys` make, so never an integer key or one that is itself
+  a foreign key, and only where none of them is a projected table, has
+  `Disjoint` keys already, or has a foreign key into another table being
+  emptied, which would pull it back into the emptying. A scaled
+  world over part of a session world's graph meets it the same way, and the
+  remedy is the same. A foreign key left null is not a reference, and only a
+  foreign key the database enforces is seen: `ForeignKey(db_constraint=False)`
+  and `GenericForeignKey` are invisible to it. The refusal is made on every
+  backend: PostgreSQL's catalogue answers it there, and Django's introspection
+  everywhere else, where a `DELETE` alone would have reached an undeclared table
+  through a database-level `ON DELETE`. Introspection reports each column of a
+  composite foreign key on its own, so off PostgreSQL such a key counts as soon
+  as any column is set; Django never creates one.
+
+  The `parents=` refusal names the one way a key can still vanish inside a
+  world: a parent table declared in the same shape, which the world empties
+  before building. The `scaled_world`, `scale_fixture` and `shape_fixture`
+  docstrings and the pytest page describe the rule, where the two fixtures'
+  docstrings still said a scaled world could not build over a session world at
+  all.
+
+- **A scaled world builds over child rows the caller wrote earlier in the same
+  transaction.** On PostgreSQL it failed on the way in with `cannot TRUNCATE
+  "..." because it has pending trigger events`. Django creates PostgreSQL
+  foreign keys `DEFERRABLE INITIALLY DEFERRED`, so a child row leaves its
+  foreign-key check queued until commit, and PostgreSQL refuses to truncate a
+  table with checks still pending. An insert into a parent alone queues nothing,
+  which is why only a caller who wrote a child met it; the usual way in is a
+  factory's `SubFactory` in a test's own setup.
+
+  `scaled_world` now fires the pending checks before a `TRUNCATE`. That changes
+  only *when* they run: a row that genuinely violates a constraint now raises
+  `IntegrityError` at world entry, naming the constraint, rather than when the
+  enclosing transaction next checks. The `DELETE` route the entry above adds,
+  taken on PostgreSQL when an undeclared table holds rows, fires them after its
+  `DELETE` statements instead, so a row outside the declaration that breaks a
+  constraint raises at entry on either route. The two routes part on an orphan
+  the caller wrote in a declared table: the `TRUNCATE` route raises for it,
+  while the `DELETE` route removes it first, PostgreSQL skips the check of a row
+  that is gone, and the world builds. Once the checks are fired, on either
+  route, every deferrable constraint is deferred for the rest of the block, one
+  declared `INITIALLY IMMEDIATE` included; the mode is transaction state, so
+  the rollback of the world's own block restores the caller's. Off PostgreSQL
+  nothing is fired, because nothing there refuses a pending check.
+
+  **`build()` sets a declared statistics target over checks still queued in its
+  transaction**, where PostgreSQL refused the `ALTER TABLE ... SET STATISTICS`
+  with `cannot ALTER TABLE "..." because it has pending trigger events`. A table
+  with `Disjoint` keys is built beside the rows already there, so a row the
+  caller wrote into it earlier in the transaction left its check queued on the
+  very table the build then altered -- and a scaled world over such a table
+  empties nothing, so it met the same refusal. Each row a world's `DELETE`
+  removes from a referenced table queues a check too. `apply_statistics_targets`
+  now fires the pending checks before its first `ALTER TABLE`, and only for a
+  table that declares a target, so a table declaring none issues no statement
+  more. A row that breaks a constraint raises `IntegrityError` there, naming
+  it. Firing them ends with `SET CONSTRAINTS ALL DEFERRED`, so a build inside a
+  transaction of the caller's leaves every deferrable constraint deferred until
+  that transaction ends.
+
+  The docstring claimed this package never issues a destructive statement
+  against a table it did not fill. Beside `CASCADE` that was untrue. What holds
+  now, and what the docstring says, is that no statement a world issues changes
+  a table its shape does not declare: the only statement naming an undeclared
+  table is a `TRUNCATE` of tables that hold no rows.
+
+  The PostgreSQL statement count a capture around a world sees over empty
+  tables is nineteen, the same at every factor; over a session world declaring
+  the same tables, emptying them first adds five more where another table
+  references them, four where none does, also the same at every factor. The
+  figure quoted in the `scaled_world` and `scale_fixture` docstrings
+  and in the pytest page had drifted from the measured one in all three places;
+  they now quote both, and a test holds them to it. The `execute_wrapper` figure
+  the `scaled_world` docstring quotes beside it, seventeen -- two fewer, because
+  `COPY` reaches the debug cursor's log but not the wrapper hook -- is now
+  measured and held to the prose the same way.
+
+- **The `ShapeNotEmpty` message and the pytest page describe the refusal the
+  package makes.** Since 0.17.0 a scaled world empties the tables it declares
+  inside the transaction it rolls back, so it builds over a session world's
+  rows -- yet the message still said a scaled world cannot build over them, and
+  the pytest page's "The two fixtures do not share a table" still called that
+  composition refused and prescribed different models. The message now names
+  the causes that remain: a second build over a session world's rows, another
+  `shape_fixture` or `build()` called directly, and a template started from a
+  base database that holds rows in a declared table. Its remedies are a scaled
+  world, different models, or emptying the table, in the base if that is where
+  the rows came from. The page's section is now "A scaled world can sit over a
+  session world", quoting the new message, and a test holds the quotation to
+  the message raised.
 
 ## [0.21.0] — 2026-09-06
 

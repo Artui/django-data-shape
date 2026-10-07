@@ -66,13 +66,21 @@ def shape_fixture(shape: Shape, *, using: str = DEFAULT_DB_ALIAS) -> object:
     :func:`~django_data_shape.scaling.scaled_world.scaled_world` at factor 1 -- which
     undoes itself and therefore does not care.
 
-    **One world per table.** A session world holds its rows for the whole run,
-    so :func:`~django_data_shape.fixtures.scale_fixture.scale_fixture` over the
-    same model cannot build: the second build meets a table that is not empty
-    and is refused. Give the two different models -- the session world the tables
-    a plan assertion needs to be big, the scale harness the tables a growth
-    assertion counts. It is the first thing a consumer composing both hits, and
-    the refusal now names it.
+    **A scaled world can sit over it.** A session world holds its rows for the
+    whole run, and :func:`~django_data_shape.fixtures.scale_fixture.scale_fixture`
+    over the same graph still builds: each scaled world empties the tables it
+    declares inside the transaction it rolls back, and this fixture's rows are
+    back afterwards. The exception is a declared table with ``Disjoint`` keys
+    that points at nothing the world empties, such as a UUID-keyed root: it
+    keeps this fixture's rows, and with the same seed the world's keys collide
+    with them, so the pytest page's section on session worlds is worth reading
+    before scaling a graph keyed by UUIDs. It removes the rows of its declared
+    tables and nothing else, so it should declare every table of this world
+    that references one of its own -- a session row it would have to orphan is
+    refused with :class:`~django_data_shape.scaling.shape_referenced.ShapeReferenced`,
+    naming the reference, rather than emptied. What is still refused is a
+    second *build* over rows that stay: another session-scoped
+    ``shape_fixture`` over the same model, or ``build()`` called directly.
 
     On a connection that cannot carry a shaped database the fixture skips with
     the reason rather than raising, so a suite that also runs on SQLite reports

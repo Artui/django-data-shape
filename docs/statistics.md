@@ -124,8 +124,8 @@ clone_database(template, "test_myapp", replace=True)
 [`template_database`][django_data_shape.databases.template_database.template_database]
 names the database after a content hash of everything that decides what is in it,
 so reuse is safe rather than merely fast. Change the declaration, the schema, the
-time-zone settings or this package's version and the name changes, so the old
-database is simply never asked for again.
+time-zone settings, this package's version or the base it starts from and the
+name changes, so the old database is simply never asked for again.
 
 ### The key
 
@@ -237,6 +237,189 @@ def django_db_modify_db_settings(django_db_modify_db_settings_parallel_suffix, d
 deciding whether the database you have is the one you want, and the template
 *is* the reuse.
 
+### Starting from a migrated base
+
+By default a template is built into a database that `migrate` fills from empty,
+and on a project with a long migration history that replay is most of the cost: one with
+about 330 migrations measured thirteen and a half minutes of `migrate` against
+about one minute to build a four-million-row shape -- paid again by every
+template a change to the declaration makes. Such a project usually keeps a
+migrated database already, and clones its test databases from it. Name it as
+the base and the template starts as a copy of it instead:
+
+```python
+# conftest.py
+import pytest
+from django.db import connections
+
+from django_data_shape import clone_database, drop_database, template_database
+
+BASE = "myproject_base"  # a database you keep migrated
+
+
+@pytest.fixture(scope="session")
+def django_db_setup(django_test_environment, django_db_modify_db_settings, django_db_blocker):
+    connection = connections["default"]
+    settings = connection.settings_dict
+    target = settings["TEST"]["NAME"] or f"test_{settings['NAME']}"
+
+    with django_db_blocker.unblock():
+        clone_database(template_database(SHAPE, base=BASE), target, replace=True)
+        connection.close()
+        settings["NAME"] = target
+        yield
+        connection.close()
+        drop_database(target)
+```
+
+The tables `migrate` builds for apps without migrations are rebuilt from the
+models, and everything else the base holds is carried as it is. An app with
+migrations is brought forward by its history: `migrate` runs over the copy and
+applies whatever the base has yet to -- nothing, on a base kept up to date. An
+app without migrations has no history to bring forward, so the tables
+`run_syncdb` makes for it -- its managed models' tables, and the many-to-many
+tables Django creates for their relations -- are dropped from the copy first
+and made again from the current models, as in an empty database. `run_syncdb`
+creates a missing table and never alters an existing one, so this is what stops
+a table the base made from an older model surviving under a key that names the
+new one -- and it means the base's rows in those tables do not carry over.
+A table is found under the name PostgreSQL stores, which for a `db_table`
+longer than 63 bytes is its first 63, cut back to a whole character: Django
+does not shorten a name a model spells out, and `run_syncdb` on its own would
+miss such a table and fail creating it again. Everything else is carried as
+the base has it: the rows in the tables of apps with migrations, an unmanaged
+model's table, the tables of an app that is no longer installed and those of
+an app with no models module, which `run_syncdb` passes over. `post_migrate`
+fires as it does from empty.
+
+**A base behind the migrations on disk is migrated forward; only a history
+migrating cannot repair is refused.** Migrating forward always ends at the
+checkout's schema for the apps with migrations, whatever prefix of their history
+the base holds, and the apps without them are rebuilt, so the key stays sound as
+it is:
+everything it absorbed before, plus the base's name and oid. The base's applied
+migrations do not need to enter it. Migrating the base itself forward later
+leaves its oid alone, so the same name is asked for, and the template under it is
+the one the copy's own forward migration already gave. Django's own PostgreSQL
+`TEST: {"TEMPLATE": ...}` setting behaves the same way. A base far behind pays its
+`migrate` once per key, which is never more than building from empty pays -- and
+accepting it is what keeps the base a project has most often, one migration
+behind because a branch added one, from being refused at all.
+
+What is refused is what migrating cannot fix, raising
+[`UnusableBase`][django_data_shape.databases.unusable_base.UnusableBase] before
+anything is created, with the one exception marked, and naming the base:
+
+- **ahead** -- the base records an applied migration of an installed app that no
+  migration on disk is or replaces. Of the histories a base can record, this is
+  the one migrating cannot bring to the checkout's schema: it moves only
+  forward, so whatever those migrations did stays in the copy, and a branch
+  migration that adds only an index would otherwise build silently and skew plan
+  assertions. The
+  message names up to three of them and gives two remedies, because the two
+  usual causes need opposite ones. Rows left behind by squashed migrations whose
+  files were deleted after the squash's `replaces` was removed are pruned with
+  `manage.py migrate <app> --prune` against the base (Django 4.1 and later). A
+  migration from another branch is undone by migrating the base back from a
+  checkout that has it, or by recreating the base -- pruning its row would leave
+  its schema in place and only silence the refusal. `--prune` declines to run
+  while a squash on disk still lists, in its `replaces`, a migration the base
+  records as applied and that is gone from disk -- from Django 5.1 one of the
+  app being pruned, and up to 5.0 one of any app -- so where that holds the
+  message names the squash and says to finish it first, by running `migrate`
+  against the base so that it is recorded as applied and then removing its
+  `replaces`, which makes it an ordinary migration, and prune after. Where it
+  does not hold, the message says nothing about squashes, because pruning
+  works as it is and removing `replaces` from a squash whose replaced files
+  are still on disk would leave the app with two leaf migrations.
+- **a squash applied in part, with its replaced files deleted** -- the base
+  records some of the migrations a squash on disk replaces, and one it has yet
+  to apply is no longer on disk. Django runs a squash only when all or none of
+  what it replaces is applied, and otherwise runs the replaced migrations
+  themselves, so with one of those files gone neither runs and the template
+  would silently lack what they do. Migrate the base from a checkout that
+  still has the replaced migrations, or recreate it. A squash applied in part
+  whose replaced files are still there is not refused: Django finishes it one
+  replaced migration at a time. Which squashes Django set aside is read off
+  the graph Django's loader builds, on every version, rather than worked out
+  again from what each squash lists. From Django 6.0 a squash can replace
+  another squash, and Django judges "in part" over everything the two come
+  down to, so a squash of a squash is refused when the base applied some of
+  what the inner one replaces and a migration after it is gone from disk.
+- **tables with no record of their migrations** -- the base holds the tables of
+  an app with migrations and records no applied migration for that app, so
+  `migrate` would create them again and fail on the first. It is judged app by
+  app. A base with no `django_migrations` table is the whole-database form; a
+  base restored from `pg_dump --schema-only` is the commonest, because the
+  table comes back with none of its rows; and a base made while an app had no
+  migrations is the one-app form, once the app gains them. Restore the rows of
+  `django_migrations` with the schema, or recreate the base with `migrate`. An
+  empty database holds none of those tables and is migrated in full; the tables
+  of an app without migrations do not count, because `run_syncdb` records
+  nothing for them, and nor do those of an app whose migrations package holds
+  no migration yet, which `migrate` leaves alone. One history is refused
+  although `migrate` would accept it: an app whose migrations would create
+  nothing when applied, such as a `0001_initial` holding only
+  `SeparateDatabaseAndState` state operations, because telling it apart would
+  mean reading what each operation does to the database.
+- **a reference into a rebuilt table** -- something in the base outside the
+  tables being rebuilt depends on one of them: a foreign key or a view. Those tables are dropped in one statement without `CASCADE`,
+  because `CASCADE` would remove the reference silently, `run_syncdb` would not
+  put it back, and the template would match neither the base nor one built from
+  empty. So PostgreSQL refuses the drop, and the refusal is raised as
+  `UnusableBase` naming the base and the object in the way. This one is raised
+  from the copy rather than before it, since only the copy can find it, and the
+  partial is dropped with it. Drop the reference in the base or recreate it
+  without one. Django does let a migration of an app with migrations point at
+  an app without them, and in that project no base can be started from until
+  the app pointed at has migrations of its own; build from empty instead.
+- **missing** -- no database by that name exists.
+- **closed** -- the database does not accept connections (`ALLOW_CONNECTIONS
+  false`). A base is connected to before it is copied, to read which migrations
+  it has applied.
+- **a template** -- a database named `data_shape_` and a sixteen-character
+  digest, with or without the `__partial` suffix a build works under, which
+  this package made. A template holds a shape's rows under a name keyed for
+  that shape, so it is never a base, whether or not connections to it have been
+  turned back on. A database of your own that merely starts with `data_shape_`
+  is a base like any other.
+- **a double quote in the name** -- Django quotes a database name by wrapping it
+  in double quotes, passes one that is already wrapped through unchanged and
+  escapes nothing inside it, so the database checked and the database copied
+  could be two different ones.
+
+Two kinds of row are not ahead. A squash whose replaced files were deleted
+leaves their rows behind, and they are not ahead while the squash still lists
+them in its `replaces` -- once all of them are applied; a squash applied in part
+is the case above. And a row for an app that is no longer installed
+describes nothing the checkout's models use, so it is ignored; its tables, if
+any are left, are carried like any other table the shape does not declare. The
+rows a squash of a squash leaves are a different matter: once only the outer
+squash is on disk, the migrations the inner one replaced are listed by nothing
+on disk, so their rows read as ahead although Django counts the base as
+migrated. The outer squash lists the inner one and the migration after it,
+both applied and both gone from disk, so `--prune` declines over it, and this is
+the case the ahead message's advice to finish the squash first is for.
+
+The base is checked on every call, a cache hit included, because its oid is part
+of the key. That is also what makes refreshing a base safe: dropping and
+recreating it, which is how one restored from a dump is usually updated, gives
+it a new oid and so a new template. The dump has to carry the rows of
+`django_migrations` as well as the schema; `pg_dump --schema-only` alone
+restores a base that is refused, as above.
+
+Whatever else the base holds, outside the tables being rebuilt, becomes
+template content, which is what lets the base carry reference data the
+shape does not declare. Rows in a table the shape
+*does* declare are refused by the build's emptiness check as they would be
+anywhere, with a `ShapeNotEmpty` message that names the base as one place they
+come from, except in a table with `Disjoint` keys, which is exempt from it.
+
+The base must have nothing attached to it while the template is copied -- the
+same rule as for cloning a template, and for the same reason. This process's own
+connection is closed first, so a project whose test database is the base can
+pass it as one.
+
 ### What it does not support
 
 - **Anything but PostgreSQL.** `CREATE DATABASE ... TEMPLATE` has no equivalent
@@ -259,6 +442,30 @@ deciding whether the database you have is the one you want, and the template
   every migration's name and every model's fields, so ordinary schema changes
   move it; editing the body of a migration that has already been created changes
   neither. Drop the template by hand when that happens.
+- **A migration regenerated under a name a base has already applied.** With a
+  base, an edited migration goes one step further, and it is a case nothing can
+  detect: `migrate` reads the name as applied and skips it, so
+  the copy keeps the version the base ran, and a template rebuilt from the same
+  base would keep it again. Recreate the base, which gives it a new oid and so a
+  new template.
+- **What a migration did to a rebuilt table.** A migration of an app with
+  migrations can run SQL against a table of an app without them -- an index, a
+  trigger, a policy, a grant or a comment. A base has applied it, so when the
+  copy rebuilds that table what the migration made is lost, and the migration is
+  never run again; nothing in the copy says which index or trigger came from
+  where, so this is stated rather than detected. Recreating the base does not
+  help, because a recreated base has applied the migration too. Build that
+  template from empty, with `base=None`: there `run_syncdb` makes the table
+  before the migration runs.
+- **Rows changed in a base in place.** The key covers a base's name and oid,
+  and the schema any accepted base migrates forward to; changing the rows it
+  holds, by hand or by migrating the base, neither of which moves its name or
+  oid, changes none of them, so the template built from the old rows is still
+  the one asked for. Drop it with `drop_database` when that happens, or
+  recreate the base rather than changing it.
+- **A base ahead of the migrations on disk.** It is refused with the remedies,
+  as above, rather than migrated back: the migrations that would undo it are not
+  in this checkout.
 
 Parallel runs *are* supported. Under `pytest-xdist` every worker asks for the
 same template at once; the first takes a PostgreSQL advisory lock on the digest

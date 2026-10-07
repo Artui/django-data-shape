@@ -14,9 +14,14 @@ passed, and the same tests named in the other order failed.
 
 from __future__ import annotations
 
+import contextlib
+from pathlib import Path
+
 import pytest
 from django.db import connection
+from django.test.utils import CaptureQueriesContext
 
+import django_data_shape
 from django_data_shape import (
     Constant,
     FanOut,
@@ -87,9 +92,47 @@ def test_a_shape_whose_tables_all_keep_their_own_keys_empties_nothing() -> None:
 
     shape = Shape(Table(Tenant, rows=3, keys=UuidKeys(), name=Constant("built")))
 
-    with scaled_world(shape, 1, using=connection.alias):
+    with (
+        CaptureQueriesContext(connection) as captured,
+        scaled_world(shape, 1, using=connection.alias),
+    ):
         # Four: the caller's row is still there, beside the three built ones.
         assert Tenant.objects.count() == 4
         assert Tenant.objects.filter(name="made-by-the-caller").exists()
 
     assert Tenant.objects.count() == 1
+    # Not even the read of which declared tables hold rows: nothing a world
+    # could find there would be emptied on its own account.
+    assert [query["sql"] for query in captured if "EXISTS" in query["sql"]] == []
+
+
+def test_a_session_table_the_scaled_shape_leaves_out_is_refused_not_emptied() -> None:
+    """A scaled world over part of a session world's graph.
+
+    The session world holds companies and their sessions; the scaled world
+    declares companies alone. Emptying the companies would orphan the session
+    rows or take them along, and the sessions are not the scaled world's, so it
+    refuses -- naming the reference, which is the table to add to its shape.
+    The pytest page quotes the start of this message, and is held to it here.
+    """
+    build(_shape(), require_statistics=False)
+
+    with (
+        pytest.raises(
+            Exception, match=r"testapp_session\.company_id -> testapp_company"
+        ) as refused,
+        contextlib.ExitStack() as entering,
+    ):
+        entering.enter_context(
+            scaled_world(Shape(Table(Company, rows=2, name=Constant("world"))), 1)
+        )
+
+    assert refused.type is django_data_shape.ShapeReferenced
+    message = " ".join(str(refused.value).split())
+    assert "(testapp_session.company_id -> testapp_company)" in message
+    page = (Path(__file__).resolve().parents[2] / "docs" / "pytest.md").read_text()
+    quoted = page.split("```text\nA scaled world cannot empty", 1)[1].split("...", 1)[0]
+    assert message.startswith(" ".join(f"A scaled world cannot empty{quoted}".split()))
+    # Nothing was removed on the way to the refusal.
+    assert Company.objects.filter(name="acme").count() == 4
+    assert Session.objects.count() == 8

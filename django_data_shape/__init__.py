@@ -7,6 +7,7 @@ from django_data_shape.databases.drop_database import drop_database
 from django_data_shape.databases.shape_digest import shape_digest
 from django_data_shape.databases.template_database import template_database
 from django_data_shape.databases.unhashable_shape import UnhashableShape
+from django_data_shape.databases.unusable_base import UnusableBase
 from django_data_shape.declaration.check_constraints import check_constraints
 from django_data_shape.declaration.invalid_shape import InvalidShape
 from django_data_shape.declaration.projection import Projection
@@ -55,6 +56,7 @@ from django_data_shape.relations.world_changed import WorldChanged
 from django_data_shape.scaling.scale_protocol import ScaleProtocol
 from django_data_shape.scaling.scaled_shape import scaled_shape
 from django_data_shape.scaling.scaled_world import scaled_world
+from django_data_shape.scaling.shape_referenced import ShapeReferenced
 from django_data_shape.types.build_result import BuildResult
 from django_data_shape.types.canonical import Canonical
 from django_data_shape.types.children_per_parent import ChildrenPerParent
@@ -97,6 +99,7 @@ __all__ = [
     "SequentialKeys",
     "Shape",
     "ShapeNotEmpty",
+    "ShapeReferenced",
     "Skew",
     "SqlKeys",
     "SqlValue",
@@ -105,6 +108,7 @@ __all__ = [
     "UnhashableShape",
     "Uniform",
     "UnsupportedBackend",
+    "UnusableBase",
     "UuidKeys",
     "WorldChanged",
     "Zipf",

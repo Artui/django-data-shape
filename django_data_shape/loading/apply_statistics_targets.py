@@ -66,6 +66,23 @@ def apply_statistics_targets(connection: Any, declaration: Table | Projection) -
     it -- the ordering is owned by the library for the same reason the rest of
     the sequence is.
 
+    **Checks still queued are fired before the first target is set.** PostgreSQL
+    refuses ``ALTER TABLE`` on a table with trigger events pending, and Django
+    creates its foreign keys ``DEFERRABLE INITIALLY DEFERRED``, so a row written
+    earlier in the same transaction into a table built beside it -- one with
+    :class:`~django_data_shape.keys.disjoint.Disjoint` keys, which the build
+    does not refuse for holding rows -- leaves its check queued on the table
+    about to be altered. So every check pending in the transaction is fired
+    first, and a row that breaks a constraint raises ``IntegrityError`` here,
+    naming it, rather than at commit. Only for a declaration with targets to
+    set: one declaring none issues no statement more. Firing them ends with
+    ``SET CONSTRAINTS ALL DEFERRED``, which stays in force for the rest of the
+    transaction, so a build inside a transaction of the caller's leaves every
+    deferrable constraint deferred until commit, one declared
+    ``INITIALLY IMMEDIATE`` included. Inside
+    :func:`~django_data_shape.scaling.scaled_world.scaled_world` that is rolled
+    back with the block.
+
     Nothing happens on another backend. The branch is on the connection's vendor
     rather than on a failed statement, so it is covered by passing a vendor
     rather than by running the suite on the backend it skips.
@@ -82,6 +99,27 @@ def apply_statistics_targets(connection: Any, declaration: Table | Projection) -
         effective = {column: target for column, target in cursor.fetchall()}
         if isinstance(declaration, Table):
             _refuse_what_cannot_be_recorded(declaration, effective)
+        if declaration.statistics:
+            # Fire the foreign-key checks still queued in this transaction
+            # before the first ALTER TABLE, because PostgreSQL refuses one on a
+            # table with trigger events pending. Django creates its foreign
+            # keys DEFERRABLE INITIALLY DEFERRED, so a row the caller wrote
+            # earlier in the transaction into a table built beside it -- one
+            # with Disjoint keys, which the build does not refuse for holding
+            # rows -- leaves its check queued on exactly the table being
+            # altered. Firing them changes when they run, not whether: a row
+            # that breaks a constraint raises IntegrityError here, under the
+            # constraint's name, rather than at commit
+            # (test_a_row_that_breaks_a_constraint_is_refused_before_the_target).
+            # The SET CONSTRAINTS ALL DEFERRED it ends with outlives the build
+            # (test_firing_them_defers_every_constraint_for_the_transaction),
+            # which leaves the caller's own INITIALLY IMMEDIATE constraints
+            # deferred too; no statement restores each constraint's own mode.
+            #
+            # Only where an ALTER follows, so a table declaring no target costs
+            # no statement more
+            # (test_no_check_is_fired_for_a_table_that_sets_no_target).
+            connection.check_constraints()
         for name, target in sorted(declaration.statistics.items()):
             # The target is interpolated rather than bound. ALTER TABLE takes no
             # placeholders -- the value is part of the utility statement's own

@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import contextlib
 import datetime
+from collections.abc import Callable
+from pathlib import Path
+from typing import Any
 
 import pytest
 from django.db import DEFAULT_DB_ALIAS, connection, connections
@@ -18,9 +21,13 @@ from django_data_shape import (
     Skew,
     Table,
     Zipf,
+    build,
     scaled_world,
 )
+from django_data_shape.fixtures import scale_fixture
 from tests.testapp.models import Company, Order, Session
+
+_ROOT = Path(__file__).resolve().parents[2]
 
 # No backend skip, unlike the loader's own tests, and the difference is the
 # point: a growth harness asks for rows and cardinality rather than for a
@@ -153,8 +160,9 @@ def test_it_also_undoes_a_world_it_opened_the_transaction_for() -> None:
 # not change silently is which of the two is a constant and which is a curve.
 # Counted with CaptureQueriesContext inside a non-transactional django_db test,
 # which is what pytestmark above gives every test in this module. Both of those
-# choices move the number: through execute_wrapper the same shape is eleven, and
-# a transaction=True test is one savepoint fewer. The constants are therefore a
+# choices move the number: through execute_wrapper the same shape is seventeen --
+# pinned below as well, because the docstring quotes it -- and a
+# transaction=True test is one savepoint fewer. The constants are therefore a
 # regression guard on this module's own measurement, not a published figure.
 #
 # It moved from fourteen to sixteen in 0.7.0, when statistics targets added one
@@ -174,8 +182,34 @@ def test_it_also_undoes_a_world_it_opened_the_transaction_for() -> None:
 # declaration rather than the factor. PostgreSQL only: Django emits no sequence
 # reset for a SQLite table without AUTOINCREMENT, which is why the portable
 # constant did not move with it.
+#
+# And by two for the foreign-key checks fired before the TRUNCATE -- SET
+# CONSTRAINTS ALL IMMEDIATE, then ALL DEFERRED -- because PostgreSQL refuses to
+# truncate a table a caller's deferred check is still pending against. Two
+# statements whatever the shape and whatever the factor, so still a constant,
+# and PostgreSQL only. (The DELETE route fires them too, after its DELETEs, and
+# a build fires them before setting a declared statistics target; none of the
+# figures here takes that route or declares a target.)
+#
+# And down by two on PostgreSQL, and by one off it, when a world stopped emptying
+# tables that hold nothing. Over empty tables -- which is what every measurement
+# above counts -- a world now reads which declared tables hold rows, in one
+# statement whatever the shape, and issues nothing else: no constraint-mode
+# statements, no TRUNCATE, no DELETE. Emptying tables that do hold rows costs a
+# fixed handful more, measured separately below.
 _POSTGRES_STATEMENTS = 19
-_PORTABLE_STATEMENTS = 12
+# Two fewer through execute_wrapper: the COPY for each of the two declared tables
+# reaches CaptureQueriesContext through Django's debug cursor, which logs it, but
+# never passes through the wrapper hook, which sees only execute and executemany.
+_WRAPPED_STATEMENTS = _POSTGRES_STATEMENTS - 2
+# Over a session world declaring the same two tables: the read of every foreign
+# key into them, the read of whether any table holding one holds rows, the two
+# constraint-mode statements, and the TRUNCATE. Per world, never per row.
+_EMPTYING_STATEMENTS = 5
+# And one fewer where no table references the declared ones, as none references
+# an order: with no referencing table there is nothing to ask about rows in.
+_UNREFERENCED_EMPTYING_STATEMENTS = _EMPTYING_STATEMENTS - 1
+_PORTABLE_STATEMENTS = 11
 _ROWS_PER_INSERT = 1000
 
 
@@ -188,19 +222,117 @@ def _statements(shape: Shape, factor: int, alias: str) -> int:
     return len(captured)
 
 
+def _wrapped_statements(shape: Shape, factor: int, alias: str) -> int:
+    seen: list[str] = []
+
+    def count(
+        execute: Callable[..., Any], sql: str, params: Any, many: bool, context: dict[str, Any]
+    ) -> Any:
+        seen.append(sql)
+        return execute(sql, params, many, context)
+
+    with connections[alias].execute_wrapper(count), scaled_world(shape, factor, using=alias):
+        pass
+    return len(seen)
+
+
 @pytest.mark.skipif(
     connection.vendor != "postgresql", reason="the COPY route needs PostgreSQL to be measured"
 )
 def test_building_a_world_costs_the_same_on_postgres_at_every_factor() -> None:
     # The half that makes a capture around the block merely wrong rather than
-    # catastrophic: COPY is not a wrapped statement, so the overhead is the
-    # TRUNCATE, the emptiness check, the statistics-target read, the parent key
-    # read, the two sequence resets, the ANALYZE and the savepoints -- none of
-    # which depend on how many rows there are.
+    # catastrophic: one COPY loads a table however many rows it carries, so the
+    # overhead is that, the read of which declared tables hold rows, the
+    # emptiness check, the statistics-target read, the parent key read, the two
+    # sequence resets, the ANALYZE and the savepoints -- none of which depend on
+    # how many rows there are.
     shape = _graph(companies=10, sessions=_ROWS_PER_INSERT)
 
     assert _statements(shape, 1, DEFAULT_DB_ALIAS) == _POSTGRES_STATEMENTS
     assert _statements(shape, 5, DEFAULT_DB_ALIAS) == _POSTGRES_STATEMENTS
+
+
+@pytest.mark.skipif(
+    connection.vendor != "postgresql", reason="the COPY route needs PostgreSQL to be measured"
+)
+def test_and_over_a_session_world_the_emptying_adds_a_fixed_handful() -> None:
+    # The composition the pytest page recommends, where the declared tables
+    # already hold rows when each world starts. Emptying them is the read of
+    # what references them, the check that none of that holds rows, the two
+    # constraint-mode statements and one TRUNCATE -- none of it per row, so the
+    # count is still the same at every factor.
+    build(_graph(companies=7, sessions=7), require_statistics=False)
+    shape = _graph(companies=10, sessions=_ROWS_PER_INSERT)
+
+    assert _statements(shape, 1, DEFAULT_DB_ALIAS) == _POSTGRES_STATEMENTS + _EMPTYING_STATEMENTS
+    assert _statements(shape, 5, DEFAULT_DB_ALIAS) == _POSTGRES_STATEMENTS + _EMPTYING_STATEMENTS
+
+
+@pytest.mark.skipif(
+    connection.vendor != "postgresql", reason="the COPY route needs PostgreSQL to be measured"
+)
+def test_and_one_fewer_where_nothing_references_the_declared_tables() -> None:
+    # The handful depends on the schema, not only on the world: the read of
+    # whether any referencing table holds rows is skipped when there is no
+    # referencing table to read. Measured as a difference over one shape, so
+    # it is the emptying alone and not the rest of a world's cost.
+    shape = _orders(rows=10)
+    over_empty = _statements(shape, 1, DEFAULT_DB_ALIAS)
+    build(_orders(rows=7), require_statistics=False)
+
+    assert _statements(shape, 1, DEFAULT_DB_ALIAS) - over_empty == (
+        _UNREFERENCED_EMPTYING_STATEMENTS
+    )
+    assert _statements(shape, 5, DEFAULT_DB_ALIAS) - over_empty == (
+        _UNREFERENCED_EMPTYING_STATEMENTS
+    )
+
+
+@pytest.mark.skipif(
+    connection.vendor != "postgresql", reason="the COPY route needs PostgreSQL to be measured"
+)
+def test_and_a_capture_built_on_execute_wrapper_sees_two_fewer() -> None:
+    # The second figure the docstring quotes, and the one a consumer counting
+    # through the hook rather than the debug cursor will read. It was quoted
+    # here as eleven long after it stopped being true, because nothing measured
+    # it.
+    shape = _graph(companies=10, sessions=_ROWS_PER_INSERT)
+
+    assert _wrapped_statements(shape, 1, DEFAULT_DB_ALIAS) == _WRAPPED_STATEMENTS
+    assert _wrapped_statements(shape, 5, DEFAULT_DB_ALIAS) == _WRAPPED_STATEMENTS
+
+
+_SPELLED_OUT = {4: "four", 5: "five", 17: "seventeen", 19: "nineteen"}
+
+
+def test_the_figure_the_prose_quotes_is_the_one_measured() -> None:
+    # The PostgreSQL figure is quoted in three places a consumer reads, and it
+    # had drifted in all three -- sixteen in two, fourteen in the third -- while
+    # the constant above moved twice. Prose cannot be measured, but it can be
+    # held to the measurement: move the constant and this names every page that
+    # still quotes the old number.
+    figure = f"{_SPELLED_OUT[_POSTGRES_STATEMENTS]} statements"
+    quoted_in = {
+        "scaled_world": scaled_world.__doc__ or "",
+        "scale_fixture": scale_fixture.__doc__ or "",
+        "docs/pytest.md": (_ROOT / "docs" / "pytest.md").read_text(),
+    }
+
+    assert [name for name, text in quoted_in.items() if figure not in " ".join(text.split())] == []
+    # The cost of emptying a session world's tables first, quoted in the same
+    # three places beside it -- both figures, because which one a world pays
+    # depends on whether another table references the declared ones.
+    emptying = (
+        f"{_SPELLED_OUT[_EMPTYING_STATEMENTS]} more where another table references them, "
+        f"{_SPELLED_OUT[_UNREFERENCED_EMPTYING_STATEMENTS]} where none does"
+    )
+    assert [
+        name for name, text in quoted_in.items() if emptying not in " ".join(text.split())
+    ] == []
+    # And the execute_wrapper figure, which only the scaled_world docstring
+    # quotes, held to its own constant.
+    wrapped = f"is {_SPELLED_OUT[_WRAPPED_STATEMENTS]}, because ``COPY``"
+    assert wrapped in " ".join((scaled_world.__doc__ or "").split())
 
 
 @pytest.mark.django_db(databases=["default", "not_postgres"])
