@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import secrets
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 
 import django
 import psycopg
@@ -1245,6 +1246,204 @@ def test_a_reference_into_such_a_table_refuses_the_base(temporary_databases: lis
     assert "CASCADE" not in message
     assert _templates_on_the_server() == before
     assert _rows_in(base, "SELECT to_regclass('kept_reference') IS NOT NULL") == [(True,)]
+
+
+@pytest.fixture
+def roles() -> Iterator[Callable[[str], str]]:
+    """Make roles without superuser rights, and drop them afterwards with every database they own.
+
+    NOLOGIN, because nothing logs in as one: the connection takes a role with
+    ``SET ROLE``, through Django's own ``assume_role`` option, so a role needs
+    no password and no authentication rule on whichever server the suite runs
+    against -- only a suite role that may create roles, which CI's ``postgres``
+    user and a local superuser both are. The argument adds attributes:
+    ``CREATEDB`` for a role that makes templates.
+
+    Every database one of these roles owns when the test ends was made by the
+    test or handed to the role by it, since the role did not exist before the
+    test; they go first, because PostgreSQL refuses to drop a role that still
+    owns one, or owns anything inside one. The connection's role is put back
+    before anything is dropped, in case the test stopped inside
+    :func:`_acting_as`.
+    """
+    made: list[str] = []
+
+    def make(attributes: str = "") -> str:
+        role = f"shape_role_{secrets.token_hex(4)}"
+        with connection.cursor() as cursor:
+            cursor.execute(f"CREATE ROLE {role} NOLOGIN {attributes}")
+        made.append(role)
+        return role
+
+    yield make
+    connection.settings_dict["OPTIONS"].pop("assume_role", None)
+    connection.close()
+    with connection._nodb_cursor() as cursor:
+        cursor.execute("SELECT datname FROM pg_database WHERE datdba = ANY (%s::regrole[])", [made])
+        for (owned,) in cursor.fetchall():
+            cursor.execute(f"DROP DATABASE IF EXISTS {connection.ops.quote_name(owned)}")
+        for role in reversed(made):
+            cursor.execute(f"DROP ROLE IF EXISTS {role}")
+
+
+@contextmanager
+def _acting_as(role: str) -> Iterator[None]:
+    """Every connection the default alias opens inside the block is ``role``, by ``SET ROLE``.
+
+    PostgreSQL checks privileges against the current role rather than the one
+    that logged in, so inside the block the suite has exactly that role's
+    rights. A superuser bypasses every ownership rule, and the role the suite
+    connects as almost always is one -- which is why a refusal about ownership
+    cannot be reached without this.
+    """
+    options = connection.settings_dict["OPTIONS"]
+    connection.close()
+    options["assume_role"] = role
+    try:
+        yield
+    finally:
+        options.pop("assume_role", None)
+        connection.close()
+
+
+def _owned_by(role: str) -> list[str]:
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT datname FROM pg_database WHERE datdba = %s::regrole ORDER BY datname", [role]
+        )
+        return [row[0] for row in cursor.fetchall()]
+
+
+def _base_for(role: str, made: list[str], *, schema_owner: str, rebuilt_owner: str) -> str:
+    """A base ``role`` may copy and migrate, whose rebuilt tables ``rebuilt_owner`` owns.
+
+    The role owns the database, because PostgreSQL lets only a database's
+    owner or a superuser copy one that is not marked as a template, and the
+    tables of the apps with migrations, because ``migrate`` reads and writes
+    them in the copy. The tables of the app without migrations, which are the
+    ones the copy drops, belong to ``rebuilt_owner``. ``schema_owner`` owns
+    ``public``: ``CURRENT_USER``, the suite's role, so that owning the copy
+    gives the role nothing there, or ``pg_database_owner``, which owns it in a
+    new database from PostgreSQL 15 and whose privileges the owner of each
+    database holds.
+    """
+    base = _base(made)
+    quote = connection.ops.quote_name
+    with connection._nodb_cursor() as cursor:
+        cursor.execute(f"ALTER DATABASE {quote(base)} OWNER TO {role}")
+    tables = _rows_in(base, "SELECT tablename FROM pg_tables WHERE schemaname = 'public'")
+    _execute_in(
+        base,
+        "; ".join(
+            [
+                f"ALTER SCHEMA public OWNER TO {schema_owner}",
+                f"GRANT USAGE, CREATE ON SCHEMA public TO {role}",
+                *(
+                    f"ALTER TABLE {quote(str(name))} OWNER TO "
+                    f"{rebuilt_owner if str(name).startswith('testapp') else role}"
+                    for (name,) in tables
+                ),
+            ]
+        ),
+    )
+    return base
+
+
+def _rebuilt_tables_of(base: str) -> list[tuple[object, ...]]:
+    """The base's tables of the app without migrations, with their owners, in byte order."""
+    return _rows_in(
+        base,
+        "SELECT tablename, tableowner FROM pg_tables WHERE schemaname = 'public' "
+        "AND tablename LIKE 'testapp%' ORDER BY tablename COLLATE \"C\"",
+    )
+
+
+def test_a_base_whose_rebuilt_tables_the_role_cannot_drop_is_refused_naming_their_owner(
+    roles: Callable[[str], str], temporary_databases: list[str]
+) -> None:
+    # DROP TABLE needs ownership -- of the table, of its schema, or of a role
+    # holding either's privileges -- and a copy made with CREATE DATABASE ...
+    # TEMPLATE keeps every owner the base gave. Here the role owns the base and
+    # the migrated apps' tables but neither public nor the tables the copy
+    # rebuilds, so the drop failed inside the copy with a raw ProgrammingError
+    # naming one table and no way out.
+    role = roles("CREATEDB")
+    base = _base_for(
+        role, temporary_databases, schema_owner="CURRENT_USER", rebuilt_owner="CURRENT_USER"
+    )
+    rebuilt = _rebuilt_tables_of(base)
+
+    with _acting_as(role), pytest.raises(UnusableBase) as refused:
+        temporary_databases.append(template_database(_shape(rows=40, seed=61), base=base))
+
+    message = str(refused.value)
+    first, owner = rebuilt[0]
+    assert base in message
+    assert f"{len(rebuilt)} table(s)" in message
+    assert f"{first} (owned by {owner})" in message
+    assert repr(role) in message
+    assert "OWNER TO" in message
+    assert "base=None" in message
+    # The partial went with the refusal: all the role owns is the base it was handed.
+    assert _owned_by(role) == [base]
+
+
+def test_so_is_one_that_is_a_member_of_their_owner_without_inheriting_its_privileges(
+    roles: Callable[[str], str], temporary_databases: list[str]
+) -> None:
+    # Ownership is checked as "has the privileges of", not as membership: a
+    # member that does not inherit them has to SET ROLE first, and DROP TABLE
+    # does not. So a check reading membership would let this base through to
+    # the raw ProgrammingError again -- which is what pg_has_role with MEMBER,
+    # rather than USAGE, does.
+    owner = roles()
+    role = roles("CREATEDB NOINHERIT")
+    with connection.cursor() as cursor:
+        cursor.execute(f"GRANT {owner} TO {role}")
+    base = _base_for(role, temporary_databases, schema_owner="CURRENT_USER", rebuilt_owner=owner)
+
+    with _acting_as(role), pytest.raises(UnusableBase) as refused:
+        temporary_databases.append(template_database(_shape(rows=40, seed=64), base=base))
+
+    assert f"(owned by {owner})" in str(refused.value)
+    assert _owned_by(role) == [base]
+
+
+def test_a_role_owning_those_tables_may_rebuild_them_without_owning_their_schema(
+    roles: Callable[[str], str], temporary_databases: list[str]
+) -> None:
+    # The table-owner half of the rule. public belongs to the suite's role
+    # here, so owning the tables is the only thing that lets this role drop
+    # them, and a check that ignored it would refuse a base the drop accepts.
+    role = roles("CREATEDB")
+    base = _base_for(role, temporary_databases, schema_owner="CURRENT_USER", rebuilt_owner=role)
+
+    with _acting_as(role):
+        name = template_database(_shape(rows=40, seed=62), base=base)
+    temporary_databases.append(name)
+
+    assert _owned_by(role) == sorted([base, name])
+
+
+def test_so_may_one_owning_their_schema_without_owning_them(
+    roles: Callable[[str], str], temporary_databases: list[str]
+) -> None:
+    # The schema-owner half, and the common case rather than a corner: from
+    # PostgreSQL 15 a new database's public schema belongs to
+    # pg_database_owner, whose privileges the owner of a database holds, and a
+    # copy belongs to the role that made it. So a role owning none of the
+    # tables may still drop every one of them from its own copy, and a check
+    # that read only the tables' owners would refuse the default layout.
+    role = roles("CREATEDB")
+    base = _base_for(
+        role, temporary_databases, schema_owner="pg_database_owner", rebuilt_owner="CURRENT_USER"
+    )
+
+    with _acting_as(role):
+        name = template_database(_shape(rows=40, seed=63), base=base)
+    temporary_databases.append(name)
+
+    assert _owned_by(role) == sorted([base, name])
 
 
 def test_a_connection_already_on_the_base_does_not_stop_the_copy(
