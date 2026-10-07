@@ -922,8 +922,8 @@ def test_a_base_holding_rows_in_a_declared_table_is_named_as_their_cause(
     message = " ".join(str(refused.value).split())
     assert message.startswith("auth_group already holds rows")
     assert (
-        "a template started from a base database keeps the rows the base holds in tables "
-        "of apps with migrations" in message
+        "a template started from a base database keeps the rows the base holds, apart from "
+        "the tables it rebuilds for apps without migrations" in message
     )
     # The partial the build failed in is dropped with it, so the next run does
     # not find a half-built database under a name it would have to judge.
