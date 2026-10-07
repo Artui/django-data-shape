@@ -285,7 +285,9 @@ def test_a_clone_will_not_overwrite_unless_it_is_told_to(
     assert _rows_in(target, f"SELECT count(*) FROM {Catalogue._meta.db_table}") == [(40,)]
 
 
-def test_a_shape_whose_build_fails_leaves_no_half_built_template() -> None:
+def test_a_shape_whose_build_fails_leaves_no_half_built_template(
+    temporary_databases: list[str],
+) -> None:
     # A projection over tables nobody filled inserts nothing, which build()
     # refuses. What matters here is what is left behind: the database is created
     # under a working name and only renamed once the build succeeds, so a
@@ -294,7 +296,7 @@ def test_a_shape_whose_build_fails_leaves_no_half_built_template() -> None:
     shape = Shape(Projection(EventSession, per=Event, copying=TemplateSession))
 
     with pytest.raises(InvalidShape, match="inserted no rows"):
-        template_database(shape)
+        temporary_databases.append(template_database(shape))
 
     with connection.cursor() as cursor:
         cursor.execute(
@@ -358,7 +360,9 @@ def test_a_statistics_target_survives_the_clone(temporary_databases: list[str]) 
     ) == [(314,)]
 
 
-def test_a_shape_that_cannot_be_hashed_is_refused_before_anything_is_created() -> None:
+def test_a_shape_that_cannot_be_hashed_is_refused_before_anything_is_created(
+    temporary_databases: list[str],
+) -> None:
     # The refusal that keeps the cache honest, met from the direction a consumer
     # meets it: a template is asked for and the shape says it cannot be
     # recognised twice. Nothing is created, because the name cannot be computed
@@ -366,15 +370,15 @@ def test_a_shape_that_cannot_be_hashed_is_refused_before_anything_is_created() -
     shape = Shape(Table(SlugPk, rows=5, name=Constant("x"), keys=KeyFunction(lambda row: str(row))))
 
     with pytest.raises(UnhashableShape, match="KeyFunction"):
-        template_database(shape)
+        temporary_databases.append(template_database(shape))
 
 
-def test_it_refuses_to_run_inside_a_transaction() -> None:
+def test_it_refuses_to_run_inside_a_transaction(temporary_databases: list[str]) -> None:
     # Rather than poisoning the connection. Django marks a connection closed
     # inside an atomic block as unusable for the rest of that block, so the
     # failure without this guard is not here but in whatever ran next.
     with transaction.atomic(), pytest.raises(TransactionManagementError, match="atomic block"):
-        template_database(_shape())
+        temporary_databases.append(template_database(_shape()))
 
 
 def test_dropping_says_whether_there_was_anything_to_drop(
