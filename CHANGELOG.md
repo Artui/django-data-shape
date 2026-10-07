@@ -16,19 +16,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   migrations measured thirteen and a half minutes of `migrate` against about a
   minute to build a 4.4-million-row shape, paid again by every template a
   change to the declaration makes. With a base, the template starts as
-  `CREATE DATABASE ... TEMPLATE <base>`, and the base contributes what its
-  migration history contributes. Apps with migrations are brought forward by
-  it: `migrate --run-syncdb` still runs over the copy, applying whatever the
-  base has yet to and firing `post_migrate`. Apps without migrations have no
-  history, so their tables are dropped from the copy first and `run_syncdb`
-  makes them from the current models, as it does in an empty database --
-  `run_syncdb` never alters an existing table, so a table the base made from an
-  older model would otherwise survive under a key naming the new one. The
-  base's rows in those tables do not carry over. A foreign key or view in the
-  base that points into one of them stops the drop, which runs without
-  `CASCADE` so that nothing is removed silently, and is refused as
-  `UnusableBase` from the copy. `base=None`, the default, behaves and keys
-  exactly as before.
+  `CREATE DATABASE ... TEMPLATE <base>`: the tables `migrate` builds for apps
+  without migrations are rebuilt from the models, and everything else the base
+  holds is carried as it is. Apps with migrations are brought forward by their
+  history: `migrate --run-syncdb` still runs over the copy, applying whatever
+  the base has yet to and firing `post_migrate`. Apps without migrations have
+  no history, so the tables `run_syncdb` makes for them -- their managed
+  models' tables and the many-to-many tables Django creates for those models'
+  relations, read the way `run_syncdb` reads them, router included -- are
+  dropped from the copy first and made again from the current models, as in an
+  empty database. `run_syncdb` never alters an existing table, so a table the
+  base made from an older model would otherwise survive under a key naming the
+  new one. The base's rows in those tables do not carry over; the rest of its
+  rows, an unmanaged model's table and the tables of an app no longer installed
+  are carried. A foreign key or view in the base that points into a rebuilt
+  table stops the drop, which runs without `CASCADE` so that nothing is
+  removed silently, and is refused as `UnusableBase` from the copy.
+  `base=None`, the default, behaves and keys exactly as before.
 
   **A base behind the migrations on disk is migrated forward in the copy; only
   a history migrating cannot repair is refused**, with the new `UnusableBase`,
@@ -40,8 +44,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   behind pays its `migrate` once per key, never more than building from empty,
   and the base a project has most often, one behind because a branch added a
   migration, builds rather than being refused. *Ahead* is an applied migration
-  of an installed app that no migration on disk is or replaces: the one case
-  where the template cannot end up with the checkout's schema, since a branch
+  of an installed app that no migration on disk is or replaces: of the
+  histories a base can record, the one migrating cannot bring to the
+  checkout's schema, since a branch
   migration that adds only an index would otherwise build silently and skew
   plan assertions. The rows a squash leaves behind while it still lists them in
   `replaces`, once all of them are applied, and the rows of an app that is no
@@ -49,12 +54,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and both remedies: `manage.py migrate <app> --prune` for rows left by
   squashed migrations deleted after their squash's `replaces` was removed, and
   migrating the base back or recreating it for a migration from another
-  branch. Two histories `migrate` would mishandle are refused too: a squash
-  applied to the base only in part, when a replaced migration it has yet to
-  apply is gone from disk -- Django then runs neither the squash nor the rest
-  of what it replaces, so the template would silently lack them -- and a base
-  with no `django_migrations` table that holds the tables of an app with
-  migrations, which `migrate` would try to create again. A base that does not
+  branch; when the app has a squash that still lists `replaces`, which
+  `--prune` declines to run beside, it says to finish that squash first. Two
+  histories `migrate` would mishandle are refused too: a squash applied to the
+  base only in part, when a replaced migration it has yet to apply is gone
+  from disk -- Django then runs neither the squash nor the rest of what it
+  replaces, so the template would silently lack them, and from Django 6.0 this
+  is read off the plan Django made, so a squash of a squash is judged over
+  everything under it -- and a base holding the tables of an app with
+  migrations that it records no applied migration for, which `migrate` would
+  try to create again: one with no `django_migrations` table, one restored
+  from `pg_dump --schema-only`, which brings that table back empty, or one
+  made before the app had migrations. A base that does not
   exist, one that does not accept connections, a name holding a double quote
   -- which Django's quoting cannot carry intact, so the database checked and
   the database copied could differ -- and a template this package made or the
@@ -63,17 +74,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   database of your own whose name starts `data_shape_` is not mistaken for one.
 
   The key also takes the base's name and its database oid, so dropping and
-  recreating a base -- the usual way one restored from a schema dump is
-  refreshed -- is a new template. The base is checked on a cache hit too. Rows
+  recreating a base -- the usual way one restored from a dump is refreshed,
+  with the rows of `django_migrations` alongside the schema -- is a new
+  template. The base is checked on a cache hit too. Rows
   the base holds become template content; changing them in place, by hand or
   by migrating the base, neither of which moves its name or oid, is not seen
   by the key, and is stated beside the
   existing `RunSQL` gap with the same remedy, `drop_database`. One case no
   check can see is stated too: a migration regenerated under a name the base
   has already applied is skipped by `migrate`, so the copy keeps the version
-  the base ran; recreating the base is the remedy. The process's own
-  connection is closed before the copy, so a project whose test database is the
-  base can pass it as one.
+  the base ran; recreating the base is the remedy. Nor can one more: SQL an
+  applied migration of an app with migrations ran against a table of an app
+  without them -- an index, a trigger, a policy, a grant or a comment -- is
+  lost when the copy rebuilds that table, and recreating the base does not
+  help, so that template is built from empty with `base=None`. The process's
+  own connection is closed before the copy, so a project whose test database
+  is the base can pass it as one.
 
 ### Changed
 

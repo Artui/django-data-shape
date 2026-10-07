@@ -272,16 +272,20 @@ def django_db_setup(django_test_environment, django_db_modify_db_settings, djang
         drop_database(target)
 ```
 
-A base contributes what its migration history contributes, and nothing else.
-An app with migrations is brought forward by that history: `migrate` runs over
-the copy and applies whatever the base has yet to -- nothing, on a base kept up
-to date. An app without migrations has no history to bring forward, so its
-tables are dropped from the copy first and `run_syncdb` makes them from the
-current models, as it does in an empty database. `run_syncdb` creates a missing
-table and never alters an existing one, so this is what stops a table the base
-made from an older model surviving under a key that names the new one -- and it
-means the base's rows in those tables do not carry over. `post_migrate` fires as
-it does from empty.
+The tables `migrate` builds for apps without migrations are rebuilt from the
+models, and everything else the base holds is carried as it is. An app with
+migrations is brought forward by its history: `migrate` runs over the copy and
+applies whatever the base has yet to -- nothing, on a base kept up to date. An
+app without migrations has no history to bring forward, so the tables
+`run_syncdb` makes for it -- its managed models' tables, and the many-to-many
+tables Django creates for their relations -- are dropped from the copy first
+and made again from the current models, as in an empty database. `run_syncdb`
+creates a missing table and never alters an existing one, so this is what stops
+a table the base made from an older model surviving under a key that names the
+new one -- and it means the base's rows in those tables do not carry over.
+Everything else is carried as the base has it: the rows in the tables of apps
+with migrations, an unmanaged model's table and the tables of an app that is no
+longer installed. `post_migrate` fires as it does from empty.
 
 **A base behind the migrations on disk is migrated forward; only a history
 migrating cannot repair is refused.** Migrating forward always ends at the
@@ -302,17 +306,23 @@ What is refused is what migrating cannot fix, raising
 anything is created, with the one exception marked, and naming the base:
 
 - **ahead** -- the base records an applied migration of an installed app that no
-  migration on disk is or replaces. This is the one case where the template
-  cannot end up with the checkout's schema: migrating moves only forward, so
-  whatever those migrations did stays in the copy, and a branch migration that
-  adds only an index would otherwise build silently and skew plan assertions. The
+  migration on disk is or replaces. Of the histories a base can record, this is
+  the one migrating cannot bring to the checkout's schema: it moves only
+  forward, so whatever those migrations did stays in the copy, and a branch
+  migration that adds only an index would otherwise build silently and skew plan
+  assertions. The
   message names up to three of them and gives two remedies, because the two
   usual causes need opposite ones. Rows left behind by squashed migrations whose
   files were deleted after the squash's `replaces` was removed are pruned with
   `manage.py migrate <app> --prune` against the base (Django 4.1 and later). A
   migration from another branch is undone by migrating the base back from a
   checkout that has it, or by recreating the base -- pruning its row would leave
-  its schema in place and only silence the refusal.
+  its schema in place and only silence the refusal. When the app has a squash
+  on disk that still lists what it replaces, the message says so, because
+  `--prune` declines to run while one does: finish the squash first, by running
+  `migrate` against the base so that it is recorded as applied and then
+  removing its `replaces`, which makes it an ordinary migration, and prune
+  after.
 - **a squash applied in part, with its replaced files deleted** -- the base
   records some of the migrations a squash on disk replaces, and one it has yet
   to apply is no longer on disk. Django runs a squash only when all or none of
@@ -321,16 +331,24 @@ anything is created, with the one exception marked, and naming the base:
   would silently lack what they do. Migrate the base from a checkout that
   still has the replaced migrations, or recreate it. A squash applied in part
   whose replaced files are still there is not refused: Django finishes it one
-  replaced migration at a time.
-- **tables with no `django_migrations`** -- the base holds the tables of an app
-  with migrations but nothing records which migrations made them, so `migrate`
-  would create them again and fail on the first. A base with no
-  `django_migrations` table is migrated in full only when it holds none of
-  those tables, as an empty database does; the tables of an app without
-  migrations do not count, because `run_syncdb` records nothing for them.
+  replaced migration at a time. From Django 6.0 a squash can replace another
+  squash, and Django judges "in part" over everything the two come down to, so
+  this is read off the plan Django actually made rather than off what the outer
+  squash lists: a squash of a squash is refused when the base applied some of
+  what the inner one replaces and a migration after it is gone from disk.
+- **tables with no record of their migrations** -- the base holds the tables of
+  an app with migrations and records no applied migration for that app, so
+  `migrate` would create them again and fail on the first. It is judged app by
+  app. A base with no `django_migrations` table is the whole-database form; a
+  base restored from `pg_dump --schema-only` is the commonest, because the
+  table comes back with none of its rows; and a base made while an app had no
+  migrations is the one-app form, once the app gains them. Restore the rows of
+  `django_migrations` with the schema, or recreate the base with `migrate`. An
+  empty database holds none of those tables and is migrated in full; the tables
+  of an app without migrations do not count, because `run_syncdb` records
+  nothing for them.
 - **a reference into a rebuilt table** -- something in the base outside the
-  tables of the apps without migrations depends on one of them: a foreign key
-  or a view. Those tables are dropped in one statement without `CASCADE`,
+  tables being rebuilt depends on one of them: a foreign key or a view. Those tables are dropped in one statement without `CASCADE`,
   because `CASCADE` would remove the reference silently, `run_syncdb` would not
   put it back, and the template would match neither the base nor one built from
   empty. So PostgreSQL refuses the drop, and the refusal is raised as
@@ -360,15 +378,22 @@ leaves their rows behind, and they are not ahead while the squash still lists
 them in its `replaces` -- once all of them are applied; a squash applied in part
 is the case above. And a row for an app that is no longer installed
 describes nothing the checkout's models use, so it is ignored; its tables, if
-any are left, are carried like any other table the shape does not declare.
+any are left, are carried like any other table the shape does not declare. The
+rows a squash of a squash leaves are a different matter: once only the outer
+squash is on disk, the migrations the inner one replaced are listed by nothing
+on disk, so their rows read as ahead although Django counts the base as
+migrated. That is the case the ahead message's advice to finish the squash
+first is for.
 
 The base is checked on every call, a cache hit included, because its oid is part
 of the key. That is also what makes refreshing a base safe: dropping and
-recreating it, which is how one restored from a schema dump is usually updated,
-gives it a new oid and so a new template.
+recreating it, which is how one restored from a dump is usually updated, gives
+it a new oid and so a new template. The dump has to carry the rows of
+`django_migrations` as well as the schema; `pg_dump --schema-only` alone
+restores a base that is refused, as above.
 
-Whatever else the base holds, outside the tables of apps without migrations,
-becomes template content, which is what lets the base carry reference data the
+Whatever else the base holds, outside the tables being rebuilt, becomes
+template content, which is what lets the base carry reference data the
 shape does not declare. Rows in a table the shape
 *does* declare are refused by the build's emptiness check as they would be
 anywhere, with a `ShapeNotEmpty` message that names the base as one place they
@@ -402,11 +427,20 @@ pass it as one.
   move it; editing the body of a migration that has already been created changes
   neither. Drop the template by hand when that happens.
 - **A migration regenerated under a name a base has already applied.** With a
-  base, an edited migration goes one step further, and it is the one case here
-  that nothing can detect: `migrate` reads the name as applied and skips it, so
+  base, an edited migration goes one step further, and it is a case nothing can
+  detect: `migrate` reads the name as applied and skips it, so
   the copy keeps the version the base ran, and a template rebuilt from the same
   base would keep it again. Recreate the base, which gives it a new oid and so a
   new template.
+- **What a migration did to a rebuilt table.** A migration of an app with
+  migrations can run SQL against a table of an app without them -- an index, a
+  trigger, a policy, a grant or a comment. A base has applied it, so when the
+  copy rebuilds that table what the migration made is lost, and the migration is
+  never run again; nothing in the copy says which index or trigger came from
+  where, so this is stated rather than detected. Recreating the base does not
+  help, because a recreated base has applied the migration too. Build that
+  template from empty, with `base=None`: there `run_syncdb` makes the table
+  before the migration runs.
 - **Rows changed in a base in place.** The key covers a base's name and oid,
   and the schema any accepted base migrates forward to; changing the rows it
   holds, by hand or by migrating the base, neither of which moves its name or
