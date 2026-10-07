@@ -267,12 +267,17 @@ def _require_empty(connection: Any, table: Table | Projection) -> None:
     A ``Projection`` has no key strategy of its own to ask, and its rows come
     from a statement rather than from generated keys, so it takes the refusal.
 
-    The message names the likely cause and not only the remedy, because the
-    first consumer met this from a direction the remedy does not fit: a
-    session-scoped ``shape_fixture`` and a scaled world pointed at one model.
+    The message names the likely causes and not only the remedy, because the
+    first consumer met this from a direction the remedy did not fit: a
+    session-scoped ``shape_fixture`` and a second build pointed at one model.
     The rows are then real, correct, and put there by a fixture the failing test
     never mentions -- so "empty the table first" reads as advice about somebody
-    else's data.
+    else's data. A scaled world no longer meets it, because it empties the
+    declared tables inside the transaction it rolls back; a second
+    session-scoped ``shape_fixture``, or ``build()`` called directly, still
+    does. So does a template whose base holds rows in a declared table, where
+    the rows were put there by whoever keeps the base, which is why the message
+    names that cause too.
     """
     keys = getattr(table, "keys", None)
     if isinstance(keys, Disjoint) and keys.is_disjoint_from_existing_rows():
@@ -286,8 +291,12 @@ def _require_empty(connection: Any, table: Table | Projection) -> None:
             f"{db_table} already holds rows, and this package assigns primary keys from 1, "
             "so building over them would collide. If nothing in the test wrote them, the usual "
             "cause is a world that was already there: a session-scoped shape_fixture over this "
-            "model holds its rows for the whole run, and a scaled world cannot build over them. "
-            "Give the two different models, or empty this table first."
+            "model holds its rows for the whole run, so a second build over it -- another "
+            "shape_fixture, or build() called directly -- meets them; and a template started "
+            "from a base database copies whatever rows the base holds. Build the second world "
+            "inside scaled_world, which empties the declared tables and puts them back; give "
+            "the two different models; or empty this table first, in the base if that is where "
+            "the rows came from."
         )
 
 

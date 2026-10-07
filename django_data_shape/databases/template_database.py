@@ -120,7 +120,9 @@ def template_database(
 
     Whatever else the base holds becomes template content. Rows in a table the
     shape declares are refused by :func:`~django_data_shape.loading.build.build`'s
-    emptiness check as they would be anywhere, except in a table whose keys are
+    emptiness check as they would be anywhere, with a message that names the
+    base as one place they come from, and the partial is dropped with the
+    failure -- except in a table whose keys are
     :class:`~django_data_shape.keys.disjoint.Disjoint`, which is exempt from it.
 
     **What it does not support**, and why:

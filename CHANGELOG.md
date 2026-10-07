@@ -115,6 +115,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   drifted from the measured one in all three places; they now quote it, and a
   test holds them to it.
 
+- **The `ShapeNotEmpty` message and the pytest page describe the refusal the
+  package makes.** Since 0.17.0 a scaled world empties the tables it declares
+  inside the transaction it rolls back, so it builds over a session world's
+  rows -- yet the message still said a scaled world cannot build over them, and
+  the pytest page's "The two fixtures do not share a table" still called that
+  composition refused and prescribed different models. The message now names
+  the causes that remain: a second build over a session world's rows, another
+  `shape_fixture` or `build()` called directly, and a template started from a
+  base database that holds rows in a declared table. Its remedies are a scaled
+  world, different models, or emptying the table, in the base if that is where
+  the rows came from. The page's section is now "A scaled world can sit over a
+  session world", quoting the new message, and a test holds the quotation to
+  the message raised.
+
 ## [0.21.0] — 2026-09-06
 
 ### Added

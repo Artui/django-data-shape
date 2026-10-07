@@ -21,6 +21,7 @@ from django_data_shape import (
     KeyFunction,
     Projection,
     Shape,
+    ShapeNotEmpty,
     Skew,
     Table,
     UnhashableShape,
@@ -836,6 +837,30 @@ def test_a_base_whose_name_holds_a_double_quote_is_refused(
     message = str(refused.value)
     assert "double quote" in message
     assert "does not exist" not in message
+
+
+def test_a_base_holding_rows_in_a_declared_table_is_named_as_their_cause(
+    temporary_databases: list[str],
+) -> None:
+    # The rows are real and were put there by whoever keeps the base, so a
+    # message naming only a session world -- or only "empty the table first" --
+    # reads as advice about a table the test never touched.
+    base = _base(temporary_databases)
+    _execute_in(base, f"INSERT INTO {Catalogue._meta.db_table} (name) VALUES ('kept in the base')")
+    before = _templates_on_the_server()
+
+    with pytest.raises(ShapeNotEmpty) as refused:
+        temporary_databases.append(template_database(_shape(), base=base))
+
+    message = " ".join(str(refused.value).split())
+    assert message.startswith(f"{Catalogue._meta.db_table} already holds rows")
+    assert "a template started from a base database copies whatever rows the base holds" in (
+        message
+    )
+    # The partial the build failed in is dropped with it, so the next run does
+    # not find a half-built database under a name it would have to judge.
+    assert _templates_on_the_server() == before
+    assert not [name for name in _templates_on_the_server() if name.endswith("__partial")]
 
 
 def test_a_connection_already_on_the_base_does_not_stop_the_copy(

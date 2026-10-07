@@ -331,7 +331,8 @@ gives it a new oid and so a new template.
 Whatever else the base holds becomes template content, which is what lets the
 base carry reference data the shape does not declare. Rows in a table the shape
 *does* declare are refused by the build's emptiness check as they would be
-anywhere, except in a table with `Disjoint` keys, which is exempt from it.
+anywhere, with a `ShapeNotEmpty` message that names the base as one place they
+come from, except in a table with `Disjoint` keys, which is exempt from it.
 
 The base must have nothing attached to it while the template is copied -- the
 same rule as for cloning a template, and for the same reason. This process's own

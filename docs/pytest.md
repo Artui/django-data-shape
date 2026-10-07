@@ -86,25 +86,33 @@ order they are usually right:
 - build per test with `scaled_world(shape, 1)`, which undoes itself and
   therefore does not care.
 
-### The two fixtures do not share a table
+### A scaled world can sit over a session world
 
-A session world holds its rows for the whole run. A scaled world is built from
-empty every time. Point both at one model and the second one is refused:
+A session world holds its rows for the whole run, and a scaled world is built
+from empty every time. They can still point at one model: a scaled world empties
+its declared tables inside the transaction it rolls back, so inside the block it
+sees only its own world, and the session rows are back after it. That is the
+shape a first consumer arrives with -- a big session world for plan assertions,
+small scaled worlds for growth assertions over the same flow -- and it needs no
+arrangement.
+
+What is still refused is a second *build* over rows that stay: two
+session-scoped `shape_fixture`s over one model, or `build()` called directly over
+a session world's table. The second one meets the first one's rows:
 
 ```text
 testapp_order already holds rows, and this package assigns primary keys from 1,
 so building over them would collide. If nothing in the test wrote them, the
 usual cause is a world that was already there: a session-scoped shape_fixture
-over this model holds its rows for the whole run, and a scaled world cannot
-build over them. Give the two different models, or empty this table first.
+over this model holds its rows for the whole run, so a second build over it --
+another shape_fixture, or build() called directly -- meets them; and a template
+started from a base database copies whatever rows the base holds. Build the
+second world inside scaled_world, which empties the declared tables and puts
+them back; give the two different models; or empty this table first, in the base
+if that is where the rows came from.
 ```
 
-That is the shape a first consumer arrives with -- a big session world for plan
-assertions, small scaled worlds for growth assertions -- so it is worth saying
-before the message has to. **They compose over a graph by taking different
-models**, not by taking turns over one: the session world gets the tables a plan
-assertion needs to be big, the scale harness gets the tables a growth assertion
-counts.
+Give the two different models, or make the second one a scaled world.
 
 ### And it is there for tests that never asked for it
 
@@ -134,8 +142,8 @@ files that never mention `shape_fixture`.
 
 Three ways out, in the order they are usually right:
 
-- **give a session world models nothing else uses.** The same rule as the one
-  above, for the same reason: a session world owns its tables for the whole run;
+- **give a session world models nothing else uses.** A session world owns its
+  tables for the whole run;
 - scope the other test's assertions rather than counting the table —
   `filter(...)` on something the shape does not produce, or assert against
   `an_order.pk` rather than a count;
