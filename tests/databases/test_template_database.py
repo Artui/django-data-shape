@@ -767,6 +767,77 @@ def test_a_base_that_does_not_exist_is_refused_by_name(temporary_databases: list
     assert _templates_on_the_server() == before
 
 
+def _allow_connections(database: str, allowed: bool) -> None:
+    with connection._nodb_cursor() as cursor:
+        cursor.execute(
+            f"ALTER DATABASE {connection.ops.quote_name(database)} "
+            f"WITH ALLOW_CONNECTIONS {'true' if allowed else 'false'}"
+        )
+
+
+def test_a_base_that_refuses_connections_is_refused_by_name(
+    temporary_databases: list[str],
+) -> None:
+    # Its applied migrations are read by connecting to it, so the alternative
+    # is the server's own refusal surfacing as an OperationalError from inside
+    # the migration loader, naming nothing a reader asked for.
+    base = _base(temporary_databases)
+    _allow_connections(base, False)
+    before = _templates_on_the_server()
+
+    with pytest.raises(UnusableBase) as refused:
+        temporary_databases.append(template_database(_shape(), base=base))
+
+    message = str(refused.value)
+    assert base in message
+    assert "ALLOW_CONNECTIONS true" in message
+    assert _templates_on_the_server() == before
+
+
+def test_a_template_is_never_a_base(temporary_databases: list[str]) -> None:
+    # The likeliest database to be refusing connections is one this package
+    # made, and the remedy for that is not to allow them: a template holds a
+    # shape's rows under a name keyed for that shape, so starting another from
+    # it is a mistake whatever its connection setting says.
+    template = _template(_shape(rows=40, seed=31), temporary_databases)
+
+    with pytest.raises(UnusableBase, match="never a base"):
+        temporary_databases.append(template_database(_shape(rows=40, seed=32), base=template))
+
+    # Including one opened up to look inside, as the docstring tells a reader
+    # how to do -- which is what holds the name check apart from the
+    # connection check.
+    _allow_connections(template, True)
+    with pytest.raises(UnusableBase, match="never a base"):
+        temporary_databases.append(template_database(_shape(rows=40, seed=32), base=template))
+
+
+def test_a_base_whose_name_holds_a_double_quote_is_refused(
+    temporary_databases: list[str],
+) -> None:
+    # Django's quote_name passes a name that is already quoted through as it is
+    # and does not escape an embedded quote, so a base literally named "x"
+    # would be looked up as one database and copied from another. The
+    # database exists and is migrated, so the name is the only thing wrong.
+    quoted = f'"shape_base_{secrets.token_hex(4)}"'
+    escaped = '"' + quoted.replace('"', '""') + '"'
+    source = connection.settings_dict["NAME"]
+    connection.close()
+    with connection._nodb_cursor() as cursor:
+        cursor.execute(f"CREATE DATABASE {escaped} TEMPLATE {connection.ops.quote_name(source)}")
+    try:
+        with pytest.raises(UnusableBase) as refused:
+            temporary_databases.append(template_database(_shape(), base=quoted))
+    finally:
+        # By hand, because drop_database quotes the way this test is about.
+        with connection._nodb_cursor() as cursor:
+            cursor.execute(f"DROP DATABASE IF EXISTS {escaped}")
+
+    message = str(refused.value)
+    assert "double quote" in message
+    assert "does not exist" not in message
+
+
 def test_a_connection_already_on_the_base_does_not_stop_the_copy(
     temporary_databases: list[str],
 ) -> None:

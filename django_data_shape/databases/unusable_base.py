@@ -4,7 +4,11 @@ from __future__ import annotations
 
 
 class UnusableBase(Exception):
-    """A base database is missing, or ahead of the migrations on disk.
+    """A base database cannot be started from, or is ahead of the migrations on disk.
+
+    Cannot be started from: it is missing, it refuses connections, it is a
+    template this package made, or its name holds a double quote, which
+    Django's quoting cannot carry intact.
 
     Its own type rather than :class:`~django_data_shape.declaration.invalid_shape.InvalidShape`
     because nothing is wrong with the declaration: the same shape builds from

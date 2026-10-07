@@ -38,8 +38,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ahead. The message names up to three migrations and both remedies:
   `manage.py migrate <app> --prune` for rows left by squashed migrations deleted
   after their squash's `replaces` was removed, and migrating the base back or
-  recreating it for a migration from another branch. A base that does not exist
-  is refused by name.
+  recreating it for a migration from another branch. A base that does not
+  exist, one that does not accept connections, a template this package made,
+  and a name holding a double quote -- which Django's quoting cannot carry
+  intact, so the database checked and the database copied could differ -- are
+  each refused by name rather than failing inside Django or the server.
 
   The key also takes the base's name and its database oid, so dropping and
   recreating a base -- the usual way one restored from a schema dump is

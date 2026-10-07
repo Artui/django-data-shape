@@ -107,8 +107,10 @@ def template_database(
     Ahead -- an applied migration of an installed app that no migration on disk
     is or replaces -- raises
     :class:`~django_data_shape.databases.unusable_base.UnusableBase` before
-    anything is created, naming a few of those migrations and both remedies,
-    and so does a base that does not exist. Ahead is the one case where the
+    anything is created, naming a few of those migrations and both remedies.
+    So does a base that does not exist, one that refuses connections, a
+    template this package made, and a name holding a double quote, which
+    Django's quoting cannot carry intact. Ahead is the one case where the
     template cannot end up with the checkout's schema: migrating moves only
     forward, so whatever those migrations did stays in the copy, and a branch
     migration that adds only an index would otherwise build silently and skew
@@ -303,15 +305,48 @@ def _base_context(connection: Any, base: str) -> tuple[str, str]:
 
     Read through ``_nodb_cursor`` rather than the connection itself, because the
     connection may be the very one that is about to be pointed at the base.
+
+    Every refusal before the migration read is about the database rather than
+    its history, and each one replaces a failure that would otherwise surface
+    from somewhere unhelpful. A name holding a double quote is refused before
+    anything is read, because Django's ``quote_name`` passes a name that is
+    already quoted through as it is and escapes nothing inside it: the lookup
+    here would check one database and the copy would read another. A database
+    that refuses connections cannot have its migrations read, and the server's
+    own refusal would arrive as an ``OperationalError`` from inside Django's
+    migration loader. A template this package made refuses connections as
+    well, but allowing them is not the remedy there, so it is refused by name
+    first, connections allowed or not: it holds a shape's rows under a name
+    keyed for that shape, and nothing is ever started from one.
     """
+    if '"' in base:
+        raise UnusableBase(
+            f"The base database name {base!r} contains a double quote. Django quotes a "
+            "database name by wrapping it in double quotes, passes one that is already "
+            "wrapped through unchanged and escapes nothing inside it, so the database checked "
+            "here and the database copied could be two different ones. Rename the base."
+        )
     with connection._nodb_cursor() as cursor:
-        cursor.execute("SELECT oid FROM pg_database WHERE datname = %s", [base])
+        cursor.execute("SELECT oid, datallowconn FROM pg_database WHERE datname = %s", [base])
         row = cursor.fetchone()
     if row is None:
         raise UnusableBase(
             f"The base database {base!r} does not exist, so no template can start from it. "
             "Create and migrate it, or pass base=None to build the template from an empty "
             "database."
+        )
+    if base.startswith(PREFIX):
+        raise UnusableBase(
+            f"The base database {base!r} is a template this package made, and a template is "
+            "never a base: it holds a shape's rows under a name keyed for that shape. Pass the "
+            "migrated database the project keeps, or base=None to build from empty."
+        )
+    if not row[1]:
+        raise UnusableBase(
+            f"The base database {base!r} does not accept connections, and a base is "
+            "connected to before it is copied, to read which migrations it has applied. "
+            f"Allow them with ALTER DATABASE {connection.ops.quote_name(base)} WITH "
+            "ALLOW_CONNECTIONS true, or pass a different base."
         )
     ahead = _ahead_of_base(connection, base)
     if ahead:

@@ -306,6 +306,16 @@ anything is created and naming the base:
   checkout that has it, or by recreating the base -- pruning its row would leave
   its schema in place and only silence the refusal.
 - **missing** -- no database by that name exists.
+- **closed** -- the database does not accept connections (`ALLOW_CONNECTIONS
+  false`). A base is connected to before it is copied, to read which migrations
+  it has applied.
+- **a template** -- a database named `data_shape_...`, which this package made.
+  A template holds a shape's rows under a name keyed for that shape, so it is
+  never a base, whether or not connections to it have been turned back on.
+- **a double quote in the name** -- Django quotes a database name by wrapping it
+  in double quotes, passes one that is already wrapped through unchanged and
+  escapes nothing inside it, so the database checked and the database copied
+  could be two different ones.
 
 Two kinds of row are not ahead. A squash whose replaced files were deleted
 leaves their rows behind, and they are not ahead while the squash still lists
