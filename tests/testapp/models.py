@@ -1193,3 +1193,32 @@ class Remark(models.Model):
     )
     code = models.ForeignKey(StrictCode, null=True, on_delete=models.CASCADE, related_name="+")
     text = models.CharField(max_length=50)
+
+
+class CasedTable(models.Model):
+    """A table whose name holds capitals, so it is found only where it is quoted.
+
+    PostgreSQL folds an unquoted identifier to lower case, and ``regclass``
+    input is read as an identifier, so ``'testapp_CasedTable'::regclass`` looks
+    for ``testapp_casedtable`` -- a table that does not exist, or worse, one
+    that does. Its own table for the reason ``Bucketed`` has one: a statistics
+    target set by one test outlives it.
+    """
+
+    code = models.CharField(max_length=20)
+
+    class Meta:
+        db_table = "testapp_CasedTable"
+
+
+class DottedTable(models.Model):
+    """A table whose name holds a dot, which Django quotes as part of one identifier.
+
+    Read unquoted, as ``regclass`` input reads it, the dot splits the name into
+    a schema and a table, and the lookup asks for a schema named ``testapp``.
+    """
+
+    code = models.CharField(max_length=20)
+
+    class Meta:
+        db_table = "testapp.dotted_table"

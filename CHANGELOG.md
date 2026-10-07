@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.22.0] — 2026-10-07
+
 ### Added
 
 - **`template_database(shape, base=...)` starts a template from a database
@@ -32,7 +34,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rows, an unmanaged model's table and the tables of an app no longer installed
   are carried. A foreign key or view in the base that points into a rebuilt
   table stops the drop, which runs without `CASCADE` so that nothing is
-  removed silently, and is refused as `UnusableBase` from the copy.
+  removed silently, and is refused as `UnusableBase` from the copy. So is a
+  rebuilt table the connecting role may not drop: `DROP TABLE` needs ownership
+  of the table or of its schema, and a copy keeps every owner the base gave, so
+  the message names each such table, its owner and the remedies -- connect as
+  the owner or a member of it that inherits its privileges, reassign the tables
+  in the base, or pass `base=None`. The check runs in the copy rather than the
+  base, because the role that makes the copy owns it and so holds the
+  privileges of `pg_database_owner`, which owns `public` from PostgreSQL 15: a
+  role owning none of those tables can still drop them from its own copy, and
+  is not refused.
   `base=None`, the default, behaves and keys exactly as before.
 
   **A base behind the migrations on disk is migrated forward in the copy; only
@@ -169,10 +180,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   pointing at parents the world had deleted. The foreign keys that decide it
   are the models', so a `ForeignKey(db_constraint=False)` pulls its table in as
   well. A `Disjoint` table pointing at nothing the world empties keeps its
-  rows, which over a session world declaring it are the session's: the world's
-  keys are a digest of each row and the seed, so with the session's seed they
-  are the session's keys and the build fails on the primary key. The pytest
-  page and the docstrings say so.
+  rows, which over a session world declaring it are the session's, and the
+  world builds beside them with keys of its own. `UuidKeys` and `Md5Keys` make
+  each key from the row and a stream derived from the seed, which scaling
+  keeps, so in 0.21.0 a world over a session world built from the same shape
+  made the session's keys and failed on the primary key. Every `Disjoint`
+  table a world builds is now handed a stream of the world's own, never the
+  one `build()` uses for the same seed and table, so inside a world its keys
+  are not the ones `build()` gives the same declaration. That stream does not
+  depend on the factor, so row *i* has one key at every factor, as an integer
+  key does, and a world opened inside another over the same table draws from
+  another stream again. Foreign keys into such a table need nothing, since a
+  fan-out reads its parents' keys from the table. And a world now reads
+  `Disjoint` as `build()` does: a key strategy implementing the protocol whose
+  `is_disjoint_from_existing_rows()` answers no is emptied like any other,
+  where the world used to leave its rows in place for the build to refuse with
+  `ShapeNotEmpty`.
 
   **One behaviour changes: a scaled world declaring a parent over rows whose
   undeclared children reference it is now refused**, where 0.21.0 silently
@@ -194,8 +217,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   foreign key the database enforces is seen: `ForeignKey(db_constraint=False)`
   and `GenericForeignKey` are invisible to it. The refusal is made on every
   backend: PostgreSQL's catalogue answers it there, and Django's introspection
-  everywhere else, where a `DELETE` alone would have reached an undeclared table
-  through a database-level `ON DELETE`. Introspection reports each column of a
+  everywhere else. It runs before any `DELETE` on both, which is what keeps a
+  `DELETE` inside the declaration: one can reach past its table through a
+  database-level `ON DELETE`, such as the one Django 6.1's `DB_CASCADE`
+  creates, but by then no row outside the tables being emptied references
+  them, so all it can reach is declared rows being removed anyway. Introspection reports each column of a
   composite foreign key on its own, so off PostgreSQL such a key counts as soon
   as any column is set; Django never creates one.
 
@@ -275,6 +301,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the rows came from. The page's section is now "A scaled world can sit over a
   session world", quoting the new message, and a test holds the quotation to
   the message raised.
+
+- **Statistics targets are looked up under the name Django created the table
+  with.** `build()` read each column's current target through `regclass`,
+  binding the model's raw `db_table`, and `regclass` input is parsed as an
+  identifier: a capital letter folded to lower case and a dot split the name
+  into a schema and a table. A model whose `db_table` held either stopped the
+  build with "relation does not exist" before a row was written, or, where a
+  table of the folded name existed, was checked against that table's targets,
+  so a shape its own column could not record went through unrefused. The name
+  is now quoted by the connection, as Django's `CREATE TABLE` quoted it, which
+  also resolves a `db_table` written already quoted, such as
+  `'"schema"."table"'`.
+
+- **`drop_database` and `clone_database` refuse a database name holding a
+  double quote**, with `ValueError`, before any statement. Django's
+  `quote_name` wraps a name in double quotes without escaping one inside it,
+  and passes a name already wrapped in them through unchanged, so a statement
+  could name a different database from the one the same string names as a
+  value: `drop_database('"x"')` looked up a database literally named `"x"`,
+  reported that it was not there, and dropped `x`, and a quote followed by a
+  clause made the clause part of the statement. `template_database` already
+  refused such a base; all three now share one check, and no name this package
+  makes holds a double quote.
 
 ## [0.21.0] — 2026-09-06
 
@@ -1633,7 +1682,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   into `COPY FROM STDIN`, which psycopg 2 cannot do without materialising them
   first.
 
-[Unreleased]: https://github.com/Artui/django-data-shape/compare/v0.21.0...HEAD
+[Unreleased]: https://github.com/Artui/django-data-shape/compare/v0.22.0...HEAD
+[0.22.0]: https://github.com/Artui/django-data-shape/compare/v0.21.0...v0.22.0
 [0.21.0]: https://github.com/Artui/django-data-shape/compare/v0.20.0...v0.21.0
 [0.20.0]: https://github.com/Artui/django-data-shape/compare/v0.19.0...v0.20.0
 [0.19.0]: https://github.com/Artui/django-data-shape/compare/v0.18.1...v0.19.0

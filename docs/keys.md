@@ -82,6 +82,13 @@ building into one that already has some is allowed -- which is what makes
 from 1 and does collide, so that stays refused, and `KeyFunction` is read the
 same way because this package cannot know what your function returns.
 
+The rows the claim cannot cover are this package's own. A key is a digest of
+the seed and the row, so a second `build()` of the same declaration with the
+same seed into a table the first one filled derives the same keys and fails on
+the primary key. A scaled world draws its keys from a stream of its own, so it
+builds beside a session world's rows; a second build that stays needs another
+seed.
+
 It is a claim about **keys and nothing else**. A unique constraint on another
 column can still meet a row that was already there, and an invariant can still
 be broken by rows this package did not write -- both are checked after the load,

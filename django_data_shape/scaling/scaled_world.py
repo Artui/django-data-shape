@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Any, NamedTuple, cast
+from weakref import WeakKeyDictionary
 
 from django.core.exceptions import ValidationError
 from django.db import DEFAULT_DB_ALIAS, connections, transaction
@@ -13,12 +14,31 @@ from django.db.models import Model
 from django_data_shape.declaration.projection import Projection
 from django_data_shape.declaration.shape import Shape
 from django_data_shape.declaration.table import Table
-from django_data_shape.keys.disjoint import Disjoint
+from django_data_shape.keys.is_disjoint import is_disjoint
+from django_data_shape.keys.key_strategy import KeyStrategy
 from django_data_shape.keys.uuid_keys import UuidKeys
 from django_data_shape.loading.build import build
 from django_data_shape.scaling.scaled_shape import scaled_shape
 from django_data_shape.scaling.shape_referenced import ShapeReferenced
-from django_data_shape.utils import primary_key_field, reset_sequence
+from django_data_shape.utils import field_stream, primary_key_field, reset_sequence
+
+# How many worlds are open on each connection, which is what a world's
+# Disjoint key stream is salted with on top of _WORLD_KEYS: a world opened
+# inside another over the same Disjoint table builds beside the outer world's
+# rows, and from the outer world's stream it would make the outer world's keys.
+# Keyed by the connection object rather than by the alias, because Django gives
+# each thread a connection of its own under one alias, and held weakly so that
+# a connection Django drops takes its count with it.
+_OPEN_WORLDS: WeakKeyDictionary[Any, int] = WeakKeyDictionary()
+
+# What a world's Disjoint key stream differs from build()'s by, for the same
+# seed and table, before the depth is mixed in. A fixed 64-bit constant derived
+# the way every stream here is, from a name, rather than a number picked by
+# hand. It has high bits set, so XORed with any depth a process could reach it
+# is never zero -- the world's stream is never build()'s -- and two depths
+# never share a stream either. A session world would need the world's seed
+# XORed with this constant to meet it, which nobody picks.
+_WORLD_KEYS = field_stream(0, "scaled_world", ":key")
 
 
 @contextmanager
@@ -96,8 +116,10 @@ def scaled_world(shape: Shape, factor: int, *, using: str = DEFAULT_DB_ALIAS) ->
     life of the block. A declared table that already holds rows -- a session
     world's, or the caller's own -- is emptied, inside the transaction the
     block rolls back, so they come back afterwards. A table whose keys are
-    :class:`~django_data_shape.keys.disjoint.Disjoint` is not emptied, and the
-    world builds beside the rows already there -- unless it has a foreign key
+    :class:`~django_data_shape.keys.disjoint.Disjoint` -- a strategy that
+    implements the protocol and answers yes, the reading ``build`` makes too
+    -- is not emptied, and the world builds beside the rows already there,
+    with keys of its own (below) -- unless it has a foreign key
     into a declared table that is being emptied, directly or through another
     such table, and holds rows. Then it is emptied too: its rows are declared
     rows, and they cannot outlive the parents they point at. Those foreign keys
@@ -107,15 +129,21 @@ def scaled_world(shape: Shape, factor: int, *, using: str = DEFAULT_DB_ALIAS) ->
     refused, where the database's own keys would have left nothing to refuse.
 
     **So a session world under a scaled world over the same graph needs no
-    arrangement unless a declared ``Disjoint`` table holding the session's
-    rows is left alone** -- one pointing at nothing the world empties, such as
-    a UUID-keyed root, or any table of a graph keyed by UUIDs throughout. The
-    world builds beside those rows, and its keys are a digest of each row's
-    position and the shape's seed, which scaling keeps: with the session's seed
-    the world makes the session's keys and the build fails on the primary key
-    with ``IntegrityError``; with another seed it builds, and a table fanned
-    out over that one draws parents from the session's rows as well as the
-    world's.
+    arrangement**, a declared ``Disjoint`` table holding the session's rows
+    included -- one pointing at nothing the world empties, such as a
+    UUID-keyed root, or any table of a graph keyed by UUIDs throughout. The
+    world leaves those rows in place and untouched, builds beside them, and
+    they are back as they were afterwards. Its keys are not theirs.
+    ``UuidKeys`` and ``Md5Keys`` make each key from the row and a stream
+    derived from the seed and the table, and scaling keeps the seed, so every
+    ``Disjoint`` table a world builds is handed a stream of the world's own,
+    never the one ``build()`` uses for the same seed and table: a world's keys
+    there are not the keys ``build()`` gives the same declaration. The stream does not
+    depend on the factor, so row ``i`` has one key at every factor, as an
+    integer key does. A world opened inside another over the same table draws
+    from another stream again, and builds beside the outer world's rows the
+    same way. A table fanned out over such a table draws parents from the
+    session's rows as well as the world's, whatever the seed.
 
     What the world's statements set off is another matter. A row-level
     ``DELETE`` trigger on a declared table runs when the world empties that
@@ -144,6 +172,20 @@ def scaled_world(shape: Shape, factor: int, *, using: str = DEFAULT_DB_ALIAS) ->
     else, which reports each column of a composite foreign key on its own, so
     off PostgreSQL a composite key counts as a reference when any of its
     columns is set rather than all of them. Django never creates one.
+
+    **That order is what keeps a ``DELETE`` inside the declaration.** A
+    ``DELETE`` can reach past the table it names: a database-level ``ON
+    DELETE`` -- ``CASCADE``, ``SET NULL`` or ``SET DEFAULT``, which Django 6.1
+    creates for ``DB_CASCADE`` and its siblings -- acts on every row
+    referencing a row the statement removes. The refusal runs first, over
+    every key the database enforces into a declared table being emptied, so
+    when the first ``DELETE`` runs no row outside the tables being emptied
+    references one of their rows, and such a key has nothing outside them to
+    act on (``test_a_cascading_key_from_an_undeclared_table_is_refused_before_anything_is_removed``).
+    What it can still reach is rows of the tables being emptied, which the
+    world removes anyway
+    (``test_a_declared_child_under_a_cascading_key_is_emptied_with_its_parent``).
+    A key the database does not enforce carries no ``ON DELETE`` to follow.
 
     On PostgreSQL the emptying is one ``TRUNCATE`` when nothing outside the
     declaration holds rows, which is the case a session world under a scaled
@@ -192,10 +234,14 @@ def scaled_world(shape: Shape, factor: int, *, using: str = DEFAULT_DB_ALIAS) ->
     after a world is torn down gets a larger id than it otherwise would.
     """
     scaled = scaled_shape(shape, factor)
+    connection = connections[using]
+    depth = _OPEN_WORLDS.get(connection, 0)
+    world = _with_world_keys(scaled, depth)
+    _OPEN_WORLDS[connection] = depth + 1
     try:
         with transaction.atomic(using=using):
-            _empty_declared_tables(scaled, using)
-            result = build(scaled, using=using, require_statistics=False)
+            _empty_declared_tables(world, using)
+            result = build(world, using=using, require_statistics=False)
             yield result.rows
             # Rolling back on the way out rather than raising and swallowing
             # an exception to get there: set_rollback is the supported way to
@@ -204,6 +250,12 @@ def scaled_world(shape: Shape, factor: int, *, using: str = DEFAULT_DB_ALIAS) ->
             # atomic rolls back for exactly that case already.
             transaction.set_rollback(True, using=using)
     finally:
+        # Given back however the block ends, so the next world on this
+        # connection draws from the stream this one did -- the same keys, which
+        # a growth assertion over several factors relies on -- even after a
+        # block that raised
+        # (test_a_world_whose_block_raised_leaves_the_next_one_its_keys).
+        _OPEN_WORLDS[connection] = depth
         # After the rollback, never inside it. The rows are back and the
         # sequences are not: ``setval`` is not transactional, so the counter
         # still holds whatever the scaled build moved it to -- and a scaled
@@ -256,10 +308,13 @@ def _empty_declared_tables(shape: Shape, using: str) -> None:
     rows for good.
 
     A table whose keys are :class:`~django_data_shape.keys.disjoint.Disjoint`
-    is left alone, mirroring the exemption ``build`` makes for the same reason:
-    those keys cannot collide with a caller's rows, so the hybrid this package
-    documents -- parents made by your code, children made here -- must keep
-    working. Unless it points into what is emptied: see :func:`_candidates`.
+    is left alone, mirroring the exemption ``build`` makes for the same reason
+    and read by the same helper (see :func:`_keeps_its_keys`): those keys
+    cannot collide with a caller's rows, so the hybrid this package documents
+    -- parents made by your code, children made here -- must keep working.
+    Nor with a session world's built from the same shape, since the world
+    draws them from a stream of its own (see :func:`_with_world_keys`). Unless
+    it points into what is emptied: see :func:`_candidates`.
 
     **Only a declared table that holds a row needs emptying** -- a
     *candidate* -- and a world with none issues no statement after the read
@@ -304,9 +359,10 @@ def _empty_declared_tables(shape: Shape, using: str) -> None:
     **Off PostgreSQL the refusal is made through Django's introspection**,
     which reads every table's foreign keys -- a cost paid only by a world whose
     declared tables already hold rows, since one over empty tables stops at the
-    first read. It is the same rule, so a world's ``DELETE`` does not reach an
-    undeclared table through a database-level ``ON DELETE``, or leave its rows
-    pointing at keys the world then hands to rows of its own. The reading
+    first read. It is the same rule, run before any ``DELETE`` as it is on
+    PostgreSQL, so a world's ``DELETE`` does not reach an undeclared table
+    through a database-level ``ON DELETE``, or leave its rows pointing at keys
+    the world then hands to rows of its own. The reading
     differs in one place: introspection reports each column of a composite
     foreign key on its own, so a composite key counts there as soon as any
     column is set (``test_off_postgresql_a_composite_key_counts_when_any_column_is_set``).
@@ -412,10 +468,92 @@ def _empty_declared_tables(shape: Shape, using: str) -> None:
 def _keeps_its_keys(table: Table | Projection) -> bool:
     """Whether ``table`` builds beside rows already there rather than being emptied.
 
+    Answered by :func:`~django_data_shape.keys.is_disjoint.is_disjoint`, the
+    helper ``build`` asks before refusing a table for holding rows, so the two
+    cannot part: a strategy implementing ``Disjoint`` and answering no used to
+    be left in place here and then refused by the build with
+    :class:`~django_data_shape.loading.shape_not_empty.ShapeNotEmpty`
+    (``test_a_strategy_that_says_it_is_not_disjoint_is_emptied``).
+
     A :class:`~django_data_shape.declaration.projection.Projection` has no
     ``keys`` to ask, and its rows come from a statement, so it never does.
     """
-    return isinstance(getattr(table, "keys", None), Disjoint)
+    return is_disjoint(getattr(table, "keys", None))
+
+
+def _with_world_keys(shape: Shape, depth: int) -> Shape:
+    """``shape`` with every Disjoint table drawing its keys from the world's own stream.
+
+    ``UuidKeys`` and ``Md5Keys`` make each key from the row and a stream
+    derived from the seed and the table, and scaling keeps the seed, so a world
+    handing them the stream ``build()`` does makes the keys ``build()`` makes. Over a session
+    world built from the same shape, those are the session's -- in a table the
+    world leaves in place and builds beside -- and the build failed on the
+    primary key (``test_a_session_world_with_a_disjoint_root_sits_under_the_same_graph``).
+    So each such table draws from that stream XORed with ``_WORLD_KEYS`` and
+    the number of worlds already open on the connection, which is never the
+    stream ``build()`` uses for the same seed and table, and is another stream
+    for a world opened inside a world
+    (``test_a_world_inside_another_builds_beside_it_over_a_disjoint_table``).
+    A wrapper around the strategy rather than a parameter of ``build()``,
+    whose signature is public: the build hands every strategy the stream it
+    always has, and the wrapper turns it into the world's.
+
+    Every such table, emptied or not, and only those. Not the factor: row
+    ``i`` gets the same key at every factor, the way an integer key is ``i +
+    1`` at every factor (``test_a_worlds_disjoint_keys_are_the_same_at_every_factor``).
+    And nothing else: a table that is not Disjoint is emptied, so there is no
+    row of anybody else's for its keys to meet, and a
+    :class:`~django_data_shape.keys.key_function.KeyFunction` or any other
+    strategy keeps the stream ``build()`` gives it
+    (``test_only_a_strategy_that_says_it_is_disjoint_draws_from_the_worlds_stream``,
+    one case for each side of the line). A child needs nothing either, since
+    a fan-out reads its parents' keys from the table rather than computing
+    them (``test_a_worlds_children_point_at_its_own_disjoint_keys``).
+
+    The ``isinstance`` is the type's and holds a test too: a
+    :class:`~django_data_shape.declaration.projection.Projection` has no
+    ``keys``, and is emptied whatever its own keys are
+    (``test_disjoint_keys_are_not_offered_for_a_projected_table``).
+    """
+    salt = _WORLD_KEYS ^ depth
+    return Shape(
+        *(
+            # The constructor scaled_shape uses, forwarding everything but the
+            # strategy as it stands. The declaration is validated again, and
+            # passes again: nothing it checks reads the keys.
+            Table(
+                table.model,
+                rows=table.rows,
+                fields=dict(table.fields),
+                keys=_WorldKeys(table.keys, salt),
+                statistics=dict(table.statistics),
+            )
+            if isinstance(table, Table) and is_disjoint(table.keys)
+            else table
+            for table in shape.tables
+        ),
+        seed=shape.seed,
+        invariants=tuple(shape.invariants),
+    )
+
+
+class _WorldKeys:
+    """A Disjoint strategy's keys, drawn from a stream of the world's own.
+
+    Still a Disjoint strategy, answering what the one it wraps answers, so the
+    build builds it beside the rows already there exactly as it would have.
+    """
+
+    def __init__(self, keys: KeyStrategy, salt: int) -> None:
+        self._keys = keys
+        self._salt = salt
+
+    def key_for(self, row: int, stream: int) -> object:
+        return self._keys.key_for(row, stream ^ self._salt)
+
+    def is_disjoint_from_existing_rows(self) -> bool:
+        return is_disjoint(self._keys)
 
 
 def _candidates(shape: Shape, holding: set[str]) -> list[str]:
@@ -670,6 +808,10 @@ def _disjoint_keys_fit(table: Table | Projection) -> bool:
     references another candidate
     (``test_disjoint_keys_are_not_offered_for_a_table_that_has_them``). Both
     disjuncts were removed in turn and the test named beside each failed.
+    Disjoint as :func:`~django_data_shape.keys.is_disjoint.is_disjoint` reads
+    it, so a strategy implementing the protocol and answering no is emptied
+    like any other, and offered them
+    (``test_disjoint_keys_are_offered_for_a_strategy_that_says_it_is_not_disjoint``).
 
     Otherwise only where the primary key accepts the keys those strategies
     make, as the field's own validation decides. A ``UUIDField`` does, and so
@@ -693,7 +835,7 @@ def _disjoint_keys_fit(table: Table | Projection) -> bool:
     since one ``except`` naming both is a single branch to the coverage gate.
     """
     keys = getattr(table, "keys", None)
-    if keys is None or isinstance(keys, Disjoint):
+    if keys is None or is_disjoint(keys):
         return False
     field = primary_key_field(table.model)
     if field.is_relation:

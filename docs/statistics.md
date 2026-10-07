@@ -373,6 +373,20 @@ anything is created, with the one exception marked, and naming the base:
   without one. Django does let a migration of an app with migrations point at
   an app without them, and in that project no base can be started from until
   the app pointed at has migrations of its own; build from empty instead.
+- **a rebuilt table the connecting role may not drop** -- `DROP TABLE` needs
+  ownership, and the copy keeps every owner the base gave. PostgreSQL lets a
+  table's owner, its schema's owner or a superuser drop it, and counts a role
+  that inherits an owner's privileges as that owner; a role that is none of
+  those is refused with `UnusableBase` naming the tables and their owners,
+  rather than with the `ProgrammingError` PostgreSQL raises for the first of
+  them. Connect as the owner or a member of it that inherits its privileges,
+  reassign the tables in the base with `ALTER TABLE ... OWNER TO`, or build
+  from empty. This one is raised from the copy too, and the partial is
+  dropped with it, because only the copy can answer it: the role that makes
+  the copy owns it, and a database's owner holds the privileges of
+  `pg_database_owner`, which owns the `public` schema of every database made
+  from PostgreSQL 15's own template. A role owning none of those tables can
+  therefore still drop them from its own copy, and is not refused.
 - **missing** -- no database by that name exists.
 - **closed** -- the database does not accept connections (`ALLOW_CONNECTIONS
   false`). A base is connected to before it is copied, to read which migrations
@@ -466,6 +480,17 @@ pass it as one.
 - **A base ahead of the migrations on disk.** It is refused with the remedies,
   as above, rather than migrated back: the migrations that would undo it are not
   in this checkout.
+- **A database name holding a double quote.** Django quotes a database name by
+  wrapping it in double quotes, passes one that is already wrapped through
+  unchanged and escapes nothing inside it, so the database a statement names
+  could differ from the one the same string names as a value -- a lookup, or a
+  connection's `NAME`. `drop_database` looks a name up and then drops it, so
+  given `'"x"'` it would report nothing there and drop `x`. Both
+  [`drop_database`][django_data_shape.databases.drop_database.drop_database] and
+  [`clone_database`][django_data_shape.databases.clone_database.clone_database]
+  raise `ValueError` for such a name, either of `clone_database`'s two, before
+  any statement; a base raises `UnusableBase`, as above. No name this package
+  makes holds one.
 
 Parallel runs *are* supported. Under `pytest-xdist` every worker asks for the
 same template at once; the first takes a PostgreSQL advisory lock on the digest

@@ -8,6 +8,7 @@ from django.db import DEFAULT_DB_ALIAS, connections
 
 from django_data_shape.backends.require_clone_strategy import require_clone_strategy
 from django_data_shape.backends.require_postgres import require_postgres
+from django_data_shape.databases.require_quotable_name import require_quotable_name
 
 
 def clone_database(
@@ -53,7 +54,12 @@ def clone_database(
     Both names are quoted by the connection rather than interpolated raw, and
     the strategy is chosen from a fixed set, because none of the three can be a
     bound parameter: ``CREATE DATABASE`` is a utility statement whose grammar
-    has no placeholders.
+    has no placeholders. **A name holding a double quote raises
+    ``ValueError``** before any statement, for either name: Django's quoting
+    escapes nothing inside a name and passes one already wrapped in double
+    quotes through as it is, so ``'"x"'`` would create, replace or copy ``x``
+    while a lookup or a connection given the same string meant another
+    database.
     """
     # Typed loosely for the reason the loader's connections are: ``pg_version``
     # and ``_nodb_cursor`` are the PostgreSQL wrapper's, not the base class's,
@@ -61,6 +67,12 @@ def clone_database(
     # on every line that uses them.
     connection: Any = connections[using]
     require_postgres(connection, "Cloning a database")
+    # Both names, before anything is asked of the server, so that with
+    # replace=True not even the DROP runs
+    # (test_cloning_with_a_name_holding_a_double_quote_is_refused_before_any_statement,
+    # once for each name).
+    require_quotable_name(template, "template database")
+    require_quotable_name(target, "target database")
     require_clone_strategy(connection, strategy)
 
     quote = connection.ops.quote_name

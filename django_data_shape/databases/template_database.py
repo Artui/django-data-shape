@@ -16,6 +16,7 @@ from django.db.migrations.loader import MigrationLoader
 from django.db.transaction import TransactionManagementError
 
 from django_data_shape.backends.require_postgres import require_postgres
+from django_data_shape.databases.require_quotable_name import require_quotable_name
 from django_data_shape.databases.shape_digest import shape_digest
 from django_data_shape.databases.unusable_base import UnusableBase
 from django_data_shape.declaration.shape import Shape
@@ -53,6 +54,23 @@ _KEY_BYTES = 8
 _GENERATED = re.compile(
     rf"{re.escape(PREFIX)}[0-9a-f]{{{_KEY_BYTES * 2}}}(?:{re.escape(_PARTIAL)})?"
 )
+
+# Which of the tables a copy rebuilds the current role may not drop, and who
+# owns each. PostgreSQL lets a table be dropped by its owner, by the owner of its
+# schema, or by a superuser, and checks ownership as "has the privileges of":
+# membership that inherits them, superuser included. pg_has_role with USAGE is
+# that same test, which MEMBER is not -- a member without INHERIT has to SET
+# ROLE first, and DROP TABLE does not. The names are bound quoted, because
+# regclass input is read as an identifier. :func:`_drop_unmigrated_tables`
+# names the test holding each condition.
+_UNDROPPABLE = """
+SELECT c.relname, pg_get_userbyid(c.relowner), current_user
+FROM pg_class AS c
+JOIN pg_namespace AS n ON n.oid = c.relnamespace
+WHERE c.oid = ANY (%s::regclass[])
+  AND NOT pg_has_role(c.relowner, 'USAGE')
+  AND NOT pg_has_role(n.nspowner, 'USAGE')
+"""
 
 
 def template_database(
@@ -154,11 +172,16 @@ def template_database(
     migrations. So does a base
     that does not exist, one that refuses connections, a template this package
     made or the partial of one, and a name holding a double quote, which
-    Django's quoting cannot carry intact. One more is raised from the copy
-    rather than before it, because only the copy can find it: something outside
-    the tables being rebuilt that depends on one of them -- a foreign key or a
-    view -- stops those tables being dropped and made again,
-    and the partial goes with the refusal. Of the histories a base can record,
+    Django's quoting cannot carry intact. Two more are raised from the copy
+    rather than before it, because only the copy can find them, and the partial
+    goes with either refusal: something outside the tables being rebuilt that
+    depends on one of them -- a foreign key or a view -- stops those tables
+    being dropped and made again; and so does a connecting role that may not
+    drop them, being neither their owner nor their schema's, nor a member
+    inheriting either's privileges, nor a superuser. Only the copy can say
+    which, because the role that makes it owns it, and a database's owner holds
+    the privileges of ``pg_database_owner``, which owns ``public`` from
+    PostgreSQL 15. Of the histories a base can record,
     ahead is the one migrating cannot bring to the checkout's schema: it moves
     only forward, so whatever those migrations did stays in the copy, and a branch
     migration that adds only an index would otherwise build silently and skew
@@ -373,6 +396,28 @@ def _drop_unmigrated_tables(connection: Any, base: str) -> None:
     :class:`~django_data_shape.databases.unusable_base.UnusableBase`; the
     partial goes with it, as any failure takes it.
 
+    **A table the connecting role may not drop is refused first**, naming each
+    one and its owner, because ``DROP TABLE`` needs ownership and the copy keeps
+    every owner the base gave: PostgreSQL's own refusal is a
+    ``ProgrammingError`` naming the first such table and no remedy. It is asked
+    of the copy rather than of the base, and that is not a matter of
+    convenience. Owning the schema is as good as owning the table, the role
+    that made the copy owns the copy, and the owner of a database holds the
+    privileges of ``pg_database_owner`` -- which owns ``public`` in every
+    database made from PostgreSQL 15's own template. So a role owning none of
+    those tables may still drop them all from its copy, and only the copy can
+    say so; the base belongs to whoever made it. The partial goes with this
+    refusal too. Each condition of the query is held by a test of its own,
+    because the whole query is one statement to a branch gate:
+
+    - the table's owner:
+      ``test_a_role_owning_those_tables_may_rebuild_them_without_owning_their_schema``;
+    - the schema's owner: ``test_so_may_one_owning_their_schema_without_owning_them``;
+    - privileges rather than membership, ``USAGE`` rather than ``MEMBER``:
+      ``test_so_is_one_that_is_a_member_of_their_owner_without_inheriting_its_privileges``;
+    - and that what is left is refused:
+      ``test_a_base_whose_rebuilt_tables_the_role_cannot_drop_is_refused_naming_their_owner``.
+
     The ``if`` is held by ``test_migrate_still_runs_over_the_copy``, whose base
     has no such table, because ``DROP TABLE`` with nothing to drop is a syntax
     error.
@@ -381,6 +426,23 @@ def _drop_unmigrated_tables(connection: Any, base: str) -> None:
     if not tables:
         return
     quote = connection.ops.quote_name
+    with connection.cursor() as cursor:
+        cursor.execute(_UNDROPPABLE, [[quote(table) for table in tables]])
+        undroppable = sorted(cursor.fetchall())
+    if undroppable:
+        role = undroppable[0][2]
+        owners = [f"{table} (owned by {owner})" for table, owner, _role in undroppable]
+        raise UnusableBase(
+            f"The base database {base!r} holds {len(undroppable)} table(s) of apps without "
+            f"migrations that the role this connects as, {role!r}, may not drop, "
+            f"{_examples(owners)}. A template from a base drops those tables from its copy and "
+            "makes them again from their models; PostgreSQL lets only a table's owner, its "
+            "schema's owner or a superuser drop one, counting a role that inherits an owner's "
+            "privileges as that owner, and the copy keeps the owners the base gave. Connect as "
+            "the owner or a member of it that inherits its privileges, reassign the tables in "
+            f"the base with ALTER TABLE ... OWNER TO {quote(role)}, or pass base=None to build "
+            "from empty."
+        )
     try:
         with connection.cursor() as cursor:
             cursor.execute(f"DROP TABLE {', '.join(quote(table) for table in tables)}")
@@ -430,13 +492,7 @@ def _base_context(connection: Any, base: str) -> tuple[str, str]:
     length with or without the partial suffix, and not merely share the
     prefix: a user's own database can.
     """
-    if '"' in base:
-        raise UnusableBase(
-            f"The base database name {base!r} contains a double quote. Django quotes a "
-            "database name by wrapping it in double quotes, passes one that is already "
-            "wrapped through unchanged and escapes nothing inside it, so the database checked "
-            "here and the database copied could be two different ones. Rename the base."
-        )
+    require_quotable_name(base, "base database", refusal=UnusableBase)
     with connection._nodb_cursor() as cursor:
         cursor.execute("SELECT oid, datallowconn FROM pg_database WHERE datname = %s", [base])
         row = cursor.fetchone()
