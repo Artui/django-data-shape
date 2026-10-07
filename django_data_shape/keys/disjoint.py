@@ -34,6 +34,13 @@ class Disjoint(Protocol):
     :class:`~django_data_shape.distributions.distinct.Distinct` does: the answer
     can be a property of the parameters and not only of the class.
 
+    **The rows it cannot speak for are this package's own.** The built-in
+    strategies derive a key from the seed and the row, so a second ``build()``
+    of one declaration with the same seed, into a table the first filled,
+    derives the same keys and collides on the primary key. A scaled world draws
+    its keys from a stream of its own and builds beside them; a second build
+    that stays needs another seed.
+
     **It says nothing about anything but keys.** A unique constraint on some
     other column can still collide with a row that was already there, and a
     business invariant can still be broken by rows this package did not write.
