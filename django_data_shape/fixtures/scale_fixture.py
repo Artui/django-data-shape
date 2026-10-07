@@ -59,8 +59,9 @@ def scale_fixture(shape: Shape, *, using: str = DEFAULT_DB_ALIAS) -> object:
     names the reference. Declare that table too, and a session world over the
     same graph builds. A declared table with ``Disjoint`` keys is emptied only
     with a table it points into; one pointing at nothing the world empties
-    keeps the session's rows, and with the session's seed the world's keys are
-    theirs and the build fails on the primary key -- see
+    keeps the session's rows, and the world builds beside them with keys drawn
+    from a stream of its own, so they are not the session's even with the
+    session's seed -- see
     :func:`~django_data_shape.scaling.scaled_world.scaled_world`.
 
     **Open a query capture inside the block, never around it.** Repeated here

@@ -511,6 +511,85 @@ def test_a_reference_the_database_does_not_enforce_is_not_seen() -> None:
     assert _callers_rows("default") == [[("caller", None)], [("caller", "caller")], [("caller", 7)]]
 
 
+def _cascading(table: str, column: str) -> None:
+    """Re-create ``table``'s key into the companies ``ON DELETE CASCADE``.
+
+    What Django 6.1's ``DB_CASCADE`` puts in the database, made in SQL inside
+    the test's transaction so it needs no model and runs on the Django floor.
+    Deferred like every key Django creates. The catalogue is read back, so a
+    statement that did not take cannot leave these tests passing over a key
+    that cascades nothing.
+    """
+    with connection.cursor() as cursor:
+        constraints = connection.introspection.get_constraints(cursor, table)
+        (foreign_key,) = (name for name, info in constraints.items() if info["foreign_key"])
+        quoted = connection.ops.quote_name(foreign_key)
+        cursor.execute(
+            f"ALTER TABLE {table} DROP CONSTRAINT {quoted}, ADD CONSTRAINT {quoted} "
+            f"FOREIGN KEY ({column}) REFERENCES testapp_company (id) "
+            "ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED"
+        )
+        cursor.execute("SELECT confdeltype FROM pg_constraint WHERE conname = %s", [foreign_key])
+        assert cursor.fetchone() == ("c",)
+
+
+@pytest.mark.skipif(connection.vendor != "postgresql", reason="the key is re-created in SQL")
+def test_a_cascading_key_from_an_undeclared_table_is_refused_before_anything_is_removed() -> None:
+    # A DELETE of the companies would take the caller's session with it
+    # through this key, and the session's table is not declared. The refusal
+    # reads the reference first, so no DELETE runs at all.
+    _cascading("testapp_session", "company_id")
+    company = Company.objects.create(name="caller")
+    Session.objects.create(company=company, label="caller")
+    shape = Shape(Table(Company, rows=2, name=Constant("world")), seed=5)
+
+    with (
+        CaptureQueriesContext(connection) as captured,
+        pytest.raises(Exception) as refused,
+        contextlib.ExitStack() as entering,
+    ):
+        entering.enter_context(scaled_world(shape, 1))
+
+    assert refused.type is django_data_shape.ShapeReferenced
+    assert "(testapp_session.company_id -> testapp_company)" in str(refused.value)
+    assert not [query for query in captured if query["sql"].startswith(("DELETE", "TRUNCATE"))]
+    assert list(Session.objects.values_list("company__name", "label")) == [("caller", "caller")]
+
+
+@pytest.mark.skipif(connection.vendor != "postgresql", reason="the keys are re-created in SQL")
+def test_a_declared_child_under_a_cascading_key_is_emptied_with_its_parent() -> None:
+    # The DELETE route, which an undeclared row left null puts the world on.
+    # The sessions are declared, so whatever the companies' DELETE could reach
+    # through their key is a declared row being removed anyway -- and the
+    # sessions go first. The optional children cascade too, and keep their row,
+    # because a key left null references nothing for a DELETE to follow.
+    _cascading("testapp_session", "company_id")
+    _cascading("testapp_optionalchild", "company_id")
+    company = Company.objects.create(name="caller")
+    Session.objects.create(company=company, label="caller")
+    OptionalChild.objects.create(company=None, label="caller")
+    shape = Shape(
+        Table(Company, rows=2, name=Constant("world")),
+        Table(Session, rows=4, label=Constant("world"), company=FanOut(Zipf())),
+        seed=5,
+    )
+
+    with CaptureQueriesContext(connection) as captured, scaled_world(shape, 1) as rows:
+        assert rows == 6
+        assert sorted(Company.objects.values_list("name", flat=True)) == ["world"] * 2
+        assert (
+            list(Session.objects.values_list("company__name", "label")) == [("world", "world")] * 4
+        )
+        assert list(OptionalChild.objects.values_list("company_id", "label")) == [(None, "caller")]
+
+    assert [query["sql"] for query in captured if query["sql"].startswith("DELETE")] == [
+        'DELETE FROM "testapp_session"',
+        'DELETE FROM "testapp_company"',
+    ]
+    assert list(Session.objects.values_list("company__name", "label")) == [("caller", "caller")]
+    assert list(Company.objects.values_list("pk", "name")) == [(company.pk, "caller")]
+
+
 def _delete_trigger_on_companies(timing: str, body: str) -> None:
     with connection.cursor() as cursor:
         cursor.execute(

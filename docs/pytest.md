@@ -95,8 +95,11 @@ those tables hold only its own world, and the session rows are back after it.
 That is the shape a first consumer arrives with -- a big session world for plan
 assertions, small scaled worlds for growth assertions over the same flow.
 
-A declared table with `Disjoint` keys is the exception, because a world leaves
-it alone and builds beside its rows. When it holds rows and has a foreign key
+A declared table with `Disjoint` keys -- a strategy that says its keys cannot
+collide with rows already there, as `UuidKeys` and `Md5Keys` do -- is the
+exception, because a world leaves it alone and builds beside its rows. A
+strategy implementing the protocol and answering no is emptied like any other,
+which is what `build()` reads too. When it holds rows and has a foreign key
 into a declared table the world empties -- directly, or through another such
 table -- it is emptied too, because its rows are declared rows and cannot
 outlive the parents they point at. That join reads the models' foreign keys,
@@ -106,13 +109,17 @@ would have left nothing to refuse.
 
 A `Disjoint` table pointing at nothing the world empties -- a UUID-keyed root,
 or every table of a graph keyed by UUIDs throughout -- keeps its rows, and over
-a session world declaring it those rows are the session's. The world's keys are
-a digest of each row's position and the shape's seed, and scaling keeps the
-seed, so with the session's seed the world makes the session's keys and the
-build fails on the primary key with `IntegrityError`. With another seed it
-builds, and a table fanned out over that one draws parents from the session's
-rows as well as the world's. Over the same graph, then, a session world needs no
-arrangement unless the graph has such a table.
+a session world declaring it those rows are the session's. The world leaves them
+untouched, builds beside them, and its keys are not theirs. `UuidKeys` and
+`Md5Keys` make each key from the row and a stream derived from the shape's seed,
+and scaling keeps the seed, so every `Disjoint` table a world builds is handed a
+stream of the world's own rather than the one `build()` uses for the same seed
+and table. Inside a world those keys are therefore not the ones `build()`
+gives the same declaration; they are the same at every factor, so row *i* has
+one key however large the world, as an integer key does; and a world opened
+inside another over the same table draws from another stream again. A table
+fanned out over such a table draws parents from the session's rows as well as
+the world's. Over the same graph, then, a session world needs no arrangement.
 
 A scaled world removes the rows of its declared tables **and nothing else**:
 no statement it issues changes a table its shape does not declare, even for the
@@ -249,7 +256,11 @@ A world first empties the tables its shape declares that hold rows, inside
 that same transaction, and changes no other table: rows the test wrote in a
 declared table are gone inside the block and back after it, and a row the test
 wrote that *references* a declared table is refused, as above, rather than
-emptied or orphaned. On PostgreSQL the emptying is one `TRUNCATE` listing the
+emptied or orphaned. That holds under a database-level `ON DELETE` as well, such
+as the one Django 6.1's `DB_CASCADE` creates: a `DELETE` follows such a key to
+the rows referencing the ones it removes, and by the time one runs, the refusal
+has established that none of those is outside the tables being emptied. On
+PostgreSQL the emptying is one `TRUNCATE` listing the
 declared tables and every table that references them, when none of those holds
 rows, and otherwise a `DELETE` per declared table holding rows. Never
 `TRUNCATE ... CASCADE`, which follows foreign keys by schema rather than by row:
