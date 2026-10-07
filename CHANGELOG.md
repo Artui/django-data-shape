@@ -32,7 +32,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rows, an unmanaged model's table and the tables of an app no longer installed
   are carried. A foreign key or view in the base that points into a rebuilt
   table stops the drop, which runs without `CASCADE` so that nothing is
-  removed silently, and is refused as `UnusableBase` from the copy.
+  removed silently, and is refused as `UnusableBase` from the copy. So is a
+  rebuilt table the connecting role may not drop: `DROP TABLE` needs ownership
+  of the table or of its schema, and a copy keeps every owner the base gave, so
+  the message names each such table, its owner and the remedies -- connect as
+  the owner or a member of it that inherits its privileges, reassign the tables
+  in the base, or pass `base=None`. The check runs in the copy rather than the
+  base, because the role that makes the copy owns it and so holds the
+  privileges of `pg_database_owner`, which owns `public` from PostgreSQL 15: a
+  role owning none of those tables can still drop them from its own copy, and
+  is not refused.
   `base=None`, the default, behaves and keys exactly as before.
 
   **A base behind the migrations on disk is migrated forward in the copy; only
@@ -290,6 +299,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the rows came from. The page's section is now "A scaled world can sit over a
   session world", quoting the new message, and a test holds the quotation to
   the message raised.
+
+- **Statistics targets are looked up under the name Django created the table
+  with.** `build()` read each column's current target through `regclass`,
+  binding the model's raw `db_table`, and `regclass` input is parsed as an
+  identifier: a capital letter folded to lower case and a dot split the name
+  into a schema and a table. A model whose `db_table` held either stopped the
+  build with "relation does not exist" before a row was written, or, where a
+  table of the folded name existed, was checked against that table's targets,
+  so a shape its own column could not record went through unrefused. The name
+  is now quoted by the connection, as Django's `CREATE TABLE` quoted it, which
+  also resolves a `db_table` written already quoted, such as
+  `'"schema"."table"'`.
+
+- **`drop_database` and `clone_database` refuse a database name holding a
+  double quote**, with `ValueError`, before any statement. Django's
+  `quote_name` wraps a name in double quotes without escaping one inside it,
+  and passes a name already wrapped in them through unchanged, so a statement
+  could name a different database from the one the same string names as a
+  value: `drop_database('"x"')` looked up a database literally named `"x"`,
+  reported that it was not there, and dropped `x`, and a quote followed by a
+  clause made the clause part of the statement. `template_database` already
+  refused such a base; all three now share one check, and no name this package
+  makes holds a double quote.
 
 ## [0.21.0] — 2026-09-06
 
