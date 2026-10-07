@@ -10,8 +10,7 @@ from typing import Any
 from django.apps import apps
 from django.conf import settings
 from django.core.management import call_command
-from django.db import DEFAULT_DB_ALIAS, connections, router
-from django.db.backends.utils import truncate_name
+from django.db import DEFAULT_DB_ALIAS, InternalError, connections, router
 from django.db.migrations.loader import MigrationLoader
 from django.db.migrations.recorder import MigrationRecorder
 from django.db.transaction import TransactionManagementError
@@ -81,9 +80,10 @@ def template_database(
       different one;
     - this package's own version, because a release that changes how a
       distribution draws changes the rows without changing the declaration;
-    - with a ``base``, the base's name and its database oid, because its rows
-      become the template's rows. Dropping and recreating the base gives it a
-      new oid, so a refreshed base is a new template.
+    - with a ``base``, the base's name and its database oid, because the rows
+      it holds in the tables of apps with migrations become the template's
+      rows. Dropping and recreating the base gives it a new oid, so a refreshed
+      base is a new template.
 
     Change any of them and the name changes, so the old database is simply not
     asked for again. Two things that are **not** covered, stated rather than
@@ -94,20 +94,32 @@ def template_database(
     a new template would copy while the key stays where it was. Drop the
     template by hand --
     :func:`~django_data_shape.databases.drop_database.drop_database` -- when either happens.
+    With a base, an edited migration goes one step further, and it is the one
+    case here that nothing could detect: a migration regenerated under a name
+    the base has already applied is read by ``migrate`` as applied and skipped,
+    so the copy keeps the version the base ran, and a template rebuilt from the
+    same base would keep it again. Recreate the base, which gives it a new oid
+    and so a new template.
 
     **Starting from a migrated base.** With ``base`` naming a database that is
     already migrated, the template starts as a copy of it rather than as an
     empty database that ``migrate`` replays the whole history into -- which on
     a project with hundreds of migrations is most of the cost, and repaid by
-    every template a change to the declaration makes. ``migrate`` still runs
-    over the copy: it applies whatever the base has yet to, creates the tables
-    of an app with no migrations and fires ``post_migrate``, so a template from
-    a base is filled exactly as one from empty is.
+    every template a change to the declaration makes. A base contributes what
+    its migration history contributes, and nothing else. An app with migrations
+    is brought forward by that history: ``migrate`` runs over the copy and
+    applies whatever the base has yet to. An app without them has no history to
+    bring forward, so its tables are dropped from the copy first and
+    ``run_syncdb`` makes them from the current models, as it does in an empty
+    database -- a table the base made from an older model is not kept under a
+    key naming the new one, and the base's rows in those tables do not carry
+    over. ``post_migrate`` fires as it does from empty.
 
-    **A base behind the migrations on disk is migrated forward; only one ahead
-    of them is refused.** Migrating forward always ends at this checkout's
-    schema, whatever prefix of the history the base holds, so the key stays
-    sound as it is -- everything listed above, the base's name and oid
+    **A base behind the migrations on disk is migrated forward; only a history
+    migrating cannot repair is refused.** Migrating forward always ends at this
+    checkout's schema for the apps with migrations, whatever prefix of their
+    history the base holds, and the apps without them are rebuilt, so the key
+    stays sound as it is -- everything listed above, the base's name and oid
     included -- without the base's applied migrations entering it. Migrating
     the base itself forward later leaves its oid alone, so it asks for the same
     name, and the template under that name is the one the copy's own forward
@@ -120,16 +132,20 @@ def template_database(
     Ahead -- an applied migration of an installed app that no migration on disk
     is or replaces -- raises
     :class:`~django_data_shape.databases.unusable_base.UnusableBase` before
-    anything is created, naming a few of those migrations and both remedies.
-    So do two histories ``migrate`` would mishandle rather than refuse: a
-    squash the base has applied only in part, when a replaced migration it has
-    yet to apply is gone from disk -- Django then runs neither the squash nor
-    the rest of what it replaces, and the copy would lack them silently -- and
-    a base with no ``django_migrations`` table that holds the tables of an app
-    with migrations, which ``migrate`` would try to create again. So does a
-    base that does not exist, one that refuses connections, a template this
-    package made or the partial of one, and a name holding a double quote,
-    which Django's quoting cannot carry intact. Ahead is the one case where the
+    anything is created, naming a few of those migrations and both remedies. So
+    do two histories ``migrate`` would mishandle rather than refuse: a squash
+    the base has applied only in part, when a replaced migration it has yet to
+    apply is gone from disk -- Django then runs neither the squash nor the rest
+    of what it replaces, and the copy would lack them silently -- and a base
+    with no ``django_migrations`` table that holds the tables of an app with
+    migrations, which ``migrate`` would try to create again. So does a base
+    that does not exist, one that refuses connections, a template this package
+    made or the partial of one, and a name holding a double quote, which
+    Django's quoting cannot carry intact. One more is raised from the copy
+    rather than before it, because only the copy can find it: something outside
+    the tables of the apps without migrations that depends on one of them -- a
+    foreign key or a view -- stops those tables being dropped and made again,
+    and the partial goes with the refusal. Ahead is the one case where the
     template cannot end up with the checkout's schema: migrating moves only
     forward, so whatever those migrations did stays in the copy, and a branch
     migration that adds only an index would otherwise build silently and skew
@@ -137,8 +153,9 @@ def template_database(
     they describe nothing the checkout's models use. The check runs on every
     call, a cache hit included, because the oid it reads is part of the name.
 
-    Whatever else the base holds becomes template content. Rows in a table the
-    shape declares are refused by :func:`~django_data_shape.loading.build.build`'s
+    Whatever else the base holds, outside the tables of apps without
+    migrations, becomes template content. Rows in a table the shape declares
+    are refused by :func:`~django_data_shape.loading.build.build`'s
     emptiness check as they would be anywhere, with a message that names the
     base as one place they come from, and the partial is dropped with the
     failure -- except in a table whose keys are
@@ -267,7 +284,7 @@ def _create(
     template = "" if base is None else f" TEMPLATE {quote(base)}"
     cursor.execute(f"CREATE DATABASE {quote(partial)}{template}")
     try:
-        _fill(shape, connection, partial, using)
+        _fill(shape, connection, partial, using, base)
     except BaseException:
         cursor.execute(f"DROP DATABASE IF EXISTS {quote(partial)}")
         raise
@@ -275,14 +292,17 @@ def _create(
     cursor.execute(f"ALTER DATABASE {quote(name)} WITH ALLOW_CONNECTIONS false")
 
 
-def _fill(shape: Shape, connection: Any, database: str, using: str) -> None:
+def _fill(shape: Shape, connection: Any, database: str, using: str, base: str | None) -> None:
     """Migrate the schema into ``database`` and build the shape there.
 
-    A database copied from a base gets whatever migrations on disk the base has
-    yet to apply -- none, for a base kept up to date -- and ``migrate`` is run
-    either way, because it is also what creates the tables of an app with no
-    migrations and what fires ``post_migrate``, so a template from a base is
-    filled exactly as one from empty is.
+    A database copied from a base contributes what its migration history
+    contributes and nothing else. Its migrated apps are brought forward by that
+    history -- whatever migrations on disk the base has yet to apply, none for a
+    base kept up to date. Its tables for apps with no migrations have no history
+    to bring forward, so they are dropped first, and ``run_syncdb`` makes them
+    from the current models as it does in an empty database; the base's rows in
+    them do not carry over. ``migrate`` is run either way, because it is also
+    what fires ``post_migrate``.
 
     Pointing an existing connection at another database by rewriting
     ``settings_dict["NAME"]`` is what Django's own test runner does to create a
@@ -302,6 +322,8 @@ def _fill(shape: Shape, connection: Any, database: str, using: str) -> None:
     connection.close()
     connection.settings_dict["NAME"] = database
     try:
+        if base is not None:
+            _drop_unmigrated_tables(connection, base)
         call_command("migrate", database=using, run_syncdb=True, interactive=False, verbosity=0)
         build(shape, using=using)
     finally:
@@ -310,6 +332,52 @@ def _fill(shape: Shape, connection: Any, database: str, using: str) -> None:
         # attached to, and this is the process most likely to be attached.
         connection.close()
         connection.settings_dict["NAME"] = original
+
+
+def _drop_unmigrated_tables(connection: Any, base: str) -> None:
+    """Drop the copy's tables for installed apps with no migrations.
+
+    ``run_syncdb`` creates a missing table and never alters an existing one, so
+    left in place, a table the base made from an older model would survive
+    under a key that names the current one -- the key absorbs every model's
+    columns, which is exactly what would be stale. Dropped, it is made again
+    from the model, as it is in an empty database. The apps are the ones
+    ``migrate``'s own loader reads as unmigrated off disk, so the set dropped is
+    the set ``run_syncdb`` then makes.
+
+    One ``DROP TABLE`` for all of them, so the references between them do not
+    order it, and without ``CASCADE``. Anything outside the set that refers to
+    one of them -- a foreign key or a view -- would be removed by ``CASCADE``
+    silently, ``run_syncdb`` would not put it back, and the template would match
+    neither the base nor one built from empty. PostgreSQL refuses the drop
+    instead, and the refusal is turned into
+    :class:`~django_data_shape.databases.unusable_base.UnusableBase`; the
+    partial goes with it, as any failure takes it.
+
+    The ``if`` is held by ``test_migrate_still_runs_over_the_copy``, whose base
+    has no such table, because ``DROP TABLE`` with nothing to drop is a syntax
+    error.
+    """
+    tables = _tables_of(connection, MigrationLoader(None).unmigrated_apps)
+    if not tables:
+        return
+    quote = connection.ops.quote_name
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(f"DROP TABLE {', '.join(quote(table) for table in tables)}")
+    except InternalError as refused:
+        # The server's own words name the object in the way, which nothing here
+        # could name better; its hint, to add CASCADE, is the one thing not to do.
+        reported = " ".join(str(refused).split("HINT:", 1)[0].split())
+        raise UnusableBase(
+            f"The base database {base!r} holds something that depends on a table of an app "
+            "without migrations, so the table cannot be dropped from the copy and made again "
+            "from its model, which is how a template from a base gets those tables. "
+            f"PostgreSQL reports: {reported}. Drop the reference in the base, or recreate it "
+            "without one. If a migration of an app with migrations made it, which Django "
+            "allows, no base can be started from until the app it points at has migrations "
+            "of its own; pass base=None to build from empty."
+        ) from refused
 
 
 def _base_context(connection: Any, base: str) -> tuple[str, str]:
@@ -483,9 +551,16 @@ def _tables_of(connection: Any, app_labels: Iterable[str]) -> list[str]:
 
     The models are the ones ``migrate`` builds a table for, read the way its
     ``run_syncdb`` phase reads them: what the router lets migrate on this
-    alias, auto-created many-to-many tables included, each name truncated the
-    way the schema editor truncates it. Only the tables that exist are named,
-    which is what ``test_an_empty_base_is_migrated_in_full`` holds.
+    alias, auto-created many-to-many tables included, less what
+    ``can_migrate`` refuses -- a proxy, an unmanaged or a swapped model. Each
+    condition is held by a test, because the filter is one arc to a branch
+    gate:
+
+    - ``can_migrate``: ``test_an_unmanaged_models_table_in_the_base_is_carried``,
+      where dropping the table would lose it, since nothing makes it again;
+    - existing: ``test_an_empty_base_is_migrated_in_full``, and
+      ``test_migrate_still_runs_over_the_copy``, whose base has no table of an
+      app without migrations to drop.
     """
     labels = set(app_labels)
     existing = set(connection.introspection.table_names())
@@ -497,8 +572,7 @@ def _tables_of(connection: Any, app_labels: Iterable[str]) -> list[str]:
             for model in router.get_migratable_models(
                 app_config, connection.alias, include_auto_created=True
             )
-            if (table := truncate_name(model._meta.db_table, connection.ops.max_name_length()))
-            in existing
+            if model._meta.can_migrate(connection) and (table := model._meta.db_table) in existing
         }
     )
 

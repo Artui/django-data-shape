@@ -7,6 +7,7 @@ from collections.abc import Iterator
 
 import psycopg
 import pytest
+from django.contrib.auth.models import Group
 from django.core.management import call_command
 from django.db import connection, connections, migrations, transaction
 from django.db.migrations import Migration
@@ -44,6 +45,7 @@ from django_data_shape.databases.template_database import (
 from django_data_shape.version import __version__
 from tests.testapp.models import (
     Catalogue,
+    Company,
     Event,
     EventSession,
     SlugPk,
@@ -895,16 +897,22 @@ def test_a_base_holding_rows_in_a_declared_table_is_named_as_their_cause(
 ) -> None:
     # The rows are real and were put there by whoever keeps the base, so a
     # message naming only a session world -- or only "empty the table first" --
-    # reads as advice about a table the test never touched.
+    # reads as advice about a table the test never touched. The table is one
+    # of an app with migrations, because that is where a base's rows survive:
+    # the tables of an app without them are rebuilt from the models.
     base = _base(temporary_databases)
-    _execute_in(base, f"INSERT INTO {Catalogue._meta.db_table} (name) VALUES ('kept in the base')")
+    _execute_in(base, "INSERT INTO auth_group (name) VALUES ('kept in the base')")
     before = _templates_on_the_server()
 
     with pytest.raises(ShapeNotEmpty) as refused:
-        temporary_databases.append(template_database(_shape(), base=base))
+        temporary_databases.append(
+            template_database(
+                Shape(Table(Group, rows=1, name=Constant("declared")), seed=42), base=base
+            )
+        )
 
     message = " ".join(str(refused.value).split())
-    assert message.startswith(f"{Catalogue._meta.db_table} already holds rows")
+    assert message.startswith("auth_group already holds rows")
     assert "a template started from a base database copies whatever rows the base holds" in (
         message
     )
@@ -912,6 +920,105 @@ def test_a_base_holding_rows_in_a_declared_table_is_named_as_their_cause(
     # not find a half-built database under a name it would have to judge.
     assert _templates_on_the_server() == before
     assert not [name for name in _templates_on_the_server() if name.endswith("__partial")]
+
+
+# Every column of a table as information_schema describes it, which is what a
+# stale table differs from the model's in.
+_CATALOGUE_COLUMNS = (
+    "SELECT column_name, data_type, is_nullable, character_maximum_length "
+    "FROM information_schema.columns "
+    f"WHERE table_name = '{Catalogue._meta.db_table}' ORDER BY column_name"
+)
+
+
+def test_a_stale_table_of_an_app_without_migrations_is_rebuilt_from_the_model(
+    temporary_databases: list[str],
+) -> None:
+    # run_syncdb creates a missing table and never alters an existing one, so
+    # an app without migrations whose model changed after the base was made
+    # kept the base's table under a key naming the new model. Its tables are
+    # dropped from the copy and made again, as they are in an empty database.
+    base = _base(temporary_databases)
+    _execute_in(
+        base,
+        f"ALTER TABLE {Catalogue._meta.db_table} ALTER COLUMN name DROP NOT NULL, "
+        "ADD COLUMN left_over integer",
+    )
+    shape = _shape(rows=40, seed=43)
+
+    from_base = template_database(shape, base=base)
+    temporary_databases.append(from_base)
+    from_empty = _template(shape, temporary_databases)
+    targets = [f"{from_base}_end", f"{from_empty}_end"]
+    temporary_databases.extend(targets)
+    clone_database(from_base, targets[0])
+    clone_database(from_empty, targets[1])
+
+    assert _rows_in(targets[0], _CATALOGUE_COLUMNS) == _rows_in(targets[1], _CATALOGUE_COLUMNS)
+    assert ("name", "character varying", "NO", 50) in _rows_in(targets[0], _CATALOGUE_COLUMNS)
+
+
+def test_so_a_bases_rows_in_such_a_table_do_not_carry_over(
+    temporary_databases: list[str],
+) -> None:
+    # The other half of rebuilding: a base contributes what its migration
+    # history contributes, and an app without migrations has none.
+    base = _base(temporary_databases)
+    _execute_in(base, f"INSERT INTO {Company._meta.db_table} (name) VALUES ('kept in the base')")
+
+    name = template_database(_shape(rows=40, seed=44), base=base)
+    temporary_databases.append(name)
+    target = f"{name}_end"
+    temporary_databases.append(target)
+    clone_database(name, target)
+
+    assert _rows_in(base, f"SELECT count(*) FROM {Company._meta.db_table}") == [(1,)]
+    assert _rows_in(target, f"SELECT count(*) FROM {Company._meta.db_table}") == [(0,)]
+
+
+def test_an_unmanaged_models_table_in_the_base_is_carried(
+    temporary_databases: list[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # run_syncdb never makes an unmanaged model's table, so dropping one would
+    # lose it rather than rebuild it: whatever made it in the base is the only
+    # thing that ever will. Holds that only the tables migrate builds are
+    # dropped.
+    monkeypatch.setattr(Subscriber._meta, "managed", False)
+    base = _base(temporary_databases)
+    _execute_in(base, f"INSERT INTO {Subscriber._meta.db_table} (email) VALUES ('kept@base')")
+
+    name = template_database(_shape(rows=40, seed=45), base=base)
+    temporary_databases.append(name)
+    target = f"{name}_end"
+    temporary_databases.append(target)
+    clone_database(name, target)
+
+    assert _rows_in(target, f"SELECT email FROM {Subscriber._meta.db_table}") == [("kept@base",)]
+
+
+def test_a_reference_into_such_a_table_refuses_the_base(temporary_databases: list[str]) -> None:
+    # Rebuilding drops the table without CASCADE. CASCADE would remove the
+    # reference silently, run_syncdb would not put it back, and the template
+    # would differ from both the base and one built from empty; so PostgreSQL
+    # refuses the drop and the refusal is turned into one naming the base.
+    base = _base(temporary_databases)
+    _execute_in(
+        base,
+        "CREATE TABLE kept_reference "
+        f"(catalogue_id bigint REFERENCES {Catalogue._meta.db_table} (id))",
+    )
+    before = _templates_on_the_server()
+
+    with pytest.raises(UnusableBase) as refused:
+        temporary_databases.append(template_database(_shape(rows=40, seed=46), base=base))
+
+    message = str(refused.value)
+    assert base in message
+    assert "kept_reference" in message
+    assert "recreate it" in message
+    assert "CASCADE" not in message
+    assert _templates_on_the_server() == before
+    assert _rows_in(base, "SELECT to_regclass('kept_reference') IS NOT NULL") == [(True,)]
 
 
 def test_a_connection_already_on_the_base_does_not_stop_the_copy(

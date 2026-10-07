@@ -12,7 +12,9 @@ class UnusableBase(Exception):
     is ahead of the migrations on disk; it has applied part of a squash whose
     remaining replaced migrations are gone from disk, so neither would run; or
     it has no ``django_migrations`` table yet holds the tables of an app with
-    migrations, which ``migrate`` would try to create again.
+    migrations, which ``migrate`` would try to create again; or something in it
+    depends on a table of an app without migrations, which stops that table
+    being dropped from the copy and made again from its model.
 
     Its own type rather than :class:`~django_data_shape.declaration.invalid_shape.InvalidShape`
     because nothing is wrong with the declaration: the same shape builds from
@@ -21,8 +23,9 @@ class UnusableBase(Exception):
 
     Raised only where migrating cannot repair the base. One behind the disk is
     migrated forward in the copy, because migrating forward ends at this
-    checkout's schema whatever prefix of the history the base holds. One ahead
-    of it cannot be repaired from this checkout at all -- the migrations that
-    would undo it are not here -- and accepting it would build a template whose
-    schema the cache key does not describe.
+    checkout's schema for the apps with migrations, whatever prefix of their
+    history the base holds; the tables of the apps without them are rebuilt
+    from the models. One ahead of it cannot be repaired from this checkout at
+    all -- the migrations that would undo it are not here -- and accepting it
+    would build a template whose schema the cache key does not describe.
     """

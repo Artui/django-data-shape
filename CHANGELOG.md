@@ -16,15 +16,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   migrations measured thirteen and a half minutes of `migrate` against about a
   minute to build a 4.4-million-row shape, paid again by every template a
   change to the declaration makes. With a base, the template starts as
-  `CREATE DATABASE ... TEMPLATE <base>`. `migrate --run-syncdb` still runs over
-  the copy -- applying whatever the base has yet to, creating an unmigrated
-  app's tables and firing `post_migrate` -- so it is filled exactly as one from
-  empty is. `base=None`, the default, behaves and keys exactly as before.
+  `CREATE DATABASE ... TEMPLATE <base>`, and the base contributes what its
+  migration history contributes. Apps with migrations are brought forward by
+  it: `migrate --run-syncdb` still runs over the copy, applying whatever the
+  base has yet to and firing `post_migrate`. Apps without migrations have no
+  history, so their tables are dropped from the copy first and `run_syncdb`
+  makes them from the current models, as it does in an empty database --
+  `run_syncdb` never alters an existing table, so a table the base made from an
+  older model would otherwise survive under a key naming the new one. The
+  base's rows in those tables do not carry over. A foreign key or view in the
+  base that points into one of them stops the drop, which runs without
+  `CASCADE` so that nothing is removed silently, and is refused as
+  `UnusableBase` from the copy. `base=None`, the default, behaves and keys
+  exactly as before.
 
   **A base behind the migrations on disk is migrated forward in the copy; only
-  one ahead of them is refused**, with the new `UnusableBase`, before anything
-  is created. Migrating forward always ends at the checkout's schema, whatever
-  prefix of the history the base holds, so the key stays sound without the
+  a history migrating cannot repair is refused**, with the new `UnusableBase`,
+  before anything is created. Migrating forward always ends at the checkout's schema for the
+  apps with migrations, whatever prefix of their history the base holds, and
+  the others are rebuilt, so the key stays sound without the
   base's applied migrations entering it -- the same reason Django's own
   PostgreSQL `TEST: {"TEMPLATE": ...}` can migrate a copy forward. A base far
   behind pays its `migrate` once per key, never more than building from empty,
@@ -58,7 +68,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the base holds become template content; changing them in place, by hand or
   by migrating the base, neither of which moves its name or oid, is not seen
   by the key, and is stated beside the
-  existing `RunSQL` gap with the same remedy, `drop_database`. The process's own
+  existing `RunSQL` gap with the same remedy, `drop_database`. One case no
+  check can see is stated too: a migration regenerated under a name the base
+  has already applied is skipped by `migrate`, so the copy keeps the version
+  the base ran; recreating the base is the remedy. The process's own
   connection is closed before the copy, so a project whose test database is the
   base can pass it as one.
 

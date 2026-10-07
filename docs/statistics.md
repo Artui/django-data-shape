@@ -272,14 +272,22 @@ def django_db_setup(django_test_environment, django_db_modify_db_settings, djang
         drop_database(target)
 ```
 
-`migrate` still runs over the copy. It applies whatever the base has yet to --
-nothing, on a base kept up to date -- and it is still what creates the tables of
-an app with no migrations and what fires `post_migrate`, so a template from a
-base is filled exactly as one from empty is.
+A base contributes what its migration history contributes, and nothing else.
+An app with migrations is brought forward by that history: `migrate` runs over
+the copy and applies whatever the base has yet to -- nothing, on a base kept up
+to date. An app without migrations has no history to bring forward, so its
+tables are dropped from the copy first and `run_syncdb` makes them from the
+current models, as it does in an empty database. `run_syncdb` creates a missing
+table and never alters an existing one, so this is what stops a table the base
+made from an older model surviving under a key that names the new one -- and it
+means the base's rows in those tables do not carry over. `post_migrate` fires as
+it does from empty.
 
-**A base behind the migrations on disk is migrated forward; only one ahead of
-them is refused.** Migrating forward always ends at the checkout's schema,
-whatever prefix of the history the base holds, so the key stays sound as it is:
+**A base behind the migrations on disk is migrated forward; only a history
+migrating cannot repair is refused.** Migrating forward always ends at the
+checkout's schema for the apps with migrations, whatever prefix of their history
+the base holds, and the apps without them are rebuilt, so the key stays sound as
+it is:
 everything it absorbed before, plus the base's name and oid. The base's applied
 migrations do not need to enter it. Migrating the base itself forward later
 leaves its oid alone, so the same name is asked for, and the template under it is
@@ -291,7 +299,7 @@ behind because a branch added one, from being refused at all.
 
 What is refused is what migrating cannot fix, raising
 [`UnusableBase`][django_data_shape.databases.unusable_base.UnusableBase] before
-anything is created and naming the base:
+anything is created, with the one exception marked, and naming the base:
 
 - **ahead** -- the base records an applied migration of an installed app that no
   migration on disk is or replaces. This is the one case where the template
@@ -320,6 +328,18 @@ anything is created and naming the base:
   `django_migrations` table is migrated in full only when it holds none of
   those tables, as an empty database does; the tables of an app without
   migrations do not count, because `run_syncdb` records nothing for them.
+- **a reference into a rebuilt table** -- something in the base outside the
+  tables of the apps without migrations depends on one of them: a foreign key
+  or a view. Those tables are dropped in one statement without `CASCADE`,
+  because `CASCADE` would remove the reference silently, `run_syncdb` would not
+  put it back, and the template would match neither the base nor one built from
+  empty. So PostgreSQL refuses the drop, and the refusal is raised as
+  `UnusableBase` naming the base and the object in the way. This one is raised
+  from the copy rather than before it, since only the copy can find it, and the
+  partial is dropped with it. Drop the reference in the base or recreate it
+  without one. Django does let a migration of an app with migrations point at
+  an app without them, and in that project no base can be started from until
+  the app pointed at has migrations of its own; build from empty instead.
 - **missing** -- no database by that name exists.
 - **closed** -- the database does not accept connections (`ALLOW_CONNECTIONS
   false`). A base is connected to before it is copied, to read which migrations
@@ -347,8 +367,9 @@ of the key. That is also what makes refreshing a base safe: dropping and
 recreating it, which is how one restored from a schema dump is usually updated,
 gives it a new oid and so a new template.
 
-Whatever else the base holds becomes template content, which is what lets the
-base carry reference data the shape does not declare. Rows in a table the shape
+Whatever else the base holds, outside the tables of apps without migrations,
+becomes template content, which is what lets the base carry reference data the
+shape does not declare. Rows in a table the shape
 *does* declare are refused by the build's emptiness check as they would be
 anywhere, with a `ShapeNotEmpty` message that names the base as one place they
 come from, except in a table with `Disjoint` keys, which is exempt from it.
@@ -380,6 +401,12 @@ pass it as one.
   every migration's name and every model's fields, so ordinary schema changes
   move it; editing the body of a migration that has already been created changes
   neither. Drop the template by hand when that happens.
+- **A migration regenerated under a name a base has already applied.** With a
+  base, an edited migration goes one step further, and it is the one case here
+  that nothing can detect: `migrate` reads the name as applied and skips it, so
+  the copy keeps the version the base ran, and a template rebuilt from the same
+  base would keep it again. Recreate the base, which gives it a new oid and so a
+  new template.
 - **Rows changed in a base in place.** The key covers a base's name and oid,
   and the schema any accepted base migrates forward to; changing the rows it
   holds, by hand or by migrating the base, neither of which moves its name or
