@@ -17,6 +17,14 @@ from django_data_shape.distributions.bounded import Bounded
 # one is reachable on any given server -- and a branch no job can execute is a
 # branch this package's own coverage gate cannot see. NULLIF folds the old
 # spelling into the new one and COALESCE resolves both to the same number.
+#
+# The table is bound already quoted. ``regclass`` input is parsed as an
+# identifier, so the raw ``db_table`` would fold its capitals to lower case and
+# split it at a dot: a table that does not exist, or the columns of one that
+# does under the folded name. Quoted by the connection, it names the table
+# exactly as Django's CREATE TABLE named it -- including a ``db_table`` written
+# already quoted, such as ``'"schema"."table"'``, which ``quote_name`` passes
+# through unchanged there and here alike.
 _EFFECTIVE_TARGETS = """
 SELECT a.attname,
        COALESCE(NULLIF(a.attstattarget, -1), current_setting('default_statistics_target')::int)
@@ -95,7 +103,14 @@ def apply_statistics_targets(connection: Any, declaration: Table | Projection) -
         name: _column(declaration.model._meta.get_field(name)) for name in declaration.statistics
     }
     with connection.cursor() as cursor:
-        cursor.execute(_EFFECTIVE_TARGETS, [declaration.db_table])
+        # Quoted, as the query's comment says why: unquoted, a name with a
+        # capital or a dot in it is looked up as some other table
+        # (test_a_table_whose_name_needs_quoting_gets_its_target and
+        # test_nor_does_it_read_the_targets_of_the_table_its_name_folds_to),
+        # and quoted by quote_name rather than escaped, or a db_table written
+        # already quoted is looked up with its quotes as part of the name
+        # (test_a_db_table_written_already_quoted_is_looked_up_as_django_created_it).
+        cursor.execute(_EFFECTIVE_TARGETS, [quote(declaration.db_table)])
         effective = {column: target for column, target in cursor.fetchall()}
         if isinstance(declaration, Table):
             _refuse_what_cannot_be_recorded(declaration, effective)

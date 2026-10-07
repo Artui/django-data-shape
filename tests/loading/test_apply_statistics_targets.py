@@ -13,6 +13,8 @@ from django_data_shape import build as build_shape
 from django_data_shape.loading.apply_statistics_targets import apply_statistics_targets
 from tests.testapp.models import (
     Bucketed,
+    CasedTable,
+    DottedTable,
     Event,
     Narrowed,
     TargetedSession,
@@ -44,13 +46,17 @@ def _wide_skew(values: int = _WIDE) -> Skew:
 
 
 def _target(model: type, column: str) -> int:
-    """The target PostgreSQL will actually use for one column, default included."""
+    """The target PostgreSQL will actually use for one column, default included.
+
+    The table is named quoted, because ``regclass`` input is read as an
+    identifier: unquoted, a capital in the name folds and a dot splits it.
+    """
     with connection.cursor() as cursor:
         cursor.execute(
             "SELECT COALESCE(NULLIF(attstattarget, -1), "
             "current_setting('default_statistics_target')::int) "
             "FROM pg_attribute WHERE attrelid = %s::regclass AND attname = %s",
-            [model._meta.db_table, column],
+            [connection.ops.quote_name(model._meta.db_table), column],
         )
         return int(cursor.fetchone()[0])
 
@@ -72,7 +78,10 @@ def _sequence_value(model: type) -> int:
         # In two steps because pg_get_serial_sequence returns the sequence's
         # name as text, and a name is not a relation until it is written into
         # the FROM clause.
-        cursor.execute("SELECT pg_get_serial_sequence(%s, 'id')", [model._meta.db_table])
+        cursor.execute(
+            "SELECT pg_get_serial_sequence(%s, 'id')",
+            [connection.ops.quote_name(model._meta.db_table)],
+        )
         cursor.execute(f"SELECT last_value, is_called FROM {cursor.fetchone()[0]}")
         last_value, is_called = cursor.fetchone()
     return int(last_value) + int(is_called)
@@ -106,7 +115,9 @@ def _fresh(model: type, column: str) -> None:
     passed every one of these assertions until this function existed, because
     the previous test had already set the target and moved the sequence.
     """
-    table = model._meta.db_table
+    # Quoted, for the reason _target gives: some of these tables are named so
+    # that only the quoted form finds them.
+    table = connection.ops.quote_name(model._meta.db_table)
     with connection.cursor() as cursor:
         # -1 is PostgreSQL's own spelling of "back to default_statistics_target".
         cursor.execute(f"ALTER TABLE {table} ALTER COLUMN {column} SET STATISTICS -1")
@@ -255,6 +266,61 @@ def test_a_projection_takes_a_target_like_any_other_table() -> None:
 
     assert _target(TargetedSession, "title") == 250
     assert TargetedSession.objects.count() > 0
+
+
+@pytest.mark.parametrize(
+    "model", [CasedTable, DottedTable], ids=["a capital in the name", "a dot in the name"]
+)
+def test_a_table_whose_name_needs_quoting_gets_its_target(model: type) -> None:
+    # The column targets are looked up through regclass, whose input is read
+    # as an identifier, so the name has to reach it the way Django wrote it
+    # into CREATE TABLE: quoted. Unquoted, a capital folds to lower case and a
+    # dot splits the name into a schema and a table, and the build stopped on a
+    # relation or a schema that does not exist before a row was written.
+    _fresh(model, "code")
+
+    build_shape(Shape(Table(model, rows=500, code=_wide_skew(), statistics={"code": 300}), seed=8))
+
+    assert _target(model, "code") == 300
+
+
+def test_nor_does_it_read_the_targets_of_the_table_its_name_folds_to() -> None:
+    # The quiet half of the same mistake. Folded, testapp_CasedTable names
+    # testapp_casedtable, and where a table of that name is in reach the lookup
+    # read *its* targets instead -- here a target generous enough that a shape
+    # the cased table's own column cannot record went through unrefused. A
+    # temporary table, because the session's temporary schema is searched
+    # first and goes with the connection if the cleanup below never runs.
+    _fresh(CasedTable, "code")
+    with connection.cursor() as cursor:
+        cursor.execute("CREATE TEMPORARY TABLE testapp_casedtable (code varchar(20))")
+        cursor.execute("ALTER TABLE testapp_casedtable ALTER COLUMN code SET STATISTICS 1000")
+    try:
+        with pytest.raises(InvalidShape, match=r"CasedTable\.code declares 150 distinct values"):
+            build_shape(Shape(Table(CasedTable, rows=500, code=_wide_skew()), seed=9))
+    finally:
+        with connection.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS pg_temp.testapp_casedtable")
+
+    assert CasedTable.objects.count() == 0
+
+
+def test_a_db_table_written_already_quoted_is_looked_up_as_django_created_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Django's quote_name passes a name that starts and ends with a double
+    # quote through unchanged, which is how a project spells a schema-qualified
+    # table: db_table = '"schema"."table"'. The lookup is quoted by the same
+    # function rather than escaped, so it names whatever CREATE TABLE named --
+    # an escaping quote would look for a table whose name holds the quotes.
+    _fresh(CasedTable, "code")
+    monkeypatch.setattr(CasedTable._meta, "db_table", '"testapp_CasedTable"')
+
+    apply_statistics_targets(
+        connection, Table(CasedTable, rows=5, code=Constant("a"), statistics={"code": 200})
+    )
+
+    assert _target(CasedTable, "code") == 200
 
 
 def _sessions_of(event: Event, statistics: dict[str, int] | None) -> Shape:

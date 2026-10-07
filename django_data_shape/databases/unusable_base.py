@@ -14,7 +14,9 @@ class UnusableBase(Exception):
     it has no ``django_migrations`` table yet holds the tables of an app with
     migrations, which ``migrate`` would try to create again; or something in it
     depends on a table of an app without migrations, which stops that table
-    being dropped from the copy and made again from its model.
+    being dropped from the copy and made again from its model; or such a table
+    belongs to a role whose privileges the connecting role does not have, and
+    the copy keeps its owner, so the connecting role may not drop it.
 
     Its own type rather than :class:`~django_data_shape.declaration.invalid_shape.InvalidShape`
     because nothing is wrong with the declaration: the same shape builds from

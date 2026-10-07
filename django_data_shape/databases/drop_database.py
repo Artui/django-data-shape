@@ -7,6 +7,7 @@ from typing import Any
 from django.db import DEFAULT_DB_ALIAS, connections
 
 from django_data_shape.backends.require_postgres import require_postgres
+from django_data_shape.databases.require_quotable_name import require_quotable_name
 
 
 def drop_database(name: str, *, using: str = DEFAULT_DB_ALIAS) -> bool:
@@ -28,12 +29,23 @@ def drop_database(name: str, *, using: str = DEFAULT_DB_ALIAS) -> bool:
     ``ALLOW_CONNECTIONS`` being off on a finished template does not get in the
     way: ``DROP DATABASE`` does not connect to what it drops. What does get in
     the way is somebody else's open session, which PostgreSQL reports by name.
+
+    **A name holding a double quote raises ``ValueError``** before anything is
+    asked of the server. The name is looked up as a value and dropped as an
+    identifier, and Django's quoting carries a double quote into the second
+    unescaped -- a name already wrapped in them is passed through as it is -- so
+    ``'"x"'`` would be reported missing while ``x`` was dropped. No database
+    this package makes is named that way.
     """
     # ``_nodb_cursor`` belongs to the backend wrapper rather than to the base
     # class, so the connection is typed loosely here as it is everywhere else
     # in this package that reaches for a backend-specific member.
     connection: Any = connections[using]
     require_postgres(connection, "Dropping a database")
+    # Before the lookup rather than before the drop, so that what this returns
+    # and what it drops are about one database or nothing is done at all
+    # (test_dropping_a_name_holding_a_double_quote_is_refused_before_anything_is_dropped).
+    require_quotable_name(name, "database")
     quote = connection.ops.quote_name
     with connection._nodb_cursor() as cursor:
         cursor.execute("SELECT 1 FROM pg_database WHERE datname = %s", [name])
