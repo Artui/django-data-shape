@@ -547,10 +547,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#the-two-fixtures-do-not-share-a-table" class="md-nav__link">
+  <a href="#a-scaled-world-can-sit-over-a-session-world" class="md-nav__link">
     <span class="md-ellipsis">
       
-        The two fixtures do not share a table
+        A scaled world can sit over a session world
       
     </span>
   </a>
@@ -752,10 +752,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#the-two-fixtures-do-not-share-a-table" class="md-nav__link">
+  <a href="#a-scaled-world-can-sit-over-a-session-world" class="md-nav__link">
     <span class="md-ellipsis">
       
-        The two fixtures do not share a table
+        A scaled world can sit over a session world
       
     </span>
   </a>
@@ -957,35 +957,95 @@ order they are usually right:</p>
 <li>build per test with <code>scaled_world(shape, 1)</code>, which undoes itself and
   therefore does not care.</li>
 </ul>
-<h3 id="the-two-fixtures-do-not-share-a-table">The two fixtures do not share a table<a class="headerlink" href="#the-two-fixtures-do-not-share-a-table" title="Permanent link">&para;</a></h3>
-<p>A session world holds its rows for the whole run. A scaled world is built from
-empty every time. Point both at one model and the second one is refused:</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>testapp_order already holds rows, and this package assigns primary keys from 1,
-</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>so building over them would collide. If nothing in the test wrote them, the
-</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>usual cause is a world that was already there: a session-scoped shape_fixture
-</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>over this model holds its rows for the whole run, and a scaled world cannot
-</span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>build over them. Give the two different models, or empty this table first.
+<h3 id="a-scaled-world-can-sit-over-a-session-world">A scaled world can sit over a session world<a class="headerlink" href="#a-scaled-world-can-sit-over-a-session-world" title="Permanent link">&para;</a></h3>
+<p>A session world holds its rows for the whole run, and a scaled world is built
+from empty every time. They can still point at one model: a scaled world empties
+its declared tables inside the transaction it rolls back, so inside the block
+those tables hold only its own world, and the session rows are back after it.
+That is the shape a first consumer arrives with -- a big session world for plan
+assertions, small scaled worlds for growth assertions over the same flow.</p>
+<p>A declared table with <code>Disjoint</code> keys -- a strategy that says its keys cannot
+collide with rows already there, as <code>UuidKeys</code> and <code>Md5Keys</code> do -- is the
+exception, because a world leaves it alone and builds beside its rows. A
+strategy implementing the protocol and answering no is emptied like any other,
+which is what <code>build()</code> reads too. When it holds rows and has a foreign key
+into a declared table the world empties -- directly, or through another such
+table -- it is emptied too, because its rows are declared rows and cannot
+outlive the parents they point at. That join reads the models' foreign keys,
+not the database's, so a <code>ForeignKey(db_constraint=False)</code> pulls a table in,
+and a row referencing that table is then refused where the database's own keys
+would have left nothing to refuse.</p>
+<p>A <code>Disjoint</code> table pointing at nothing the world empties -- a UUID-keyed root,
+or every table of a graph keyed by UUIDs throughout -- keeps its rows, and over
+a session world declaring it those rows are the session's. The world leaves them
+untouched, builds beside them, and its keys are not theirs. <code>UuidKeys</code> and
+<code>Md5Keys</code> make each key from the row and a stream derived from the shape's seed,
+and scaling keeps the seed, so every <code>Disjoint</code> table a world builds is handed a
+stream of the world's own rather than the one <code>build()</code> uses for the same seed
+and table. Inside a world those keys are therefore not the ones <code>build()</code>
+gives the same declaration; they are the same at every factor, so row <em>i</em> has
+one key however large the world, as an integer key does; and a world opened
+inside another over the same table draws from another stream again. A table
+fanned out over such a table draws parents from the session's rows as well as
+the world's. Over the same graph, then, a session world needs no arrangement.</p>
+<p>A scaled world removes the rows of its declared tables <strong>and nothing else</strong>:
+no statement it issues changes a table its shape does not declare, even for the
+life of the block. Where a row it did not make references a row it would have to
+remove -- a session table the scaled shape leaves out, or a row the test wrote
+-- it refuses before removing anything, rather than leave the reference pointing
+at nothing:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>A scaled world cannot empty testapp_company without changing a table its shape
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>does not declare: rows it did not make reference the rows it would remove
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>(testapp_session.company_id -&gt; testapp_company). ...
 </span></code></pre></div>
-<p>That is the shape a first consumer arrives with -- a big session world for plan
-assertions, small scaled worlds for growth assertions -- so it is worth saying
-before the message has to. <strong>They compose over a graph by taking different
-models</strong>, not by taking turns over one: the session world gets the tables a plan
-assertion needs to be big, the scale harness gets the tables a growth assertion
-counts.</p>
+<p>The refusal is <code>ShapeReferenced</code>, and its message names each reference and the
+ways out: declare the referencing table in the scaled shape too, so its rows are
+the world's, or do not create those rows in that test. Where every declared
+table it names can take them, it offers a third: give those tables <code>Disjoint</code>
+keys (<code>UuidKeys</code> or <code>Md5Keys</code>), so the world builds beside the rows already
+there instead of emptying them. Both strategies make UUIDs, so that one is
+offered only where the primary key accepts a UUID -- a <code>UUIDField</code>, or a text
+column with room for one -- and never for an integer key, a primary key that is
+itself a foreign key, a projected table, or a table whose keys are <code>Disjoint</code>
+already. Nor is it offered for a table with a foreign key into another table the
+world empties, since with <code>Disjoint</code> keys that key would pull it back into the
+emptying and the refusal would come back unchanged.</p>
+<p>A foreign key left null is not a reference, and only a foreign key the database
+enforces is seen: a <code>ForeignKey(db_constraint=False)</code> or a <code>GenericForeignKey</code>
+is invisible to the refusal, so its row is left pointing at whatever the world
+puts under that key. The refusal is made on every backend, from PostgreSQL's
+catalogue there and Django's introspection elsewhere. The two read a composite
+foreign key differently -- off PostgreSQL it counts when any of its columns is
+set rather than all of them -- but Django never creates one.</p>
+<p>What is still refused is a second <em>build</em> over rows that stay: two
+session-scoped <code>shape_fixture</code>s over one model, or <code>build()</code> called directly over
+a session world's table. The second one meets the first one's rows:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>testapp_order already holds rows, and this package assigns primary keys from 1,
+</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>so building over them would collide. If nothing in the test wrote them, the
+</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>usual cause is a world that was already there: a session-scoped shape_fixture
+</span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>over this model holds its rows for the whole run, so a second build over it --
+</span><span id="__span-4-5"><a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>another shape_fixture, or build() called directly -- meets them; and a template
+</span><span id="__span-4-6"><a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>started from a base database keeps the rows the base holds, apart from the
+</span><span id="__span-4-7"><a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>tables it rebuilds for apps without migrations. Build the second world inside
+</span><span id="__span-4-8"><a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a>scaled_world, which empties the declared tables and puts them back; give the two
+</span><span id="__span-4-9"><a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a>different models; or empty this table first, in the base if that is where the
+</span><span id="__span-4-10"><a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a>rows came from.
+</span></code></pre></div>
+<p>Give the two different models, or make the second one a scaled world.</p>
 <h3 id="and-it-is-there-for-tests-that-never-asked-for-it">And it is there for tests that never asked for it<a class="headerlink" href="#and-it-is-there-for-tests-that-never-asked-for-it" title="Permanent link">&para;</a></h3>
 <p>The rows are committed once, outside any test's transaction, so <strong>every test in
 the run sees them</strong> — not only the ones that request the fixture. An ordinary
 per-test fixture over the same model therefore does not start from an empty
 table:</p>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="c1"># somewhere else entirely, in a file that has never heard of this package</span>
-</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="nd">@pytest</span><span class="o">.</span><span class="n">fixture</span>
-</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="k">def</span><span class="w"> </span><span class="nf">an_order</span><span class="p">(</span><span class="n">db</span><span class="p">):</span>
-</span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>    <span class="k">return</span> <span class="n">Order</span><span class="o">.</span><span class="n">objects</span><span class="o">.</span><span class="n">create</span><span class="p">(</span><span class="n">status</span><span class="o">=</span><span class="s2">"pending"</span><span class="p">)</span>
-</span><span id="__span-4-5"><a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>
-</span><span id="__span-4-6"><a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>
-</span><span id="__span-4-7"><a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="k">def</span><span class="w"> </span><span class="nf">test_the_dashboard_lists_it</span><span class="p">(</span><span class="n">an_order</span><span class="p">):</span>
-</span><span id="__span-4-8"><a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a>    <span class="k">assert</span> <span class="n">Order</span><span class="o">.</span><span class="n">objects</span><span class="o">.</span><span class="n">count</span><span class="p">()</span> <span class="o">==</span> <span class="mi">1</span>  <span class="c1"># 100_001</span>
-</span><span id="__span-4-9"><a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a>    <span class="k">assert</span> <span class="n">dashboard</span><span class="p">()[</span><span class="s2">"rows"</span><span class="p">]</span> <span class="o">==</span> <span class="p">[</span><span class="n">an_order</span><span class="p">]</span>  <span class="c1"># and now it has 100_000 friends</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="c1"># somewhere else entirely, in a file that has never heard of this package</span>
+</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="nd">@pytest</span><span class="o">.</span><span class="n">fixture</span>
+</span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="k">def</span><span class="w"> </span><span class="nf">an_order</span><span class="p">(</span><span class="n">db</span><span class="p">):</span>
+</span><span id="__span-5-4"><a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>    <span class="k">return</span> <span class="n">Order</span><span class="o">.</span><span class="n">objects</span><span class="o">.</span><span class="n">create</span><span class="p">(</span><span class="n">status</span><span class="o">=</span><span class="s2">"pending"</span><span class="p">)</span>
+</span><span id="__span-5-5"><a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>
+</span><span id="__span-5-6"><a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>
+</span><span id="__span-5-7"><a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="k">def</span><span class="w"> </span><span class="nf">test_the_dashboard_lists_it</span><span class="p">(</span><span class="n">an_order</span><span class="p">):</span>
+</span><span id="__span-5-8"><a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a>    <span class="k">assert</span> <span class="n">Order</span><span class="o">.</span><span class="n">objects</span><span class="o">.</span><span class="n">count</span><span class="p">()</span> <span class="o">==</span> <span class="mi">1</span>  <span class="c1"># 100_001</span>
+</span><span id="__span-5-9"><a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a>    <span class="k">assert</span> <span class="n">dashboard</span><span class="p">()[</span><span class="s2">"rows"</span><span class="p">]</span> <span class="o">==</span> <span class="p">[</span><span class="n">an_order</span><span class="p">]</span>  <span class="c1"># and now it has 100_000 friends</span>
 </span></code></pre></div>
 <p>Nothing is wrong at the database: both sets of rows are real and correct, and the
 failing assertion is the <em>other</em> test's belief about how empty the world is. That
@@ -995,8 +1055,8 @@ fixture — so the test passes in isolation, fails in a full run, and does so in
 files that never mention <code>shape_fixture</code>.</p>
 <p>Three ways out, in the order they are usually right:</p>
 <ul>
-<li><strong>give a session world models nothing else uses.</strong> The same rule as the one
-  above, for the same reason: a session world owns its tables for the whole run;</li>
+<li><strong>give a session world models nothing else uses.</strong> A session world owns its
+  tables for the whole run;</li>
 <li>scope the other test's assertions rather than counting the table —
   <code>filter(...)</code> on something the shape does not produce, or assert against
   <code>an_order.pk</code> rather than a count;</li>
@@ -1017,31 +1077,70 @@ is what the <strong>scale protocol</strong> is:</p>
 <p>make the world be at factor F, then let me run my block.</p>
 </blockquote>
 <p><code>scale_fixture</code> is the pytest face of it.</p>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="c1"># conftest.py</span>
-</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">django_data_shape</span><span class="w"> </span><span class="kn">import</span> <span class="n">Constant</span><span class="p">,</span> <span class="n">Shape</span><span class="p">,</span> <span class="n">Table</span>
-</span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="kn">from</span><span class="w"> </span><span class="nn">django_data_shape.fixtures</span><span class="w"> </span><span class="kn">import</span> <span class="n">scale_fixture</span>
-</span><span id="__span-5-4"><a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>
-</span><span id="__span-5-5"><a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="kn">from</span><span class="w"> </span><span class="nn">myapp.models</span><span class="w"> </span><span class="kn">import</span> <span class="n">Order</span>
-</span><span id="__span-5-6"><a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>
-</span><span id="__span-5-7"><a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="n">world</span> <span class="o">=</span> <span class="n">scale_fixture</span><span class="p">(</span><span class="n">Shape</span><span class="p">(</span><span class="n">Table</span><span class="p">(</span><span class="n">Order</span><span class="p">,</span> <span class="n">rows</span><span class="o">=</span><span class="mi">100</span><span class="p">,</span> <span class="n">status</span><span class="o">=</span><span class="n">Constant</span><span class="p">(</span><span class="s2">"complete"</span><span class="p">)),</span> <span class="n">seed</span><span class="o">=</span><span class="mi">1234</span><span class="p">))</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="c1"># conftest.py</span>
+</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">django_data_shape</span><span class="w"> </span><span class="kn">import</span> <span class="n">Constant</span><span class="p">,</span> <span class="n">Shape</span><span class="p">,</span> <span class="n">Table</span>
+</span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="kn">from</span><span class="w"> </span><span class="nn">django_data_shape.fixtures</span><span class="w"> </span><span class="kn">import</span> <span class="n">scale_fixture</span>
+</span><span id="__span-6-4"><a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>
+</span><span id="__span-6-5"><a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="kn">from</span><span class="w"> </span><span class="nn">myapp.models</span><span class="w"> </span><span class="kn">import</span> <span class="n">Order</span>
+</span><span id="__span-6-6"><a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a>
+</span><span id="__span-6-7"><a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a><span class="n">world</span> <span class="o">=</span> <span class="n">scale_fixture</span><span class="p">(</span><span class="n">Shape</span><span class="p">(</span><span class="n">Table</span><span class="p">(</span><span class="n">Order</span><span class="p">,</span> <span class="n">rows</span><span class="o">=</span><span class="mi">100</span><span class="p">,</span> <span class="n">status</span><span class="o">=</span><span class="n">Constant</span><span class="p">(</span><span class="s2">"complete"</span><span class="p">)),</span> <span class="n">seed</span><span class="o">=</span><span class="mi">1234</span><span class="p">))</span>
 </span></code></pre></div>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="k">def</span><span class="w"> </span><span class="nf">test_the_dashboard_query_does_not_grow</span><span class="p">(</span><span class="n">world</span><span class="p">,</span> <span class="n">django_assert_num_queries</span><span class="p">):</span>
-</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>    <span class="k">for</span> <span class="n">factor</span> <span class="ow">in</span> <span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">10</span><span class="p">):</span>
-</span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>        <span class="k">with</span> <span class="n">world</span><span class="p">(</span><span class="n">factor</span><span class="p">)</span> <span class="k">as</span> <span class="n">rows</span><span class="p">:</span>
-</span><span id="__span-6-4"><a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">rows</span><span class="si">}</span><span class="s2"> rows in the world"</span><span class="p">)</span>
-</span><span id="__span-6-5"><a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>            <span class="k">with</span> <span class="n">django_assert_num_queries</span><span class="p">(</span><span class="mi">3</span><span class="p">):</span>
-</span><span id="__span-6-6"><a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a>                <span class="n">dashboard</span><span class="p">()</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="k">def</span><span class="w"> </span><span class="nf">test_the_dashboard_query_does_not_grow</span><span class="p">(</span><span class="n">world</span><span class="p">,</span> <span class="n">django_assert_num_queries</span><span class="p">):</span>
+</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>    <span class="k">for</span> <span class="n">factor</span> <span class="ow">in</span> <span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">10</span><span class="p">):</span>
+</span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>        <span class="k">with</span> <span class="n">world</span><span class="p">(</span><span class="n">factor</span><span class="p">)</span> <span class="k">as</span> <span class="n">rows</span><span class="p">:</span>
+</span><span id="__span-7-4"><a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">rows</span><span class="si">}</span><span class="s2"> rows in the world"</span><span class="p">)</span>
+</span><span id="__span-7-5"><a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>            <span class="k">with</span> <span class="n">django_assert_num_queries</span><span class="p">(</span><span class="mi">3</span><span class="p">):</span>
+</span><span id="__span-7-6"><a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a>                <span class="n">dashboard</span><span class="p">()</span>
 </span></code></pre></div>
 <p>No <code>django_db</code> marker: the fixture requests <code>db</code> itself, so a test that asks for
 worlds has database access and an enclosing transaction without having to
 remember either. Each world is built inside that transaction and undone by
 rolling back to a savepoint, so the next factor starts from an empty table and
 the test's own transaction survives.</p>
+<p>A world first empties the tables its shape declares that hold rows, inside
+that same transaction, and changes no other table: rows the test wrote in a
+declared table are gone inside the block and back after it, and a row the test
+wrote that <em>references</em> a declared table is refused, as above, rather than
+emptied or orphaned. That holds under a database-level <code>ON DELETE</code> as well, such
+as the one Django 6.1's <code>DB_CASCADE</code> creates: a <code>DELETE</code> follows such a key to
+the rows referencing the ones it removes, and by the time one runs, the refusal
+has established that none of those is outside the tables being emptied. On
+PostgreSQL the emptying is one <code>TRUNCATE</code> listing the
+declared tables and every table that references them, when none of those holds
+rows, and otherwise a <code>DELETE</code> per declared table holding rows. Never
+<code>TRUNCATE ... CASCADE</code>, which follows foreign keys by schema rather than by row:
+through a chain of keys leading from a declared child back to its own parent, it
+emptied the parent too.
+Before the <code>TRUNCATE</code>, the foreign-key checks Django leaves deferred on the
+test's own writes are fired, because PostgreSQL refuses to truncate a table with
+checks still pending. A row that genuinely breaks a constraint therefore raises
+<code>IntegrityError</code> on the way into the world, naming the constraint, rather than
+at the end of the test. After the <code>DELETE</code>s they are fired too, so a row outside
+the declaration that breaks a constraint raises on the way in on either route.
+The build fires them again before the <code>ALTER TABLE ... SET STATISTICS</code> a table
+declaring <code>statistics=</code> is built with, because PostgreSQL refuses it while checks
+are pending: each row a <code>DELETE</code> removes from a referenced table queues one, and
+a world that empties nothing leaves the test's own queued.</p>
+<p>The two routes part on a row in a declared table that breaks a constraint, such
+as an orphan the test wrote. The <code>TRUNCATE</code> route checks it before the
+statement and raises <code>IntegrityError</code>. The <code>DELETE</code> route removes the row
+before it fires the checks, PostgreSQL skips a check whose row is gone, and the
+world builds; the orphan is back after the block.</p>
+<p>Firing the checks ends with <code>SET CONSTRAINTS ALL DEFERRED</code>, on either route, so
+from there until the block ends every deferrable constraint is deferred -- one
+declared <code>INITIALLY IMMEDIATE</code> included -- and the test's own code inside the
+block runs under that. The mode is transaction state, so the rollback that ends
+the block restores the test's.</p>
+<p>A <code>DELETE</code> fires row-level <code>DELETE</code> triggers, which <code>TRUNCATE</code> does not. A
+trigger on a declared table runs inside the world: an audit trigger writing into
+an undeclared table writes there, and the write is rolled back with the block;
+a <code>BEFORE DELETE</code> trigger that returns null keeps its rows, and the build then
+refuses the table with <code>ShapeNotEmpty</code>.</p>
 <p>Outside a fixture, the same thing is a context manager:</p>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">django_data_shape</span><span class="w"> </span><span class="kn">import</span> <span class="n">scaled_world</span>
-</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>
-</span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="k">with</span> <span class="n">scaled_world</span><span class="p">(</span><span class="n">shape</span><span class="p">,</span> <span class="mi">10</span><span class="p">)</span> <span class="k">as</span> <span class="n">rows</span><span class="p">:</span>
-</span><span id="__span-7-4"><a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>    <span class="o">...</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">django_data_shape</span><span class="w"> </span><span class="kn">import</span> <span class="n">scaled_world</span>
+</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>
+</span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="k">with</span> <span class="n">scaled_world</span><span class="p">(</span><span class="n">shape</span><span class="p">,</span> <span class="mi">10</span><span class="p">)</span> <span class="k">as</span> <span class="n">rows</span><span class="p">:</span>
+</span><span id="__span-8-4"><a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>    <span class="o">...</span>
 </span></code></pre></div>
 <h3 id="declare-small-scale-up">Declare small, scale up<a class="headerlink" href="#declare-small-scale-up" title="Permanent link">&para;</a></h3>
 <p>The declared row counts are the world at factor 1, so the base declaration should
@@ -1053,17 +1152,21 @@ all. Growth is about the shape of the count curve; plans are about the planner.<
 <h3 id="where-to-open-a-query-capture">Where to open a query capture<a class="headerlink" href="#where-to-open-a-query-capture" title="Permanent link">&para;</a></h3>
 <p>Inside the block, never around it. Building a world emits statements of its own,
 and a capture wrapped around <code>world(factor)</code> counts them with the block's:</p>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="k">def</span><span class="w"> </span><span class="nf">test_the_dashboard_query_does_not_grow</span><span class="p">(</span><span class="n">world</span><span class="p">,</span> <span class="n">django_assert_num_queries</span><span class="p">):</span>
-</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>    <span class="k">for</span> <span class="n">factor</span> <span class="ow">in</span> <span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">10</span><span class="p">):</span>
-</span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>        <span class="k">with</span> <span class="n">world</span><span class="p">(</span><span class="n">factor</span><span class="p">):</span>
-</span><span id="__span-8-4"><a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>            <span class="k">with</span> <span class="n">django_assert_num_queries</span><span class="p">(</span><span class="mi">3</span><span class="p">):</span>  <span class="c1"># inside, not outside</span>
-</span><span id="__span-8-5"><a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>                <span class="n">dashboard</span><span class="p">()</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="k">def</span><span class="w"> </span><span class="nf">test_the_dashboard_query_does_not_grow</span><span class="p">(</span><span class="n">world</span><span class="p">,</span> <span class="n">django_assert_num_queries</span><span class="p">):</span>
+</span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>    <span class="k">for</span> <span class="n">factor</span> <span class="ow">in</span> <span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">10</span><span class="p">):</span>
+</span><span id="__span-9-3"><a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>        <span class="k">with</span> <span class="n">world</span><span class="p">(</span><span class="n">factor</span><span class="p">):</span>
+</span><span id="__span-9-4"><a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a>            <span class="k">with</span> <span class="n">django_assert_num_queries</span><span class="p">(</span><span class="mi">3</span><span class="p">):</span>  <span class="c1"># inside, not outside</span>
+</span><span id="__span-9-5"><a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>                <span class="n">dashboard</span><span class="p">()</span>
 </span></code></pre></div>
-<p>On PostgreSQL the hazard is mild and fixed -- fourteen statements for a two-table
-shape, at every factor, because <code>COPY</code> does not pass through Django's
-<code>execute_wrapper</code> and only
-the emptiness check, the parent key read, the sequence reset, the <code>ANALYZE</code> and
-the savepoints do. Off PostgreSQL it is neither mild nor fixed: the inserts are
+<p>On PostgreSQL the hazard is mild and fixed -- nineteen statements for a
+two-table shape over empty tables, at every factor, because one <code>COPY</code> loads a
+table however many rows it carries, and everything else a world emits -- the
+read of which declared tables hold rows, the emptiness check, the
+statistics-target read, the parent key read, the sequence resets, the <code>ANALYZE</code>
+and the savepoints -- is counted per table or per world, never per row. Over a
+session world declaring the same tables, emptying them adds five more where
+another table references them, four where none does, the same at every factor.
+Off PostgreSQL it is neither mild nor fixed: the inserts are
 ordinary statements, one per thousand rows, so the count a capture sees <strong>grows
 with the factor</strong>, and a growth assertion measuring from outside the block would
 read the loader's curve as its subject's.</p>
@@ -1078,24 +1181,24 @@ without naming which axis caused it.</p>
 <p>There is no per-table factor and no <code>scale=</code> flag, because none is needed: the
 protocol takes a <strong>callable</strong>, so which dimension varies is a property of the
 function you bind rather than of the seam.</p>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">contextlib</span>
-</span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>
-</span><span id="__span-9-3"><a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="kn">from</span><span class="w"> </span><span class="nn">django_data_shape</span><span class="w"> </span><span class="kn">import</span> <span class="n">Constant</span><span class="p">,</span> <span class="n">FanOut</span><span class="p">,</span> <span class="n">Shape</span><span class="p">,</span> <span class="n">Table</span><span class="p">,</span> <span class="n">Zipf</span><span class="p">,</span> <span class="n">scaled_world</span>
-</span><span id="__span-9-4"><a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a>
-</span><span id="__span-9-5"><a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>
-</span><span id="__span-9-6"><a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a><span class="nd">@contextlib</span><span class="o">.</span><span class="n">contextmanager</span>
-</span><span id="__span-9-7"><a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a><span class="k">def</span><span class="w"> </span><span class="nf">more_customers</span><span class="p">(</span><span class="n">n</span><span class="p">,</span> <span class="o">/</span><span class="p">):</span>
-</span><span id="__span-9-8"><a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a>    <span class="c1"># Orders pinned, customers growing. Note what this really asks for: with the</span>
-</span><span id="__span-9-9"><a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a>    <span class="c1"># child count fixed, more parents means fewer children each, so the fan-out</span>
-</span><span id="__span-9-10"><a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a>    <span class="c1"># moves too. That is the honest reading of "O(parents)", and a flag that</span>
-</span><span id="__span-9-11"><a id="__codelineno-9-11" name="__codelineno-9-11" href="#__codelineno-9-11"></a>    <span class="c1"># hid it behind a boolean would be hiding the confound rather than the</span>
-</span><span id="__span-9-12"><a id="__codelineno-9-12" name="__codelineno-9-12" href="#__codelineno-9-12"></a>    <span class="c1"># arithmetic.</span>
-</span><span id="__span-9-13"><a id="__codelineno-9-13" name="__codelineno-9-13" href="#__codelineno-9-13"></a>    <span class="n">shape</span> <span class="o">=</span> <span class="n">Shape</span><span class="p">(</span>
-</span><span id="__span-9-14"><a id="__codelineno-9-14" name="__codelineno-9-14" href="#__codelineno-9-14"></a>        <span class="n">Table</span><span class="p">(</span><span class="n">Customer</span><span class="p">,</span> <span class="n">rows</span><span class="o">=</span><span class="mi">50</span> <span class="o">*</span> <span class="n">n</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="n">Constant</span><span class="p">(</span><span class="s2">"acme"</span><span class="p">)),</span>
-</span><span id="__span-9-15"><a id="__codelineno-9-15" name="__codelineno-9-15" href="#__codelineno-9-15"></a>        <span class="n">Table</span><span class="p">(</span><span class="n">Order</span><span class="p">,</span> <span class="n">rows</span><span class="o">=</span><span class="mi">5_000</span><span class="p">,</span> <span class="n">customer</span><span class="o">=</span><span class="n">FanOut</span><span class="p">(</span><span class="n">Zipf</span><span class="p">()),</span> <span class="n">status</span><span class="o">=</span><span class="n">Constant</span><span class="p">(</span><span class="s2">"complete"</span><span class="p">)),</span>
-</span><span id="__span-9-16"><a id="__codelineno-9-16" name="__codelineno-9-16" href="#__codelineno-9-16"></a>    <span class="p">)</span>
-</span><span id="__span-9-17"><a id="__codelineno-9-17" name="__codelineno-9-17" href="#__codelineno-9-17"></a>    <span class="k">with</span> <span class="n">scaled_world</span><span class="p">(</span><span class="n">shape</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span> <span class="k">as</span> <span class="n">rows</span><span class="p">:</span>
-</span><span id="__span-9-18"><a id="__codelineno-9-18" name="__codelineno-9-18" href="#__codelineno-9-18"></a>        <span class="k">yield</span> <span class="n">rows</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">contextlib</span>
+</span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>
+</span><span id="__span-10-3"><a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="kn">from</span><span class="w"> </span><span class="nn">django_data_shape</span><span class="w"> </span><span class="kn">import</span> <span class="n">Constant</span><span class="p">,</span> <span class="n">FanOut</span><span class="p">,</span> <span class="n">Shape</span><span class="p">,</span> <span class="n">Table</span><span class="p">,</span> <span class="n">Zipf</span><span class="p">,</span> <span class="n">scaled_world</span>
+</span><span id="__span-10-4"><a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>
+</span><span id="__span-10-5"><a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a>
+</span><span id="__span-10-6"><a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a><span class="nd">@contextlib</span><span class="o">.</span><span class="n">contextmanager</span>
+</span><span id="__span-10-7"><a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a><span class="k">def</span><span class="w"> </span><span class="nf">more_customers</span><span class="p">(</span><span class="n">n</span><span class="p">,</span> <span class="o">/</span><span class="p">):</span>
+</span><span id="__span-10-8"><a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a>    <span class="c1"># Orders pinned, customers growing. Note what this really asks for: with the</span>
+</span><span id="__span-10-9"><a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a>    <span class="c1"># child count fixed, more parents means fewer children each, so the fan-out</span>
+</span><span id="__span-10-10"><a id="__codelineno-10-10" name="__codelineno-10-10" href="#__codelineno-10-10"></a>    <span class="c1"># moves too. That is the honest reading of "O(parents)", and a flag that</span>
+</span><span id="__span-10-11"><a id="__codelineno-10-11" name="__codelineno-10-11" href="#__codelineno-10-11"></a>    <span class="c1"># hid it behind a boolean would be hiding the confound rather than the</span>
+</span><span id="__span-10-12"><a id="__codelineno-10-12" name="__codelineno-10-12" href="#__codelineno-10-12"></a>    <span class="c1"># arithmetic.</span>
+</span><span id="__span-10-13"><a id="__codelineno-10-13" name="__codelineno-10-13" href="#__codelineno-10-13"></a>    <span class="n">shape</span> <span class="o">=</span> <span class="n">Shape</span><span class="p">(</span>
+</span><span id="__span-10-14"><a id="__codelineno-10-14" name="__codelineno-10-14" href="#__codelineno-10-14"></a>        <span class="n">Table</span><span class="p">(</span><span class="n">Customer</span><span class="p">,</span> <span class="n">rows</span><span class="o">=</span><span class="mi">50</span> <span class="o">*</span> <span class="n">n</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="n">Constant</span><span class="p">(</span><span class="s2">"acme"</span><span class="p">)),</span>
+</span><span id="__span-10-15"><a id="__codelineno-10-15" name="__codelineno-10-15" href="#__codelineno-10-15"></a>        <span class="n">Table</span><span class="p">(</span><span class="n">Order</span><span class="p">,</span> <span class="n">rows</span><span class="o">=</span><span class="mi">5_000</span><span class="p">,</span> <span class="n">customer</span><span class="o">=</span><span class="n">FanOut</span><span class="p">(</span><span class="n">Zipf</span><span class="p">()),</span> <span class="n">status</span><span class="o">=</span><span class="n">Constant</span><span class="p">(</span><span class="s2">"complete"</span><span class="p">)),</span>
+</span><span id="__span-10-16"><a id="__codelineno-10-16" name="__codelineno-10-16" href="#__codelineno-10-16"></a>    <span class="p">)</span>
+</span><span id="__span-10-17"><a id="__codelineno-10-17" name="__codelineno-10-17" href="#__codelineno-10-17"></a>    <span class="k">with</span> <span class="n">scaled_world</span><span class="p">(</span><span class="n">shape</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span> <span class="k">as</span> <span class="n">rows</span><span class="p">:</span>
+</span><span id="__span-10-18"><a id="__codelineno-10-18" name="__codelineno-10-18" href="#__codelineno-10-18"></a>        <span class="k">yield</span> <span class="n">rows</span>
 </span></code></pre></div>
 <h3 id="why-a-factor-varies-the-declaration">Why a factor varies the declaration<a class="headerlink" href="#why-a-factor-varies-the-declaration" title="Permanent link">&para;</a></h3>
 <p>The alternative was to build once at the largest factor and let a smaller factor
@@ -1120,25 +1223,25 @@ see only part of it. It does not survive contact with what a subset actually is:
 the average fan-out along with the size, so two worlds would differ in a second
 way and the curve would no longer be about size.</p>
 <p><code>scaled_shape</code> is that transform on its own, and it needs no database:</p>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">django_data_shape</span><span class="w"> </span><span class="kn">import</span> <span class="n">scaled_shape</span>
-</span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>
-</span><span id="__span-10-3"><a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="n">bigger</span> <span class="o">=</span> <span class="n">scaled_shape</span><span class="p">(</span><span class="n">shape</span><span class="p">,</span> <span class="mi">10</span><span class="p">)</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">django_data_shape</span><span class="w"> </span><span class="kn">import</span> <span class="n">scaled_shape</span>
+</span><span id="__span-11-2"><a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>
+</span><span id="__span-11-3"><a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="n">bigger</span> <span class="o">=</span> <span class="n">scaled_shape</span><span class="p">(</span><span class="n">shape</span><span class="p">,</span> <span class="mi">10</span><span class="p">)</span>
 </span></code></pre></div>
 <h3 id="implementing-the-protocol-without-this-package">Implementing the protocol without this package<a class="headerlink" href="#implementing-the-protocol-without-this-package" title="Permanent link">&para;</a></h3>
 <p>A consumer of the protocol -- a growth assertion in another library, say --
 depends on the <em>shape</em> of the call and not on this package. Anything callable as
 <code>at(factor)</code> returning a context manager will do, so a project on a backend this
 package refuses supplies its own:</p>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">contextlib</span>
-</span><span id="__span-11-2"><a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>
-</span><span id="__span-11-3"><a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>
-</span><span id="__span-11-4"><a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="nd">@contextlib</span><span class="o">.</span><span class="n">contextmanager</span>
-</span><span id="__span-11-5"><a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a><span class="k">def</span><span class="w"> </span><span class="nf">world</span><span class="p">(</span><span class="n">n</span><span class="p">):</span>
-</span><span id="__span-11-6"><a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a>    <span class="n">orders</span> <span class="o">=</span> <span class="p">[</span><span class="n">make_order</span><span class="p">()</span> <span class="k">for</span> <span class="n">_</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">100</span> <span class="o">*</span> <span class="n">n</span><span class="p">)]</span>
-</span><span id="__span-11-7"><a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a>    <span class="k">try</span><span class="p">:</span>
-</span><span id="__span-11-8"><a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a>        <span class="k">yield</span> <span class="nb">len</span><span class="p">(</span><span class="n">orders</span><span class="p">)</span>
-</span><span id="__span-11-9"><a id="__codelineno-11-9" name="__codelineno-11-9" href="#__codelineno-11-9"></a>    <span class="k">finally</span><span class="p">:</span>
-</span><span id="__span-11-10"><a id="__codelineno-11-10" name="__codelineno-11-10" href="#__codelineno-11-10"></a>        <span class="n">delete</span><span class="p">(</span><span class="n">orders</span><span class="p">)</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">contextlib</span>
+</span><span id="__span-12-2"><a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>
+</span><span id="__span-12-3"><a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>
+</span><span id="__span-12-4"><a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="nd">@contextlib</span><span class="o">.</span><span class="n">contextmanager</span>
+</span><span id="__span-12-5"><a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a><span class="k">def</span><span class="w"> </span><span class="nf">world</span><span class="p">(</span><span class="n">n</span><span class="p">):</span>
+</span><span id="__span-12-6"><a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a>    <span class="n">orders</span> <span class="o">=</span> <span class="p">[</span><span class="n">make_order</span><span class="p">()</span> <span class="k">for</span> <span class="n">_</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">100</span> <span class="o">*</span> <span class="n">n</span><span class="p">)]</span>
+</span><span id="__span-12-7"><a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a>    <span class="k">try</span><span class="p">:</span>
+</span><span id="__span-12-8"><a id="__codelineno-12-8" name="__codelineno-12-8" href="#__codelineno-12-8"></a>        <span class="k">yield</span> <span class="nb">len</span><span class="p">(</span><span class="n">orders</span><span class="p">)</span>
+</span><span id="__span-12-9"><a id="__codelineno-12-9" name="__codelineno-12-9" href="#__codelineno-12-9"></a>    <span class="k">finally</span><span class="p">:</span>
+</span><span id="__span-12-10"><a id="__codelineno-12-10" name="__codelineno-12-10" href="#__codelineno-12-10"></a>        <span class="n">delete</span><span class="p">(</span><span class="n">orders</span><span class="p">)</span>
 </span></code></pre></div>
 <p>The factor is <strong>positional-only</strong> in the protocol, so an implementation may call
 it whatever reads best -- <code>n</code> above. That is deliberate: a structural type
@@ -1147,7 +1250,7 @@ implementations that happened to spell the argument <code>factor</code>, which i
 about this package's naming rather than about the shape of the call.</p>
 <p>Restated without importing <code>ScaleProtocol</code>, for a consumer who would rather spell
 the shape than depend on it, it is exactly:</p>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="n">Callable</span><span class="p">[[</span><span class="nb">int</span><span class="p">],</span> <span class="n">AbstractContextManager</span><span class="p">[</span><span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span><span class="p">]]</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-13-1"><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="n">Callable</span><span class="p">[[</span><span class="nb">int</span><span class="p">],</span> <span class="n">AbstractContextManager</span><span class="p">[</span><span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span><span class="p">]]</span>
 </span></code></pre></div>
 <p>The value yielded is how many rows the world holds, <strong>or <code>None</code></strong>. It is a
 diagnostic: the growth curve's x-axis is the factor, which the caller passed in
@@ -1155,10 +1258,10 @@ and already knows. That is also why it is a plain number rather than a
 <code>BuildResult</code> -- a seam a stranger cannot implement is not a seam -- and why
 <code>None</code> is allowed, because the shortest honest implementation of this protocol
 builds rows and has no count to hand back:</p>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-13-1"><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="nd">@contextlib</span><span class="o">.</span><span class="n">contextmanager</span>
-</span><span id="__span-13-2"><a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="k">def</span><span class="w"> </span><span class="nf">world</span><span class="p">(</span><span class="n">n</span><span class="p">):</span>
-</span><span id="__span-13-3"><a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a>    <span class="n">build_my_fixtures</span><span class="p">(</span><span class="mi">100</span> <span class="o">*</span> <span class="n">n</span><span class="p">)</span>
-</span><span id="__span-13-4"><a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a>    <span class="k">yield</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-14-1"><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="nd">@contextlib</span><span class="o">.</span><span class="n">contextmanager</span>
+</span><span id="__span-14-2"><a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="k">def</span><span class="w"> </span><span class="nf">world</span><span class="p">(</span><span class="n">n</span><span class="p">):</span>
+</span><span id="__span-14-3"><a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a>    <span class="n">build_my_fixtures</span><span class="p">(</span><span class="mi">100</span> <span class="o">*</span> <span class="n">n</span><span class="p">)</span>
+</span><span id="__span-14-4"><a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a>    <span class="k">yield</span>
 </span></code></pre></div>
 <p>A caller reading the value has to tolerate <code>None</code>. An implementation that can
 count cheaply should still yield the number.</p>
@@ -1184,10 +1287,10 @@ something.</p>
 insert is about 1.6 ms per thousand rows against 8 ms to generate them, so at the
 scales a growth assertion runs at the load is not what you are paying for.</p>
 <p><code>shape_fixture</code> skips, with the refusal as the stated reason:</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-14-1"><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>SKIPPED [1] test_orders.py:14: Building a shape for the test session needs
-</span><span id="__span-14-2"><a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a>PostgreSQL; connection 'default' is sqlite. Generation and cardinality are
-</span><span id="__span-14-3"><a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a>backend-neutral, but COPY loading and planner statistics are not, and a shaped
-</span><span id="__span-14-4"><a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a>database whose plans mean nothing is worse than no shaped database at all.
+<div class="language-text highlight"><pre><span></span><code><span id="__span-15-1"><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a>SKIPPED [1] test_orders.py:14: Building a shape for the test session needs
+</span><span id="__span-15-2"><a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a>PostgreSQL; connection 'default' is sqlite. Generation and cardinality are
+</span><span id="__span-15-3"><a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a>backend-neutral, but COPY loading and planner statistics are not, and a shaped
+</span><span id="__span-15-4"><a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a>database whose plans mean nothing is worse than no shaped database at all.
 </span></code></pre></div>
 <p>That is the fixture whose job is to be big and to be believed by a planner, and
 that world cannot exist here. A skip is the honest degradation: a test that never
@@ -1195,16 +1298,16 @@ ran says so, while a test that ran against a database nobody shaped passes and
 means nothing. If you are writing your own fixture over a shaped database --
 anything that asserts on a <em>plan</em> -- <code>skip_unless_postgres</code> is the same behaviour
 to reach for:</p>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-15-1"><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">pytest</span>
-</span><span id="__span-15-2"><a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">django.db</span><span class="w"> </span><span class="kn">import</span> <span class="n">connections</span>
-</span><span id="__span-15-3"><a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a>
-</span><span id="__span-15-4"><a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a><span class="kn">from</span><span class="w"> </span><span class="nn">django_data_shape.fixtures</span><span class="w"> </span><span class="kn">import</span> <span class="n">skip_unless_postgres</span>
-</span><span id="__span-15-5"><a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a>
-</span><span id="__span-15-6"><a id="__codelineno-15-6" name="__codelineno-15-6" href="#__codelineno-15-6"></a>
-</span><span id="__span-15-7"><a id="__codelineno-15-7" name="__codelineno-15-7" href="#__codelineno-15-7"></a><span class="nd">@pytest</span><span class="o">.</span><span class="n">fixture</span>
-</span><span id="__span-15-8"><a id="__codelineno-15-8" name="__codelineno-15-8" href="#__codelineno-15-8"></a><span class="k">def</span><span class="w"> </span><span class="nf">my_own_world</span><span class="p">(</span><span class="n">db</span><span class="p">):</span>
-</span><span id="__span-15-9"><a id="__codelineno-15-9" name="__codelineno-15-9" href="#__codelineno-15-9"></a>    <span class="n">skip_unless_postgres</span><span class="p">(</span><span class="n">connections</span><span class="p">[</span><span class="s2">"default"</span><span class="p">],</span> <span class="s2">"Measuring a plan"</span><span class="p">)</span>
-</span><span id="__span-15-10"><a id="__codelineno-15-10" name="__codelineno-15-10" href="#__codelineno-15-10"></a>    <span class="o">...</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-16-1"><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">pytest</span>
+</span><span id="__span-16-2"><a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">django.db</span><span class="w"> </span><span class="kn">import</span> <span class="n">connections</span>
+</span><span id="__span-16-3"><a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a>
+</span><span id="__span-16-4"><a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a><span class="kn">from</span><span class="w"> </span><span class="nn">django_data_shape.fixtures</span><span class="w"> </span><span class="kn">import</span> <span class="n">skip_unless_postgres</span>
+</span><span id="__span-16-5"><a id="__codelineno-16-5" name="__codelineno-16-5" href="#__codelineno-16-5"></a>
+</span><span id="__span-16-6"><a id="__codelineno-16-6" name="__codelineno-16-6" href="#__codelineno-16-6"></a>
+</span><span id="__span-16-7"><a id="__codelineno-16-7" name="__codelineno-16-7" href="#__codelineno-16-7"></a><span class="nd">@pytest</span><span class="o">.</span><span class="n">fixture</span>
+</span><span id="__span-16-8"><a id="__codelineno-16-8" name="__codelineno-16-8" href="#__codelineno-16-8"></a><span class="k">def</span><span class="w"> </span><span class="nf">my_own_world</span><span class="p">(</span><span class="n">db</span><span class="p">):</span>
+</span><span id="__span-16-9"><a id="__codelineno-16-9" name="__codelineno-16-9" href="#__codelineno-16-9"></a>    <span class="n">skip_unless_postgres</span><span class="p">(</span><span class="n">connections</span><span class="p">[</span><span class="s2">"default"</span><span class="p">],</span> <span class="s2">"Measuring a plan"</span><span class="p">)</span>
+</span><span id="__span-16-10"><a id="__codelineno-16-10" name="__codelineno-16-10" href="#__codelineno-16-10"></a>    <span class="o">...</span>
 </span></code></pre></div>
 
 

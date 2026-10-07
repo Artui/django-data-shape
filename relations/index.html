@@ -1181,16 +1181,17 @@ template cache keys on this package's version, so a database built by a release
 that drew differently is never the one being read.</p>
 <p>The one thing recomputation needs is that the parent table still holds the
 parents the children were spread across. Where the parent is declared in the
-same shape — which every cacheable shape is, since a template is built into a
-freshly migrated database — that is checked, and a mismatch raises
-<code>WorldChanged</code> rather than returning a plausible partition of a world nobody
-built:</p>
+same shape — which every cacheable shape built from empty is, since that
+template starts as a freshly migrated database with no parent rows to draw on —
+that is checked, and a mismatch raises <code>WorldChanged</code> rather than returning a
+plausible partition of a world nobody built:</p>
 <div class="language-text highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>Company holds 41 rows and this shape declares 40, so the fan-out for
 </span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>Session.company would be spread over parents the children were never spread
 </span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>across.
 </span></code></pre></div>
-<p>Where the parents came from the ORM instead, there is nothing to check against
-and nothing is claimed: the answer describes the parents that are there. Ask
+<p>Where the parents came from the ORM instead, or from rows a template's migrated
+<code>base</code> already held, there is nothing to check against and nothing is claimed:
+the answer describes the parents that are there. Ask
 before the test starts making more.</p>
 <h3 id="the-sizes-are-not-ordered-on-the-parent-key">The sizes are not ordered on the parent key<a class="headerlink" href="#the-sizes-are-not-ordered-on-the-parent-key" title="Permanent link">&para;</a></h3>
 <p><strong>"The whales are the low ids" is false</strong>, and so is the reverse. A parent's size

@@ -570,6 +570,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#starting-from-a-migrated-base" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Starting from a migrated base
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#what-it-does-not-support" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -758,6 +769,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#starting-from-a-migrated-base" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Starting from a migrated base
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#what-it-does-not-support" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -835,8 +857,8 @@ target is collapsed into a single residual frequency.</p>
 </span><span id="__span-1-12"><a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a><span class="p">)</span>
 </span></code></pre></div>
 <p><code>statistics=</code> maps a field name to a number of buckets, on
-<a class="autorefs autorefs-internal" title="Table" href="../reference/#django_data_shape.table.Table"><code>Table</code></a> and on
-<a class="autorefs autorefs-internal" title="Projection" href="../reference/#django_data_shape.projection.Projection"><code>Projection</code></a> alike. A column left out
+<a class="autorefs autorefs-internal" title="Table" href="../reference/#django_data_shape.declaration.table.Table"><code>Table</code></a> and on
+<a class="autorefs autorefs-internal" title="Projection" href="../reference/#django_data_shape.declaration.projection.Projection"><code>Projection</code></a> alike. A column left out
 keeps whatever target the schema gives it.</p>
 <h3 id="declared-never-inferred">Declared, never inferred<a class="headerlink" href="#declared-never-inferred" title="Permanent link">&para;</a></h3>
 <p>The target could have been derived from the distribution -- a <code>Skew</code> knows how
@@ -916,13 +938,13 @@ seventeen seconds once per machine, and a fifth of a second per test database.</
 </span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="n">template</span> <span class="o">=</span> <span class="n">template_database</span><span class="p">(</span><span class="n">shape</span><span class="p">)</span>  <span class="c1"># builds the first time, finds it after</span>
 </span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="n">clone_database</span><span class="p">(</span><span class="n">template</span><span class="p">,</span> <span class="s2">"test_myapp"</span><span class="p">,</span> <span class="n">replace</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
 </span></code></pre></div>
-<p><a class="autorefs autorefs-internal" title="template_database" href="../reference/#django_data_shape.template_database.template_database"><code>template_database</code></a>
+<p><a class="autorefs autorefs-internal" title="template_database" href="../reference/#django_data_shape.databases.template_database.template_database"><code>template_database</code></a>
 names the database after a content hash of everything that decides what is in it,
 so reuse is safe rather than merely fast. Change the declaration, the schema, the
-time-zone settings or this package's version and the name changes, so the old
-database is simply never asked for again.</p>
+time-zone settings, this package's version or the base it starts from and the
+name changes, so the old database is simply never asked for again.</p>
 <h3 id="the-key">The key<a class="headerlink" href="#the-key" title="Permanent link">&para;</a></h3>
-<p><a class="autorefs autorefs-internal" title="shape_digest" href="../reference/#django_data_shape.shape_digest.shape_digest"><code>shape_digest</code></a> is the declaration
+<p><a class="autorefs autorefs-internal" title="shape_digest" href="../reference/#django_data_shape.databases.shape_digest.shape_digest"><code>shape_digest</code></a> is the declaration
 half, and it is public because it is useful on its own -- it needs no database and
 answers "are these two shapes the same shape".</p>
 <p>It is a BLAKE2b digest of a canonical encoding, not Python's <code>hash()</code>: that one is
@@ -946,9 +968,9 @@ edited in another module. Every one of those failures is in the same direction -
 the key agrees while the data has changed -- and the result is a suite running
 against a database built from code that no longer exists.</p>
 <p>So a shape holding one raises
-<a class="autorefs autorefs-internal" title="UnhashableShape" href="../reference/#django_data_shape.unhashable_shape.UnhashableShape"><code>UnhashableShape</code></a>, naming
+<a class="autorefs autorefs-internal" title="UnhashableShape" href="../reference/#django_data_shape.databases.unhashable_shape.UnhashableShape"><code>UnhashableShape</code></a>, naming
 the table and the column. Build it with <code>build()</code> and pay the load, or implement
-<a class="autorefs autorefs-internal" title="Canonical" href="../reference/#django_data_shape.canonical.Canonical"><code>Canonical</code></a> on a declaration that really
+<a class="autorefs autorefs-internal" title="Canonical" href="../reference/#django_data_shape.types.canonical.Canonical"><code>Canonical</code></a> on a declaration that really
 is data:</p>
 <div class="language-python highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="k">class</span><span class="w"> </span><span class="nc">EveryNth</span><span class="p">:</span>
 </span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="w">    </span><span class="sd">"""A distribution that is a function of its parameters, and says so."""</span>
@@ -1014,6 +1036,193 @@ per session, and it re-runs <code>migrate</code> over the clone:</p>
 <p><code>--reuse-db</code> is not worth reaching for with either: a clone is cheaper than
 deciding whether the database you have is the one you want, and the template
 <em>is</em> the reuse.</p>
+<h3 id="starting-from-a-migrated-base">Starting from a migrated base<a class="headerlink" href="#starting-from-a-migrated-base" title="Permanent link">&para;</a></h3>
+<p>By default a template is built into a database that <code>migrate</code> fills from empty,
+and on a project with a long migration history that replay is most of the cost: one with
+about 330 migrations measured thirteen and a half minutes of <code>migrate</code> against
+about one minute to build a four-million-row shape -- paid again by every
+template a change to the declaration makes. Such a project usually keeps a
+migrated database already, and clones its test databases from it. Name it as
+the base and the template starts as a copy of it instead:</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="c1"># conftest.py</span>
+</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="kn">import</span><span class="w"> </span><span class="nn">pytest</span>
+</span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="kn">from</span><span class="w"> </span><span class="nn">django.db</span><span class="w"> </span><span class="kn">import</span> <span class="n">connections</span>
+</span><span id="__span-7-4"><a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>
+</span><span id="__span-7-5"><a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="kn">from</span><span class="w"> </span><span class="nn">django_data_shape</span><span class="w"> </span><span class="kn">import</span> <span class="n">clone_database</span><span class="p">,</span> <span class="n">drop_database</span><span class="p">,</span> <span class="n">template_database</span>
+</span><span id="__span-7-6"><a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a>
+</span><span id="__span-7-7"><a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="n">BASE</span> <span class="o">=</span> <span class="s2">"myproject_base"</span>  <span class="c1"># a database you keep migrated</span>
+</span><span id="__span-7-8"><a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a>
+</span><span id="__span-7-9"><a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a>
+</span><span id="__span-7-10"><a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a><span class="nd">@pytest</span><span class="o">.</span><span class="n">fixture</span><span class="p">(</span><span class="n">scope</span><span class="o">=</span><span class="s2">"session"</span><span class="p">)</span>
+</span><span id="__span-7-11"><a id="__codelineno-7-11" name="__codelineno-7-11" href="#__codelineno-7-11"></a><span class="k">def</span><span class="w"> </span><span class="nf">django_db_setup</span><span class="p">(</span><span class="n">django_test_environment</span><span class="p">,</span> <span class="n">django_db_modify_db_settings</span><span class="p">,</span> <span class="n">django_db_blocker</span><span class="p">):</span>
+</span><span id="__span-7-12"><a id="__codelineno-7-12" name="__codelineno-7-12" href="#__codelineno-7-12"></a>    <span class="n">connection</span> <span class="o">=</span> <span class="n">connections</span><span class="p">[</span><span class="s2">"default"</span><span class="p">]</span>
+</span><span id="__span-7-13"><a id="__codelineno-7-13" name="__codelineno-7-13" href="#__codelineno-7-13"></a>    <span class="n">settings</span> <span class="o">=</span> <span class="n">connection</span><span class="o">.</span><span class="n">settings_dict</span>
+</span><span id="__span-7-14"><a id="__codelineno-7-14" name="__codelineno-7-14" href="#__codelineno-7-14"></a>    <span class="n">target</span> <span class="o">=</span> <span class="n">settings</span><span class="p">[</span><span class="s2">"TEST"</span><span class="p">][</span><span class="s2">"NAME"</span><span class="p">]</span> <span class="ow">or</span> <span class="sa">f</span><span class="s2">"test_</span><span class="si">{</span><span class="n">settings</span><span class="p">[</span><span class="s1">'NAME'</span><span class="p">]</span><span class="si">}</span><span class="s2">"</span>
+</span><span id="__span-7-15"><a id="__codelineno-7-15" name="__codelineno-7-15" href="#__codelineno-7-15"></a>
+</span><span id="__span-7-16"><a id="__codelineno-7-16" name="__codelineno-7-16" href="#__codelineno-7-16"></a>    <span class="k">with</span> <span class="n">django_db_blocker</span><span class="o">.</span><span class="n">unblock</span><span class="p">():</span>
+</span><span id="__span-7-17"><a id="__codelineno-7-17" name="__codelineno-7-17" href="#__codelineno-7-17"></a>        <span class="n">clone_database</span><span class="p">(</span><span class="n">template_database</span><span class="p">(</span><span class="n">SHAPE</span><span class="p">,</span> <span class="n">base</span><span class="o">=</span><span class="n">BASE</span><span class="p">),</span> <span class="n">target</span><span class="p">,</span> <span class="n">replace</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+</span><span id="__span-7-18"><a id="__codelineno-7-18" name="__codelineno-7-18" href="#__codelineno-7-18"></a>        <span class="n">connection</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+</span><span id="__span-7-19"><a id="__codelineno-7-19" name="__codelineno-7-19" href="#__codelineno-7-19"></a>        <span class="n">settings</span><span class="p">[</span><span class="s2">"NAME"</span><span class="p">]</span> <span class="o">=</span> <span class="n">target</span>
+</span><span id="__span-7-20"><a id="__codelineno-7-20" name="__codelineno-7-20" href="#__codelineno-7-20"></a>        <span class="k">yield</span>
+</span><span id="__span-7-21"><a id="__codelineno-7-21" name="__codelineno-7-21" href="#__codelineno-7-21"></a>        <span class="n">connection</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+</span><span id="__span-7-22"><a id="__codelineno-7-22" name="__codelineno-7-22" href="#__codelineno-7-22"></a>        <span class="n">drop_database</span><span class="p">(</span><span class="n">target</span><span class="p">)</span>
+</span></code></pre></div>
+<p>The tables <code>migrate</code> builds for apps without migrations are rebuilt from the
+models, and everything else the base holds is carried as it is. An app with
+migrations is brought forward by its history: <code>migrate</code> runs over the copy and
+applies whatever the base has yet to -- nothing, on a base kept up to date. An
+app without migrations has no history to bring forward, so the tables
+<code>run_syncdb</code> makes for it -- its managed models' tables, and the many-to-many
+tables Django creates for their relations -- are dropped from the copy first
+and made again from the current models, as in an empty database. <code>run_syncdb</code>
+creates a missing table and never alters an existing one, so this is what stops
+a table the base made from an older model surviving under a key that names the
+new one -- and it means the base's rows in those tables do not carry over.
+A table is found under the name PostgreSQL stores, which for a <code>db_table</code>
+longer than 63 bytes is its first 63, cut back to a whole character: Django
+does not shorten a name a model spells out, and <code>run_syncdb</code> on its own would
+miss such a table and fail creating it again. Everything else is carried as
+the base has it: the rows in the tables of apps with migrations, an unmanaged
+model's table, the tables of an app that is no longer installed and those of
+an app with no models module, which <code>run_syncdb</code> passes over. <code>post_migrate</code>
+fires as it does from empty.</p>
+<p><strong>A base behind the migrations on disk is migrated forward; only a history
+migrating cannot repair is refused.</strong> Migrating forward always ends at the
+checkout's schema for the apps with migrations, whatever prefix of their history
+the base holds, and the apps without them are rebuilt, so the key stays sound as
+it is:
+everything it absorbed before, plus the base's name and oid. The base's applied
+migrations do not need to enter it. Migrating the base itself forward later
+leaves its oid alone, so the same name is asked for, and the template under it is
+the one the copy's own forward migration already gave. Django's own PostgreSQL
+<code>TEST: {"TEMPLATE": ...}</code> setting behaves the same way. A base far behind pays its
+<code>migrate</code> once per key, which is never more than building from empty pays -- and
+accepting it is what keeps the base a project has most often, one migration
+behind because a branch added one, from being refused at all.</p>
+<p>What is refused is what migrating cannot fix, raising
+<a class="autorefs autorefs-internal" title="UnusableBase" href="../reference/#django_data_shape.databases.unusable_base.UnusableBase"><code>UnusableBase</code></a> before
+anything is created, with the one exception marked, and naming the base:</p>
+<ul>
+<li><strong>ahead</strong> -- the base records an applied migration of an installed app that no
+  migration on disk is or replaces. Of the histories a base can record, this is
+  the one migrating cannot bring to the checkout's schema: it moves only
+  forward, so whatever those migrations did stays in the copy, and a branch
+  migration that adds only an index would otherwise build silently and skew plan
+  assertions. The
+  message names up to three of them and gives two remedies, because the two
+  usual causes need opposite ones. Rows left behind by squashed migrations whose
+  files were deleted after the squash's <code>replaces</code> was removed are pruned with
+  <code>manage.py migrate &lt;app&gt; --prune</code> against the base (Django 4.1 and later). A
+  migration from another branch is undone by migrating the base back from a
+  checkout that has it, or by recreating the base -- pruning its row would leave
+  its schema in place and only silence the refusal. <code>--prune</code> declines to run
+  while a squash on disk still lists, in its <code>replaces</code>, a migration the base
+  records as applied and that is gone from disk -- from Django 5.1 one of the
+  app being pruned, and up to 5.0 one of any app -- so where that holds the
+  message names the squash and says to finish it first, by running <code>migrate</code>
+  against the base so that it is recorded as applied and then removing its
+  <code>replaces</code>, which makes it an ordinary migration, and prune after. Where it
+  does not hold, the message says nothing about squashes, because pruning
+  works as it is and removing <code>replaces</code> from a squash whose replaced files
+  are still on disk would leave the app with two leaf migrations.</li>
+<li><strong>a squash applied in part, with its replaced files deleted</strong> -- the base
+  records some of the migrations a squash on disk replaces, and one it has yet
+  to apply is no longer on disk. Django runs a squash only when all or none of
+  what it replaces is applied, and otherwise runs the replaced migrations
+  themselves, so with one of those files gone neither runs and the template
+  would silently lack what they do. Migrate the base from a checkout that
+  still has the replaced migrations, or recreate it. A squash applied in part
+  whose replaced files are still there is not refused: Django finishes it one
+  replaced migration at a time. Which squashes Django set aside is read off
+  the graph Django's loader builds, on every version, rather than worked out
+  again from what each squash lists. From Django 6.0 a squash can replace
+  another squash, and Django judges "in part" over everything the two come
+  down to, so a squash of a squash is refused when the base applied some of
+  what the inner one replaces and a migration after it is gone from disk.</li>
+<li><strong>tables with no record of their migrations</strong> -- the base holds the tables of
+  an app with migrations and records no applied migration for that app, so
+  <code>migrate</code> would create them again and fail on the first. It is judged app by
+  app. A base with no <code>django_migrations</code> table is the whole-database form; a
+  base restored from <code>pg_dump --schema-only</code> is the commonest, because the
+  table comes back with none of its rows; and a base made while an app had no
+  migrations is the one-app form, once the app gains them. Restore the rows of
+  <code>django_migrations</code> with the schema, or recreate the base with <code>migrate</code>. An
+  empty database holds none of those tables and is migrated in full; the tables
+  of an app without migrations do not count, because <code>run_syncdb</code> records
+  nothing for them, and nor do those of an app whose migrations package holds
+  no migration yet, which <code>migrate</code> leaves alone. One history is refused
+  although <code>migrate</code> would accept it: an app whose migrations would create
+  nothing when applied, such as a <code>0001_initial</code> holding only
+  <code>SeparateDatabaseAndState</code> state operations, because telling it apart would
+  mean reading what each operation does to the database.</li>
+<li><strong>a reference into a rebuilt table</strong> -- something in the base outside the
+  tables being rebuilt depends on one of them: a foreign key or a view. Those tables are dropped in one statement without <code>CASCADE</code>,
+  because <code>CASCADE</code> would remove the reference silently, <code>run_syncdb</code> would not
+  put it back, and the template would match neither the base nor one built from
+  empty. So PostgreSQL refuses the drop, and the refusal is raised as
+  <code>UnusableBase</code> naming the base and the object in the way. This one is raised
+  from the copy rather than before it, since only the copy can find it, and the
+  partial is dropped with it. Drop the reference in the base or recreate it
+  without one. Django does let a migration of an app with migrations point at
+  an app without them, and in that project no base can be started from until
+  the app pointed at has migrations of its own; build from empty instead.</li>
+<li><strong>a rebuilt table the connecting role may not drop</strong> -- <code>DROP TABLE</code> needs
+  ownership, and the copy keeps every owner the base gave. PostgreSQL lets a
+  table's owner, its schema's owner or a superuser drop it, and counts a role
+  that inherits an owner's privileges as that owner; a role that is none of
+  those is refused with <code>UnusableBase</code> naming the tables and their owners,
+  rather than with the <code>ProgrammingError</code> PostgreSQL raises for the first of
+  them. Connect as the owner or a member of it that inherits its privileges,
+  reassign the tables in the base with <code>ALTER TABLE ... OWNER TO</code>, or build
+  from empty. This one is raised from the copy too, and the partial is
+  dropped with it, because only the copy can answer it: the role that makes
+  the copy owns it, and a database's owner holds the privileges of
+  <code>pg_database_owner</code>, which owns the <code>public</code> schema of every database made
+  from PostgreSQL 15's own template. A role owning none of those tables can
+  therefore still drop them from its own copy, and is not refused.</li>
+<li><strong>missing</strong> -- no database by that name exists.</li>
+<li><strong>closed</strong> -- the database does not accept connections (<code>ALLOW_CONNECTIONS
+  false</code>). A base is connected to before it is copied, to read which migrations
+  it has applied.</li>
+<li><strong>a template</strong> -- a database named <code>data_shape_</code> and a sixteen-character
+  digest, with or without the <code>__partial</code> suffix a build works under, which
+  this package made. A template holds a shape's rows under a name keyed for
+  that shape, so it is never a base, whether or not connections to it have been
+  turned back on. A database of your own that merely starts with <code>data_shape_</code>
+  is a base like any other.</li>
+<li><strong>a double quote in the name</strong> -- Django quotes a database name by wrapping it
+  in double quotes, passes one that is already wrapped through unchanged and
+  escapes nothing inside it, so the database checked and the database copied
+  could be two different ones.</li>
+</ul>
+<p>Two kinds of row are not ahead. A squash whose replaced files were deleted
+leaves their rows behind, and they are not ahead while the squash still lists
+them in its <code>replaces</code> -- once all of them are applied; a squash applied in part
+is the case above. And a row for an app that is no longer installed
+describes nothing the checkout's models use, so it is ignored; its tables, if
+any are left, are carried like any other table the shape does not declare. The
+rows a squash of a squash leaves are a different matter: once only the outer
+squash is on disk, the migrations the inner one replaced are listed by nothing
+on disk, so their rows read as ahead although Django counts the base as
+migrated. The outer squash lists the inner one and the migration after it,
+both applied and both gone from disk, so <code>--prune</code> declines over it, and this is
+the case the ahead message's advice to finish the squash first is for.</p>
+<p>The base is checked on every call, a cache hit included, because its oid is part
+of the key. That is also what makes refreshing a base safe: dropping and
+recreating it, which is how one restored from a dump is usually updated, gives
+it a new oid and so a new template. The dump has to carry the rows of
+<code>django_migrations</code> as well as the schema; <code>pg_dump --schema-only</code> alone
+restores a base that is refused, as above.</p>
+<p>Whatever else the base holds, outside the tables being rebuilt, becomes
+template content, which is what lets the base carry reference data the
+shape does not declare. Rows in a table the shape
+<em>does</em> declare are refused by the build's emptiness check as they would be
+anywhere, with a <code>ShapeNotEmpty</code> message that names the base as one place they
+come from, except in a table with <code>Disjoint</code> keys, which is exempt from it.</p>
+<p>The base must have nothing attached to it while the template is copied -- the
+same rule as for cloning a template, and for the same reason. This process's own
+connection is closed first, so a project whose test database is the base can
+pass it as one.</p>
 <h3 id="what-it-does-not-support">What it does not support<a class="headerlink" href="#what-it-does-not-support" title="Permanent link">&para;</a></h3>
 <ul>
 <li><strong>Anything but PostgreSQL.</strong> <code>CREATE DATABASE ... TEMPLATE</code> has no equivalent
@@ -1031,11 +1240,46 @@ deciding whether the database you have is the one you want, and the template
   that survives is ever <em>wrong</em>, only unused, and dropping one on a guess would
   mean deleting a database because this package stopped recognising its name.
   They are all named <code>data_shape_</code> followed by a digest, and
-  <a class="autorefs autorefs-internal" title="drop_database" href="../reference/#django_data_shape.drop_database.drop_database"><code>drop_database</code></a> removes one.</li>
+  <a class="autorefs autorefs-internal" title="drop_database" href="../reference/#django_data_shape.databases.drop_database.drop_database"><code>drop_database</code></a> removes one.</li>
 <li><strong>A <code>RunSQL</code> edited inside a migration that already exists.</strong> The key covers
   every migration's name and every model's fields, so ordinary schema changes
   move it; editing the body of a migration that has already been created changes
   neither. Drop the template by hand when that happens.</li>
+<li><strong>A migration regenerated under a name a base has already applied.</strong> With a
+  base, an edited migration goes one step further, and it is a case nothing can
+  detect: <code>migrate</code> reads the name as applied and skips it, so
+  the copy keeps the version the base ran, and a template rebuilt from the same
+  base would keep it again. Recreate the base, which gives it a new oid and so a
+  new template.</li>
+<li><strong>What a migration did to a rebuilt table.</strong> A migration of an app with
+  migrations can run SQL against a table of an app without them -- an index, a
+  trigger, a policy, a grant or a comment. A base has applied it, so when the
+  copy rebuilds that table what the migration made is lost, and the migration is
+  never run again; nothing in the copy says which index or trigger came from
+  where, so this is stated rather than detected. Recreating the base does not
+  help, because a recreated base has applied the migration too. Build that
+  template from empty, with <code>base=None</code>: there <code>run_syncdb</code> makes the table
+  before the migration runs.</li>
+<li><strong>Rows changed in a base in place.</strong> The key covers a base's name and oid,
+  and the schema any accepted base migrates forward to; changing the rows it
+  holds, by hand or by migrating the base, neither of which moves its name or
+  oid, changes none of them, so the template built from the old rows is still
+  the one asked for. Drop it with <code>drop_database</code> when that happens, or
+  recreate the base rather than changing it.</li>
+<li><strong>A base ahead of the migrations on disk.</strong> It is refused with the remedies,
+  as above, rather than migrated back: the migrations that would undo it are not
+  in this checkout.</li>
+<li><strong>A database name holding a double quote.</strong> Django quotes a database name by
+  wrapping it in double quotes, passes one that is already wrapped through
+  unchanged and escapes nothing inside it, so the database a statement names
+  could differ from the one the same string names as a value -- a lookup, or a
+  connection's <code>NAME</code>. <code>drop_database</code> looks a name up and then drops it, so
+  given <code>'"x"'</code> it would report nothing there and drop <code>x</code>. Both
+  <a class="autorefs autorefs-internal" title="drop_database" href="../reference/#django_data_shape.databases.drop_database.drop_database"><code>drop_database</code></a> and
+  <a class="autorefs autorefs-internal" title="clone_database" href="../reference/#django_data_shape.databases.clone_database.clone_database"><code>clone_database</code></a>
+  raise <code>ValueError</code> for such a name, either of <code>clone_database</code>'s two, before
+  any statement; a base raises <code>UnusableBase</code>, as above. No name this package
+  makes holds one.</li>
 </ul>
 <p>Parallel runs <em>are</em> supported. Under <code>pytest-xdist</code> every worker asks for the
 same template at once; the first takes a PostgreSQL advisory lock on the digest
@@ -1044,7 +1288,7 @@ package at all -- PostgreSQL handles concurrent copies of one source itself.</p>
 <p>Connections to a finished template are turned off (<code>ALLOW_CONNECTIONS false</code>),
 because the one failure mode of the whole mechanism is PostgreSQL refusing to
 copy a database something is attached to. To look inside one:</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>ALTER DATABASE data_shape_abc123 ALLOW_CONNECTIONS true
+<div class="language-text highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>ALTER DATABASE data_shape_abc123 ALLOW_CONNECTIONS true
 </span></code></pre></div>
 
 
