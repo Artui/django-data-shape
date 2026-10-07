@@ -34,21 +34,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   where the template cannot end up with the checkout's schema, since a branch
   migration that adds only an index would otherwise build silently and skew
   plan assertions. The rows a squash leaves behind while it still lists them in
-  `replaces`, and the rows of an app that is no longer installed, are not
-  ahead. The message names up to three migrations and both remedies:
-  `manage.py migrate <app> --prune` for rows left by squashed migrations deleted
-  after their squash's `replaces` was removed, and migrating the base back or
-  recreating it for a migration from another branch. A base that does not
-  exist, one that does not accept connections, a template this package made,
-  and a name holding a double quote -- which Django's quoting cannot carry
-  intact, so the database checked and the database copied could differ -- are
-  each refused by name rather than failing inside Django or the server.
+  `replaces`, once all of them are applied, and the rows of an app that is no
+  longer installed, are not ahead. The message names up to three migrations
+  and both remedies: `manage.py migrate <app> --prune` for rows left by
+  squashed migrations deleted after their squash's `replaces` was removed, and
+  migrating the base back or recreating it for a migration from another
+  branch. Two histories `migrate` would mishandle are refused too: a squash
+  applied to the base only in part, when a replaced migration it has yet to
+  apply is gone from disk -- Django then runs neither the squash nor the rest
+  of what it replaces, so the template would silently lack them -- and a base
+  with no `django_migrations` table that holds the tables of an app with
+  migrations, which `migrate` would try to create again. A base that does not
+  exist, one that does not accept connections, a name holding a double quote
+  -- which Django's quoting cannot carry intact, so the database checked and
+  the database copied could differ -- and a template this package made or the
+  partial of one are each refused by name rather than failing inside Django or
+  the server. Only a name the package generates counts as a template, so a
+  database of your own whose name starts `data_shape_` is not mistaken for one.
 
   The key also takes the base's name and its database oid, so dropping and
   recreating a base -- the usual way one restored from a schema dump is
   refreshed -- is a new template. The base is checked on a cache hit too. Rows
-  the base holds become template content; editing them in place, with no
-  migration and no recreate, is not seen by the key, and is stated beside the
+  the base holds become template content; changing them in place, by hand or
+  by migrating the base, neither of which moves its name or oid, is not seen
+  by the key, and is stated beside the
   existing `RunSQL` gap with the same remedy, `drop_database`. The process's own
   connection is closed before the copy, so a project whose test database is the
   base can pass it as one.

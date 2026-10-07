@@ -220,6 +220,11 @@ def test_the_pytest_page_quotes_the_message_it_raises() -> None:
     assert " ".join(f"{_ORDERS} already holds rows{quoted}".split()) == " ".join(
         str(refused.value).split()
     )
+    # The equality holds the page to the message and not the message to the
+    # truth: restoring the old claim in both places keeps them equal. A scaled
+    # world empties its declared tables, so it builds over a session world's
+    # rows, and the message must not say otherwise.
+    assert "cannot build over them" not in " ".join(str(refused.value).split())
 
 
 def test_a_failed_build_leaves_no_table_behind() -> None:

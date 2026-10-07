@@ -4,11 +4,15 @@ from __future__ import annotations
 
 
 class UnusableBase(Exception):
-    """A base database cannot be started from, or is ahead of the migrations on disk.
+    """A base database cannot be started from, or holds a history migrating cannot repair.
 
     Cannot be started from: it is missing, it refuses connections, it is a
     template this package made, or its name holds a double quote, which
-    Django's quoting cannot carry intact.
+    Django's quoting cannot carry intact. A history migrating cannot repair: it
+    is ahead of the migrations on disk; it has applied part of a squash whose
+    remaining replaced migrations are gone from disk, so neither would run; or
+    it has no ``django_migrations`` table yet holds the tables of an app with
+    migrations, which ``migrate`` would try to create again.
 
     Its own type rather than :class:`~django_data_shape.declaration.invalid_shape.InvalidShape`
     because nothing is wrong with the declaration: the same shape builds from

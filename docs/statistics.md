@@ -305,13 +305,31 @@ anything is created and naming the base:
   migration from another branch is undone by migrating the base back from a
   checkout that has it, or by recreating the base -- pruning its row would leave
   its schema in place and only silence the refusal.
+- **a squash applied in part, with its replaced files deleted** -- the base
+  records some of the migrations a squash on disk replaces, and one it has yet
+  to apply is no longer on disk. Django runs a squash only when all or none of
+  what it replaces is applied, and otherwise runs the replaced migrations
+  themselves, so with one of those files gone neither runs and the template
+  would silently lack what they do. Migrate the base from a checkout that
+  still has the replaced migrations, or recreate it. A squash applied in part
+  whose replaced files are still there is not refused: Django finishes it one
+  replaced migration at a time.
+- **tables with no `django_migrations`** -- the base holds the tables of an app
+  with migrations but nothing records which migrations made them, so `migrate`
+  would create them again and fail on the first. A base with no
+  `django_migrations` table is migrated in full only when it holds none of
+  those tables, as an empty database does; the tables of an app without
+  migrations do not count, because `run_syncdb` records nothing for them.
 - **missing** -- no database by that name exists.
 - **closed** -- the database does not accept connections (`ALLOW_CONNECTIONS
   false`). A base is connected to before it is copied, to read which migrations
   it has applied.
-- **a template** -- a database named `data_shape_...`, which this package made.
-  A template holds a shape's rows under a name keyed for that shape, so it is
-  never a base, whether or not connections to it have been turned back on.
+- **a template** -- a database named `data_shape_` and a sixteen-character
+  digest, with or without the `__partial` suffix a build works under, which
+  this package made. A template holds a shape's rows under a name keyed for
+  that shape, so it is never a base, whether or not connections to it have been
+  turned back on. A database of your own that merely starts with `data_shape_`
+  is a base like any other.
 - **a double quote in the name** -- Django quotes a database name by wrapping it
   in double quotes, passes one that is already wrapped through unchanged and
   escapes nothing inside it, so the database checked and the database copied
@@ -319,7 +337,8 @@ anything is created and naming the base:
 
 Two kinds of row are not ahead. A squash whose replaced files were deleted
 leaves their rows behind, and they are not ahead while the squash still lists
-them in its `replaces`. And a row for an app that is no longer installed
+them in its `replaces` -- once all of them are applied; a squash applied in part
+is the case above. And a row for an app that is no longer installed
 describes nothing the checkout's models use, so it is ignored; its tables, if
 any are left, are carried like any other table the shape does not declare.
 
@@ -361,11 +380,12 @@ pass it as one.
   every migration's name and every model's fields, so ordinary schema changes
   move it; editing the body of a migration that has already been created changes
   neither. Drop the template by hand when that happens.
-- **Rows edited in a base in place.** The key covers a base's name and oid, and
-  the schema any accepted base migrates forward to; changing the rows it holds
-  with no migration and no recreate changes none of them, so the template built from the
-  old rows is still the one asked for. Drop it with `drop_database` when that
-  happens, or recreate the base rather than editing it.
+- **Rows changed in a base in place.** The key covers a base's name and oid,
+  and the schema any accepted base migrates forward to; changing the rows it
+  holds, by hand or by migrating the base, neither of which moves its name or
+  oid, changes none of them, so the template built from the old rows is still
+  the one asked for. Drop it with `drop_database` when that happens, or
+  recreate the base rather than changing it.
 - **A base ahead of the migrations on disk.** It is refused with the remedies,
   as above, rather than migrated back: the migrations that would undo it are not
   in this checkout.

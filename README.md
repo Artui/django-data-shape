@@ -229,7 +229,8 @@ A project with a long migration history can start templates from a database it
 already keeps migrated, `template_database(shape, base="myproject_base")`, rather
 than replaying every migration into an empty one. A base behind the migrations on
 disk is migrated forward in the copy, which always ends at the checkout's schema;
-only a base ahead of them, which no forward migration can fix, is refused.
+only a history no forward migration can fix, such as a base ahead of them, is
+refused.
 A shape holding a `Derived` or a `KeyFunction` is refused rather than hashed --
 there is no honest digest of a callable, and every way of guessing one agrees
 while the data has changed. See

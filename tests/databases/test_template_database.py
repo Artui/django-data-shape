@@ -8,7 +8,7 @@ from collections.abc import Iterator
 import psycopg
 import pytest
 from django.core.management import call_command
-from django.db import connection, connections, transaction
+from django.db import connection, connections, migrations, transaction
 from django.db.migrations import Migration
 from django.db.migrations.loader import MigrationLoader
 from django.db.transaction import TransactionManagementError
@@ -42,7 +42,15 @@ from django_data_shape.databases.template_database import (
     _schema_digest,
 )
 from django_data_shape.version import __version__
-from tests.testapp.models import Catalogue, Event, EventSession, SlugPk, Template, TemplateSession
+from tests.testapp.models import (
+    Catalogue,
+    Event,
+    EventSession,
+    SlugPk,
+    Subscriber,
+    Template,
+    TemplateSession,
+)
 
 # transaction=True throughout, and it is a requirement rather than a habit here:
 # filling a template means pointing the connection at another database and
@@ -670,9 +678,15 @@ def test_migrating_the_base_forward_in_place_asks_for_the_same_template(
     _migrate(base)
     caught_up = template_database(shape, base=base)
     temporary_databases.append(caught_up)
+    target = f"{caught_up}_end"
+    temporary_databases.append(target)
+    clone_database(caught_up, target)
 
     assert _rows_in(base, _FIRST_NAME_WIDTH) == [(150,)]
     assert caught_up == behind
+    # And the template under that name does hold the schema the caught-up base
+    # has, which is the half of the claim the names alone cannot show.
+    assert _rows_in(target, _FIRST_NAME_WIDTH) == [(150,)]
 
 
 def test_an_empty_base_is_migrated_in_full(temporary_databases: list[str]) -> None:
@@ -817,6 +831,39 @@ def test_a_template_is_never_a_base(temporary_databases: list[str]) -> None:
         temporary_databases.append(template_database(_shape(rows=40, seed=32), base=template))
 
 
+def test_a_partial_this_package_left_is_never_a_base(temporary_databases: list[str]) -> None:
+    # A build killed between creating its working database and renaming it
+    # leaves one under the template's name and the partial suffix, and it is
+    # this package's as much as a finished template is.
+    partial = f"{PREFIX}{secrets.token_hex(8)}__partial"
+    with connection._nodb_cursor() as cursor:
+        cursor.execute(f"CREATE DATABASE {connection.ops.quote_name(partial)}")
+    temporary_databases.append(partial)
+
+    with pytest.raises(UnusableBase, match="never a base"):
+        temporary_databases.append(template_database(_shape(rows=40, seed=40), base=partial))
+
+
+@pytest.mark.parametrize("pattern", ["data_shape_userdb_{}", "data_shape_{}"])
+def test_a_database_only_named_like_a_template_is_not_refused_as_one(
+    temporary_databases: list[str], pattern: str
+) -> None:
+    # Only a name this package generates is its template: the prefix, a digest
+    # exactly as long as the key's, and the partial suffix or nothing. A user's
+    # database sharing the prefix -- including one whose suffix happens to be
+    # hexadecimal, but of another length -- is a base like any other, here an
+    # empty one, migrated in full.
+    base = pattern.format(secrets.token_hex(4))
+    with connection._nodb_cursor() as cursor:
+        cursor.execute(f"CREATE DATABASE {connection.ops.quote_name(base)}")
+    temporary_databases.append(base)
+
+    name = template_database(_shape(rows=40, seed=41), base=base)
+    temporary_databases.append(name)
+
+    assert _oid(name) is not None
+
+
 def test_a_base_whose_name_holds_a_double_quote_is_refused(
     temporary_databases: list[str],
 ) -> None:
@@ -892,36 +939,175 @@ def test_a_connection_already_on_the_base_does_not_stop_the_copy(
     assert _oid(name) is not None
 
 
+def _squash_on_disk(monkeypatch: pytest.MonkeyPatch, *, replaced_files: bool = False) -> None:
+    """A squash of two contenttypes migrations, added to what the loader reads from disk.
+
+    No installed app ships one, so it is made here -- a real Migration, shaped as
+    squashmigrations writes it -- and it creates a table, so whether a template
+    ran it can be read back. With ``replaced_files`` the two migrations it
+    replaces are on disk beside it, as they are until somebody deletes them, and
+    the second creates the same table, because the squash is what they fold into.
+    """
+    marker = migrations.RunSQL("CREATE TABLE squash_marker (id int)", migrations.RunSQL.noop)
+    squash = Migration("0003_squashed_0004", "contenttypes")
+    squash.replaces = [("contenttypes", "0003_folded"), ("contenttypes", "0004_folded")]
+    squash.dependencies = [("contenttypes", "0002_remove_content_type_name")]
+    squash.operations = [marker]
+    added = {("contenttypes", squash.name): squash}
+    if replaced_files:
+        first = Migration("0003_folded", "contenttypes")
+        first.dependencies = [("contenttypes", "0002_remove_content_type_name")]
+        second = Migration("0004_folded", "contenttypes")
+        second.dependencies = [("contenttypes", "0003_folded")]
+        second.operations = [marker]
+        added |= {("contenttypes", first.name): first, ("contenttypes", second.name): second}
+    load_disk = MigrationLoader.load_disk
+
+    def load_disk_with_the_squash(loader: MigrationLoader) -> None:
+        load_disk(loader)
+        loader.disk_migrations.update(added)
+
+    monkeypatch.setattr(MigrationLoader, "load_disk", load_disk_with_the_squash)
+
+
+_SQUASH_RAN = "SELECT to_regclass('squash_marker') IS NOT NULL"
+
+
 def test_a_squash_whose_replaced_files_were_deleted_does_not_make_a_base_ahead(
     temporary_databases: list[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # The state a squash passes through on its way to being an ordinary
     # migration: the replaced files are gone, the squash still lists them in
     # ``replaces``, and every database migrated before the squash still records
-    # them. No installed app ships one, so the squash is added to what the
-    # loader reads from disk -- a real Migration, shaped as squashmigrations
-    # writes it -- and the base records the two migrations it replaced.
-    squash = Migration("0003_squashed_0004", "contenttypes")
-    squash.replaces = [("contenttypes", "0003_gone"), ("contenttypes", "0004_gone")]
-    squash.dependencies = [("contenttypes", "0002_remove_content_type_name")]
-    load_disk = MigrationLoader.load_disk
-
-    def load_disk_with_the_squash(loader: MigrationLoader) -> None:
-        load_disk(loader)
-        loader.disk_migrations[("contenttypes", squash.name)] = squash
-
-    monkeypatch.setattr(MigrationLoader, "load_disk", load_disk_with_the_squash)
+    # them -- both of them, so the squash counts as applied.
+    _squash_on_disk(monkeypatch)
     base = _base(temporary_databases)
     _execute_in(
         base,
         "INSERT INTO django_migrations (app, name, applied) VALUES "
-        "('contenttypes', '0003_gone', now()), ('contenttypes', '0004_gone', now())",
+        "('contenttypes', '0003_folded', now()), ('contenttypes', '0004_folded', now())",
     )
 
     name = template_database(_shape(rows=40, seed=26), base=base)
     temporary_databases.append(name)
 
     assert name.startswith(PREFIX)
+
+
+def test_a_base_behind_a_squash_is_migrated_through_it(
+    temporary_databases: list[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # None of what the squash replaces is applied, so Django runs the squash
+    # itself, and the replaced files being gone does not matter. Holds that a
+    # squash is refused only when some of it is applied.
+    _squash_on_disk(monkeypatch)
+    base = _base(temporary_databases)
+
+    name = template_database(_shape(rows=40, seed=35), base=base)
+    temporary_databases.append(name)
+    target = f"{name}_end"
+    temporary_databases.append(target)
+    clone_database(name, target)
+
+    assert _rows_in(target, _SQUASH_RAN) == [(True,)]
+
+
+def test_a_squash_applied_in_part_is_finished_by_the_replaced_files_still_on_disk(
+    temporary_databases: list[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Django sets a partly applied squash aside and runs the rest of what it
+    # replaces one migration at a time, which ends where the squash would have.
+    # Holds that a partly applied squash is refused only when a migration it
+    # still needs is missing from disk.
+    _squash_on_disk(monkeypatch, replaced_files=True)
+    base = _base(temporary_databases)
+    _execute_in(
+        base,
+        "INSERT INTO django_migrations (app, name, applied) "
+        "VALUES ('contenttypes', '0003_folded', now())",
+    )
+
+    name = template_database(_shape(rows=40, seed=36), base=base)
+    temporary_databases.append(name)
+    target = f"{name}_end"
+    temporary_databases.append(target)
+    clone_database(name, target)
+
+    assert _rows_in(target, _SQUASH_RAN) == [(True,)]
+    assert _rows_in(
+        target,
+        "SELECT count(*) FROM django_migrations "
+        "WHERE app = 'contenttypes' AND name = '0004_folded'",
+    ) == [(1,)]
+
+
+def test_a_squash_applied_in_part_with_its_replaced_files_deleted_is_refused(
+    temporary_databases: list[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Django runs a squash only when all or none of what it replaces is applied,
+    # and otherwise runs the replaced migrations themselves. With their files
+    # gone neither runs: the copy was built without the squash's table under a
+    # key that names the squash, and from empty the same key would have it.
+    _squash_on_disk(monkeypatch)
+    base = _base(temporary_databases)
+    _execute_in(
+        base,
+        "INSERT INTO django_migrations (app, name, applied) "
+        "VALUES ('contenttypes', '0003_folded', now())",
+    )
+    before = _templates_on_the_server()
+
+    with pytest.raises(UnusableBase) as refused:
+        temporary_databases.append(template_database(_shape(rows=40, seed=37), base=base))
+
+    message = str(refused.value)
+    assert base in message
+    assert "contenttypes.0003_squashed_0004" in message
+    assert "contenttypes.0004_folded" in message
+    assert "recreate it" in message
+    # The applied half is replaced by a squash on disk, so it is not ahead, and
+    # the message is this check's rather than that one's.
+    assert "ahead" not in message
+    assert _templates_on_the_server() == before
+
+
+def test_a_base_with_tables_but_no_django_migrations_is_refused(
+    temporary_databases: list[str],
+) -> None:
+    # Nothing records which migrations made its tables, so migrate would create
+    # them again and fail on the first with "already exists" from inside the
+    # migration executor, naming a table rather than the base.
+    base = _base(temporary_databases)
+    _execute_in(base, "DROP TABLE django_migrations")
+    before = _templates_on_the_server()
+
+    with pytest.raises(UnusableBase) as refused:
+        temporary_databases.append(template_database(_shape(rows=40, seed=38), base=base))
+
+    message = str(refused.value)
+    assert base in message
+    assert "django_migrations" in message
+    assert "auth_group" in message
+    assert _templates_on_the_server() == before
+
+
+def test_but_a_table_of_an_app_without_migrations_does_not_count(
+    temporary_databases: list[str],
+) -> None:
+    # migrate --run-syncdb makes those tables with no django_migrations row,
+    # and a project with no migrated app makes no django_migrations table at
+    # all, so a base holding only them is one migrate could have produced.
+    # Holds that only the tables of apps with migrations refuse a base.
+    base = f"shape_base_{secrets.token_hex(4)}"
+    with connection._nodb_cursor() as cursor:
+        cursor.execute(f"CREATE DATABASE {connection.ops.quote_name(base)}")
+    temporary_databases.append(base)
+    _execute_in(base, f"CREATE TABLE {Subscriber._meta.db_table} (id int)")
+
+    name = template_database(_shape(rows=40, seed=39), base=base)
+    temporary_databases.append(name)
+
+    assert _oid(name) is not None
 
 
 # The ahead check's arithmetic, apart from any database, because the case that
