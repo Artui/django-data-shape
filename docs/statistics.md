@@ -254,7 +254,7 @@ from django.db import connections
 
 from django_data_shape import clone_database, drop_database, template_database
 
-BASE = "myproject_base"  # a database you keep migrated to the migrations on disk
+BASE = "myproject_base"  # a database you keep migrated
 
 
 @pytest.fixture(scope="session")
@@ -272,29 +272,46 @@ def django_db_setup(django_test_environment, django_db_modify_db_settings, djang
         drop_database(target)
 ```
 
-`migrate` still runs over the copy. On an accepted base it finds nothing to
-apply, and it is still what creates the tables of an app with no migrations and
-what fires `post_migrate`, so a template from a base is filled exactly as one
-from empty is.
+`migrate` still runs over the copy. It applies whatever the base has yet to --
+nothing, on a base kept up to date -- and it is still what creates the tables of
+an app with no migrations and what fires `post_migrate`, so a template from a
+base is filled exactly as one from empty is.
 
-**A base whose migrations are not the ones on disk is refused, never migrated
-forward.** The migrations on disk are already part of the key; refusing every
-base they do not describe is what lets them describe the base's schema too, so
-the key stays a statement about what the template holds. It also means a
-template never quietly re-runs a long `migrate` because a branch added one
-migration. There are three refusals, each raising
+**A base behind the migrations on disk is migrated forward; only one ahead of
+them is refused.** Migrating forward always ends at the checkout's schema,
+whatever prefix of the history the base holds, so the key stays sound as it is:
+everything it absorbed before, plus the base's name and oid. The base's applied
+migrations do not need to enter it. Migrating the base itself forward later
+leaves its oid alone, so the same name is asked for, and the template under it is
+the one the copy's own forward migration already gave. Django's own PostgreSQL
+`TEST: {"TEMPLATE": ...}` setting behaves the same way. A base far behind pays its
+`migrate` once per key, which is never more than building from empty pays -- and
+accepting it is what keeps the base a project has most often, one migration
+behind because a branch added one, from being refused at all.
+
+What is refused is what migrating cannot fix, raising
 [`UnusableBase`][django_data_shape.databases.unusable_base.UnusableBase] before
 anything is created and naming the base:
 
-- **behind** -- a migration on disk is not applied to the base. Migrate the
-  base, which applies only what is new, and ask again.
-- **ahead** -- the base records an applied migration that no migration on disk
-  is or replaces, usually because another branch migrated it. Migrate it back
-  from a checkout that has those migrations, or recreate it. A squash whose
-  replaced files were deleted is not ahead while the squash still lists them in
-  its `replaces`; once that attribute is removed too, their leftover rows in
-  `django_migrations` are, and deleting those rows is the remedy.
+- **ahead** -- the base records an applied migration of an installed app that no
+  migration on disk is or replaces. This is the one case where the template
+  cannot end up with the checkout's schema: migrating moves only forward, so
+  whatever those migrations did stays in the copy, and a branch migration that
+  adds only an index would otherwise build silently and skew plan assertions. The
+  message names up to three of them and gives two remedies, because the two
+  usual causes need opposite ones. Rows left behind by squashed migrations whose
+  files were deleted after the squash's `replaces` was removed are pruned with
+  `manage.py migrate <app> --prune` against the base (Django 4.1 and later). A
+  migration from another branch is undone by migrating the base back from a
+  checkout that has it, or by recreating the base -- pruning its row would leave
+  its schema in place and only silence the refusal.
 - **missing** -- no database by that name exists.
+
+Two kinds of row are not ahead. A squash whose replaced files were deleted
+leaves their rows behind, and they are not ahead while the squash still lists
+them in its `replaces`. And a row for an app that is no longer installed
+describes nothing the checkout's models use, so it is ignored; its tables, if
+any are left, are carried like any other table the shape does not declare.
 
 The base is checked on every call, a cache hit included, because its oid is part
 of the key. That is also what makes refreshing a base safe: dropping and
@@ -333,13 +350,14 @@ pass it as one.
   every migration's name and every model's fields, so ordinary schema changes
   move it; editing the body of a migration that has already been created changes
   neither. Drop the template by hand when that happens.
-- **Rows edited in a base in place.** The key covers a base's name and oid and,
-  through the refusal, its migrations; changing the rows it holds with no
-  migration and no recreate changes none of them, so the template built from the
+- **Rows edited in a base in place.** The key covers a base's name and oid, and
+  the schema any accepted base migrates forward to; changing the rows it holds
+  with no migration and no recreate changes none of them, so the template built from the
   old rows is still the one asked for. Drop it with `drop_database` when that
   happens, or recreate the base rather than editing it.
-- **Migrating a base.** A base behind or ahead of the migrations on disk is
-  refused with the remedy, as above, rather than brought up to date.
+- **A base ahead of the migrations on disk.** It is refused with the remedies,
+  as above, rather than migrated back: the migrations that would undo it are not
+  in this checkout.
 
 Parallel runs *are* supported. Under `pytest-xdist` every worker asks for the
 same template at once; the first takes a PostgreSQL advisory lock on the digest

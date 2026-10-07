@@ -10,7 +10,6 @@ from django.apps import apps
 from django.conf import settings
 from django.core.management import call_command
 from django.db import DEFAULT_DB_ALIAS, connections
-from django.db.migrations.executor import MigrationExecutor
 from django.db.migrations.loader import MigrationLoader
 from django.db.transaction import TransactionManagementError
 
@@ -35,9 +34,9 @@ _PARTIAL = "__partial"
 
 _FORMAT = "django-data-shape template 1"
 
-# How many differing migrations a refused base's message names. Enough to say
-# which app and roughly how far, without pasting a whole history into a
-# traceback when the base is hundreds of migrations out.
+# How many migrations a refused base's message names. Enough to say which app
+# and roughly how far, without pasting a whole history into a traceback when a
+# base is dozens of migrations out.
 _EXAMPLES = 3
 
 # 8 bytes: sixteen hexadecimal characters, so the longest name this produces --
@@ -88,18 +87,33 @@ def template_database(
     empty database that ``migrate`` replays the whole history into -- which on
     a project with hundreds of migrations is most of the cost, and repaid by
     every template a change to the declaration makes. ``migrate`` still runs
-    over the copy, finding nothing to apply, so an app with no migrations gets
-    its tables and ``post_migrate`` fires exactly as it does from empty.
+    over the copy: it applies whatever the base has yet to, creates the tables
+    of an app with no migrations and fires ``post_migrate``, so a template from
+    a base is filled exactly as one from empty is.
 
-    **A base whose migrations are not the ones on disk is refused, never
-    migrated forward**, raising
+    **A base behind the migrations on disk is migrated forward; only one ahead
+    of them is refused.** Migrating forward always ends at this checkout's
+    schema, whatever prefix of the history the base holds, so the key stays
+    sound as it is -- everything listed above, the base's name and oid
+    included -- without the base's applied migrations entering it. Migrating
+    the base itself forward later leaves its oid alone, so it asks for the same
+    name, and the template under that name is the one the copy's own forward
+    migration already gave. Django's own PostgreSQL ``TEST: {"TEMPLATE": ...}``
+    setting behaves the same way. A base far behind pays its ``migrate`` once
+    per key, which is never more than building from empty pays, and accepting
+    it is what keeps the commonest base -- one migration behind, because a
+    branch added one -- from being refused at all.
+
+    Ahead -- an applied migration of an installed app that no migration on disk
+    is or replaces -- raises
     :class:`~django_data_shape.databases.unusable_base.UnusableBase` before
-    anything is created. That is what makes the key sound: the migrations on
-    disk are already part of it, and refusing every other base is what lets
-    them describe the base's schema too. Behind -- a migration on disk not yet
-    applied to it -- and ahead -- an applied migration no migration on disk is
-    or replaces -- are refused separately, each naming a few of the migrations
-    that differ, and so is a base that does not exist. The check runs on every
+    anything is created, naming a few of those migrations and both remedies,
+    and so does a base that does not exist. Ahead is the one case where the
+    template cannot end up with the checkout's schema: migrating moves only
+    forward, so whatever those migrations did stays in the copy, and a branch
+    migration that adds only an index would otherwise build silently and skew
+    plan assertions. Rows for an app that is not installed are ignored, because
+    they describe nothing the checkout's models use. The check runs on every
     call, a cache hit included, because the oid it reads is part of the name.
 
     Whatever else the base holds becomes template content. Rows in a table the
@@ -134,9 +148,9 @@ def template_database(
       it. This process's own connection is closed before the copy, so a project
       whose test database *is* the base can pass it as one; a connection another
       process holds is not something this can close.
-    - **Migrating a base.** A base that is behind or ahead of the migrations on
-      disk is refused with the remedy rather than brought up to date, for the
-      reasons above.
+    - **A base ahead of the migrations on disk.** It is refused with the
+      remedies rather than migrated back, because the migrations that would
+      undo it are not in this checkout, for the reasons above.
     - **Cleaning up after itself.** A template is a cache on a machine, keyed by
       content, so nothing that survives is ever wrong -- only unused. Deleting on
       a guess would mean dropping a database because this package no longer
@@ -241,11 +255,11 @@ def _create(
 def _fill(shape: Shape, connection: Any, database: str, using: str) -> None:
     """Migrate the schema into ``database`` and build the shape there.
 
-    A database copied from an accepted base already has every migration on disk
-    applied, so ``migrate`` finds nothing to run -- and is still run, because it
-    is also what creates the tables of an app with no migrations and what fires
-    ``post_migrate``, so a template from a base is filled exactly as one from
-    empty is.
+    A database copied from a base gets whatever migrations on disk the base has
+    yet to apply -- none, for a base kept up to date -- and ``migrate`` is run
+    either way, because it is also what creates the tables of an app with no
+    migrations and what fires ``post_migrate``, so a template from a base is
+    filled exactly as one from empty is.
 
     Pointing an existing connection at another database by rewriting
     ``settings_dict["NAME"]`` is what Django's own test runner does to create a
@@ -276,15 +290,16 @@ def _fill(shape: Shape, connection: Any, database: str, using: str) -> None:
 
 
 def _base_context(connection: Any, base: str) -> tuple[str, str]:
-    """Refuse a base the migrations on disk do not describe; else what the key takes from it.
+    """Refuse a base no migration can bring to the disk's schema; else what the key takes.
 
     The name and the database's oid. The oid is the part doing the work: a base
     dropped and recreated -- the usual way one restored from a schema dump is
     refreshed -- gets a new one, so the template built from the old base is
     simply not asked for again. A rename re-keys too, which costs a build and is
-    otherwise harmless. The base's *migrations* are not hashed, because they
-    are refused below unless they are the ones on disk, which the key already
-    holds.
+    otherwise harmless. The base's applied migrations are not hashed: a base
+    behind the disk is migrated forward in the copy, which ends at the schema
+    the migrations on disk name and the key already holds, and a base ahead of
+    it is refused below.
 
     Read through ``_nodb_cursor`` rather than the connection itself, because the
     connection may be the very one that is about to be pointed at the base.
@@ -298,39 +313,36 @@ def _base_context(connection: Any, base: str) -> tuple[str, str]:
             "Create and migrate it, or pass base=None to build the template from an empty "
             "database."
         )
-    behind, ahead = _migration_state(connection, base)
-    if behind:
-        raise UnusableBase(
-            f"The base database {base!r} is behind the migrations on disk: {len(behind)} "
-            f"of them are not applied to it, {_examples(behind)}. A template is never "
-            "migrated forward from its base -- replaying the history is what a base exists "
-            "to skip, and the cache key names the schema by the migrations on disk. Migrate "
-            "the base, or recreate it, and ask again."
-        )
+    ahead = _ahead_of_base(connection, base)
     if ahead:
+        prune = " and ".join(
+            f"manage.py migrate {app_label} --prune"
+            for app_label in sorted({app_label for app_label, _name in ahead})
+        )
         raise UnusableBase(
             f"The base database {base!r} is ahead of the migrations on disk: it records "
-            f"{len(ahead)} applied migration(s) that no migration on disk is or replaces, "
-            f"{_examples(ahead)}. Its schema is then something the migrations on disk do "
-            "not describe, and they are what the cache key says a template holds. Migrate "
-            "the base back from a checkout that has those migrations, or recreate it. If "
-            "they were deleted on purpose -- a squash whose replaces attribute has since "
-            "been removed, or an app no longer installed -- delete their rows from the "
-            "base's django_migrations table."
+            f"{len(ahead)} applied migration(s) of installed apps that no migration on disk "
+            f"is or replaces, {_examples(ahead)}. This is the one case where a template "
+            "cannot end up with this checkout's schema: migrating moves only forward, so "
+            "whatever those migrations did stays in the copy, and a branch migration that "
+            "adds only an index would otherwise build silently and skew plan assertions. If "
+            "the rows were left behind by squashed migrations whose files were deleted after "
+            "the squash's replaces attribute was removed, run "
+            f"{prune} against the base. If they come from another branch, migrate the base "
+            "back from a checkout that has them, or recreate it."
         )
     return base, str(row[0])
 
 
-def _migration_state(
-    connection: Any, base: str
-) -> tuple[list[tuple[str, str]], list[tuple[str, str]]]:
-    """What ``base`` has yet to apply, and what it has applied that the disk lacks.
+def _ahead_of_base(connection: Any, base: str) -> list[tuple[str, str]]:
+    """What ``base`` has applied that no migration on disk accounts for.
 
-    Behind is ``migrate``'s own plan over every leaf, read while connected to
-    the base, rather than a comparison of names: the executor already knows
-    when a squash counts as applied and when its replaced migrations do, and a
-    hand-rolled version of that is the kind of code that is right until a
-    project squashes.
+    The applied set is the loader's, read while connected to the base, rather
+    than the raw rows: the loader already knows when a squash counts as
+    applied, and a hand-rolled reading of ``django_migrations`` is the kind of
+    code that is right until a project squashes. A base with no
+    ``django_migrations`` table at all -- an empty database -- reads as having
+    applied nothing, and is migrated in full.
 
     The connection is pointed at the base the way :func:`_fill` points it at a
     partial, and closed before the name goes back, which is also what lets the
@@ -343,13 +355,8 @@ def _migration_state(
     connection.close()
     connection.settings_dict["NAME"] = base
     try:
-        executor = MigrationExecutor(connection)
-        loader = executor.loader
-        behind = [
-            (migration.app_label, migration.name)
-            for migration, _backwards in executor.migration_plan(loader.graph.leaf_nodes())
-        ]
-        ahead = _ahead_of_disk(
+        loader = MigrationLoader(connection)
+        return _ahead_of_disk(
             loader.applied_migrations,
             disk=loader.disk_migrations,
             replaced=[
@@ -357,11 +364,11 @@ def _migration_state(
                 for migration in loader.disk_migrations.values()
                 for app_label, name in migration.replaces
             ],
+            installed={app_config.label for app_config in apps.get_app_configs()},
         )
     finally:
         connection.close()
         connection.settings_dict["NAME"] = original
-    return behind, ahead
 
 
 def _ahead_of_disk(
@@ -369,29 +376,41 @@ def _ahead_of_disk(
     *,
     disk: Iterable[tuple[str, str]],
     replaced: Iterable[tuple[str, str]],
+    installed: Iterable[str],
 ) -> list[tuple[str, str]]:
-    """The applied migrations that are neither on disk nor replaced by one that is.
+    """The applied migrations of installed apps that are neither on disk nor replaced.
 
     The replaced exclusion is what keeps an ordinary squash from refusing a good
     base: once the replaced files are deleted, their records stay behind in
     ``django_migrations``, legitimately, and the squash on disk names them in
-    its ``replaces``.
+    its ``replaces``. The installed one is what keeps a removed app from
+    refusing it: its rows outlive it and describe no table the checkout's
+    models use.
 
     Takes its inputs as arguments rather than reading a loader, for the reason
-    :func:`_schema_digest` does: the exclusion needs a squashed migration on disk
-    to reach through a real base, and as arithmetic it needs nothing. Each
-    condition is held by a test, because a branch gate sees the comprehension's
-    filter as one arc and would stay green with either deleted:
+    :func:`_schema_digest` does: the exclusions need a squashed migration on
+    disk and an app that is gone to reach through a real base, and as
+    arithmetic they need nothing. Each condition is held by a test, because a
+    branch gate sees the comprehension's filter as one arc and would stay green
+    with any of them deleted:
 
     - not on disk: ``test_a_migration_on_disk_is_not_ahead_of_it``, and every
       test that builds from a base;
     - not replaced: ``test_unless_a_migration_on_disk_replaces_it``, and
       ``test_a_squash_whose_replaced_files_were_deleted_does_not_make_a_base_ahead``,
-      which also holds that the replaced names are read off the disk at all.
+      which also holds that the replaced names are read off the disk at all;
+    - installed: ``test_nor_one_recorded_for_an_app_that_is_not_installed``, and
+      ``test_a_row_for_an_app_no_longer_installed_does_not_refuse_the_base``,
+      which also holds that the labels are not simply every label the base
+      records, while ``test_a_base_ahead_of_the_migrations_on_disk_is_refused``
+      holds that the installed apps are among them.
     """
     on_disk = set(disk)
     excused = set(replaced)
-    return sorted(key for key in applied if key not in on_disk and key not in excused)
+    labels = set(installed)
+    return sorted(
+        key for key in applied if key not in on_disk and key not in excused and key[0] in labels
+    )
 
 
 def _examples(migrations: list[tuple[str, str]]) -> str:

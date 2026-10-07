@@ -141,6 +141,23 @@ def _base(made: list[str]) -> str:
     return name
 
 
+def _migrate(database: str, *arguments: str) -> None:
+    """Run ``migrate`` against ``database``, as a project keeping a base would.
+
+    The connection is pointed at it the way the package points one at a
+    partial, and closed on both sides, because PostgreSQL refuses to copy a
+    database anything is attached to and the next step is always a copy.
+    """
+    original = connection.settings_dict["NAME"]
+    connection.close()
+    connection.settings_dict["NAME"] = database
+    try:
+        call_command("migrate", *arguments, interactive=False, verbosity=0)
+    finally:
+        connection.close()
+        connection.settings_dict["NAME"] = original
+
+
 def _templates_on_the_server() -> set[str]:
     with connection.cursor() as cursor:
         cursor.execute("SELECT datname FROM pg_database WHERE datname LIKE %s", [f"{PREFIX}%"])
@@ -540,14 +557,7 @@ def test_migrate_still_runs_over_the_copy(temporary_databases: list[str]) -> Non
     with connection._nodb_cursor() as cursor:
         cursor.execute(f"CREATE DATABASE {connection.ops.quote_name(base)}")
     temporary_databases.append(base)
-    original = connection.settings_dict["NAME"]
-    connection.close()
-    connection.settings_dict["NAME"] = base
-    try:
-        call_command("migrate", interactive=False, verbosity=0)
-    finally:
-        connection.close()
-        connection.settings_dict["NAME"] = original
+    _migrate(base)
     assert _rows_in(base, f"SELECT to_regclass('{Catalogue._meta.db_table}') IS NULL") == [(True,)]
 
     name = template_database(_shape(rows=40, seed=24), base=base)
@@ -601,52 +611,90 @@ def test_what_the_key_absorbs_for_a_base_is_its_name_and_its_oid(
     assert _base_context(connection, base) == (base, str(_oid(base)))
 
 
-def test_a_base_behind_the_migrations_on_disk_is_refused(temporary_databases: list[str]) -> None:
-    # Never migrated forward: replaying the history is what a base exists to
-    # skip, and a template that quietly did it would cost the thirteen minutes
-    # nobody asked for, every time a migration was added.
-    base = _base(temporary_databases)
-    _execute_in(
-        base,
-        "DELETE FROM django_migrations "
-        "WHERE app = 'contenttypes' AND name = '0002_remove_content_type_name'",
-    )
-    before = _templates_on_the_server()
-
-    with pytest.raises(UnusableBase) as refused:
-        template_database(_shape(), base=base)
-
-    message = str(refused.value)
-    assert base in message
-    assert "behind" in message
-    assert "contenttypes.0002_remove_content_type_name" in message
-    assert "migrate" in message
-    assert _templates_on_the_server() == before
+# How wide auth_user.first_name is: 30 before auth's 0012 migration, 150 after
+# it, so a schema that tells a base migrated back from one migrated forward.
+_FIRST_NAME_WIDTH = (
+    "SELECT character_maximum_length FROM information_schema.columns "
+    "WHERE table_name = 'auth_user' AND column_name = 'first_name'"
+)
 
 
-def test_a_base_that_goes_stale_is_refused_with_its_template_already_built(
+def test_a_base_behind_the_migrations_on_disk_is_migrated_forward(
     temporary_databases: list[str],
 ) -> None:
-    # A stale base keeps its name and its oid, so the template built from it
-    # while it matched is still the one the key names. The check runs before
-    # the key is looked up, so the cache hit is never reached.
+    # The base a consumer has most often: every migration a branch adds leaves
+    # a kept base one behind. Migrating forward ends at this checkout's schema
+    # whatever prefix of the history the base holds, which is what the key
+    # already names. Behind for real -- migrated back, so the column really is
+    # the narrower one -- rather than a row deleted from django_migrations over
+    # a schema that still has the change, which migrate would fail to reapply.
     base = _base(temporary_databases)
-    built = template_database(_shape(rows=40, seed=25), base=base)
-    temporary_databases.append(built)
-    _execute_in(
-        base,
-        "DELETE FROM django_migrations "
-        "WHERE app = 'contenttypes' AND name = '0002_remove_content_type_name'",
-    )
+    _migrate(base, "auth", "0011_update_proxy_permissions")
+    assert _rows_in(base, _FIRST_NAME_WIDTH) == [(30,)]
 
-    with pytest.raises(UnusableBase, match="behind"):
-        template_database(_shape(rows=40, seed=25), base=base)
+    name = template_database(_shape(rows=40, seed=27), base=base)
+    temporary_databases.append(name)
+    target = f"{name}_end"
+    temporary_databases.append(target)
+    clone_database(name, target)
+
+    assert _rows_in(target, _FIRST_NAME_WIDTH) == [(150,)]
+    assert _rows_in(
+        target,
+        "SELECT count(*) FROM django_migrations "
+        "WHERE app = 'auth' AND name = '0012_alter_user_first_name_max_length'",
+    ) == [(1,)]
+    assert _rows_in(target, f"SELECT count(*) FROM {Catalogue._meta.db_table}") == [(40,)]
+    # The copy is what was migrated; the base is left where its owner put it.
+    assert _rows_in(base, _FIRST_NAME_WIDTH) == [(30,)]
+
+
+def test_migrating_the_base_forward_in_place_asks_for_the_same_template(
+    temporary_databases: list[str],
+) -> None:
+    # Why the base's applied migrations stay out of the key: catching the base
+    # up leaves its oid alone, and the template the key already names is the
+    # one that catching up would have given -- the copy was migrated forward to
+    # the same schema when it was built.
+    shape = _shape(rows=40, seed=30)
+    base = _base(temporary_databases)
+    _migrate(base, "auth", "0011_update_proxy_permissions")
+    behind = template_database(shape, base=base)
+    temporary_databases.append(behind)
+
+    _migrate(base)
+    caught_up = template_database(shape, base=base)
+    temporary_databases.append(caught_up)
+
+    assert _rows_in(base, _FIRST_NAME_WIDTH) == [(150,)]
+    assert caught_up == behind
+
+
+def test_an_empty_base_is_migrated_in_full(temporary_databases: list[str]) -> None:
+    # The far end of behind, and not the same path as building from empty: the
+    # base has no django_migrations table at all, so reading what it has
+    # applied must find nothing rather than fail. It costs what building from
+    # empty costs, once per key, which is the most a behind base ever pays.
+    base = f"shape_base_{secrets.token_hex(4)}"
+    with connection._nodb_cursor() as cursor:
+        cursor.execute(f"CREATE DATABASE {connection.ops.quote_name(base)}")
+    temporary_databases.append(base)
+
+    name = template_database(_shape(rows=40, seed=29), base=base)
+    temporary_databases.append(name)
+    target = f"{name}_end"
+    temporary_databases.append(target)
+    clone_database(name, target)
+
+    assert _rows_in(target, _FIRST_NAME_WIDTH) == [(150,)]
+    assert _rows_in(target, f"SELECT count(*) FROM {Catalogue._meta.db_table}") == [(40,)]
 
 
 def test_a_base_ahead_of_the_migrations_on_disk_is_refused(temporary_databases: list[str]) -> None:
-    # A base migrated by a newer branch holds schema the migrations on disk do
-    # not describe, and those migrations are what the key says the template
-    # holds.
+    # The one base migrating cannot fix. A base migrated by another branch
+    # holds schema the migrations on disk do not describe, and nothing here can
+    # take it away -- an index that branch added would build silently and skew
+    # every plan assertion over the template.
     base = _base(temporary_databases)
     _execute_in(
         base,
@@ -656,34 +704,65 @@ def test_a_base_ahead_of_the_migrations_on_disk_is_refused(temporary_databases: 
     before = _templates_on_the_server()
 
     with pytest.raises(UnusableBase) as refused:
-        template_database(_shape(), base=base)
+        temporary_databases.append(template_database(_shape(), base=base))
 
     message = str(refused.value)
     assert base in message
     assert "ahead" in message
     assert "contenttypes.9999_ghost" in message
-    assert "behind" not in message
+    # Both remedies, because the two causes need opposite ones: pruning a
+    # branch's rows would leave its schema behind and stop the refusal.
+    assert "manage.py migrate contenttypes --prune" in message
+    assert "recreate it" in message
     assert _templates_on_the_server() == before
 
 
-def test_a_database_never_migrated_is_behind_by_all_of_it(temporary_databases: list[str]) -> None:
-    # The likeliest wrong base of all -- an empty database, or the wrong one --
-    # and the case that shows why the message names a few and counts the rest:
-    # on a real project the list would be hundreds of migrations long.
-    base = f"shape_base_{secrets.token_hex(4)}"
-    with connection._nodb_cursor() as cursor:
-        cursor.execute(f"CREATE DATABASE {connection.ops.quote_name(base)}")
-    temporary_databases.append(base)
+def test_a_base_that_goes_ahead_is_refused_with_its_template_already_built(
+    temporary_databases: list[str],
+) -> None:
+    # A base migrated in place by another branch keeps its name and its oid, so
+    # the template built from it while it matched is still the one the key
+    # names. The check runs before the key is looked up, so the cache hit is
+    # never reached.
+    base = _base(temporary_databases)
+    built = template_database(_shape(rows=40, seed=25), base=base)
+    temporary_databases.append(built)
+    _execute_in(
+        base,
+        "INSERT INTO django_migrations (app, name, applied) "
+        "VALUES ('contenttypes', '9999_ghost', now())",
+    )
 
-    with pytest.raises(UnusableBase, match=r"behind .* for example \S+, \S+, \S+ and \d+ more"):
-        template_database(_shape(), base=base)
+    with pytest.raises(UnusableBase, match="ahead"):
+        temporary_databases.append(template_database(_shape(rows=40, seed=25), base=base))
 
 
-def test_a_base_that_does_not_exist_is_refused_by_name() -> None:
+def test_a_row_for_an_app_no_longer_installed_does_not_refuse_the_base(
+    temporary_databases: list[str],
+) -> None:
+    # Removing an app leaves its rows in django_migrations, and they describe
+    # nothing this checkout's models use: its tables, if any, are content the
+    # template carries like any other table the shape does not declare.
+    base = _base(temporary_databases)
+    _execute_in(
+        base,
+        "INSERT INTO django_migrations (app, name, applied) "
+        "VALUES ('removedapp', '0001_initial', now())",
+    )
+
+    name = template_database(_shape(rows=40, seed=28), base=base)
+    temporary_databases.append(name)
+
+    assert _oid(name) is not None
+
+
+def test_a_base_that_does_not_exist_is_refused_by_name(temporary_databases: list[str]) -> None:
     before = _templates_on_the_server()
 
     with pytest.raises(UnusableBase, match="shape_base_that_was_never_made"):
-        template_database(_shape(), base="shape_base_that_was_never_made")
+        temporary_databases.append(
+            template_database(_shape(), base="shape_base_that_was_never_made")
+        )
 
     assert _templates_on_the_server() == before
 
@@ -753,13 +832,15 @@ def test_a_squash_whose_replaced_files_were_deleted_does_not_make_a_base_ahead(
 def test_a_migration_on_disk_is_not_ahead_of_it() -> None:
     applied = [("shop", "0001_initial"), ("shop", "0002_order")]
 
-    assert _ahead_of_disk(applied, disk=applied, replaced=[]) == []
+    assert _ahead_of_disk(applied, disk=applied, replaced=[], installed={"shop"}) == []
 
 
 def test_one_recorded_and_missing_from_disk_is() -> None:
     applied = [("shop", "0003_ghost"), ("shop", "0001_initial"), ("auth", "0099_ghost")]
 
-    assert _ahead_of_disk(applied, disk=[("shop", "0001_initial")], replaced=[]) == [
+    assert _ahead_of_disk(
+        applied, disk=[("shop", "0001_initial")], replaced=[], installed={"shop", "auth"}
+    ) == [
         ("auth", "0099_ghost"),
         ("shop", "0003_ghost"),
     ]
@@ -775,6 +856,17 @@ def test_unless_a_migration_on_disk_replaces_it() -> None:
             applied,
             disk=[("shop", "0001_squashed_0002")],
             replaced=[("shop", "0001_initial"), ("shop", "0002_order")],
+            installed={"shop"},
         )
+        == []
+    )
+
+
+def test_nor_one_recorded_for_an_app_that_is_not_installed() -> None:
+    # Its rows outlive the app, and describe no table the checkout's models use.
+    applied = [("shop", "0001_initial"), ("removedapp", "0001_initial")]
+
+    assert (
+        _ahead_of_disk(applied, disk=[("shop", "0001_initial")], replaced=[], installed={"shop"})
         == []
     )

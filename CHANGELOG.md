@@ -17,20 +17,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   minute to build a 4.4-million-row shape, paid again by every template a
   change to the declaration makes. With a base, the template starts as
   `CREATE DATABASE ... TEMPLATE <base>`. `migrate --run-syncdb` still runs over
-  the copy -- finding nothing to apply, but still creating an unmigrated app's
-  tables and firing `post_migrate` -- so it is filled exactly as one from empty
-  is. `base=None`, the default, behaves and keys exactly as before.
+  the copy -- applying whatever the base has yet to, creating an unmigrated
+  app's tables and firing `post_migrate` -- so it is filled exactly as one from
+  empty is. `base=None`, the default, behaves and keys exactly as before.
 
-  **A base whose migrations are not the ones on disk is refused, never migrated
-  forward**, with the new `UnusableBase`, before anything is created. That is
-  what keeps the cache key sound: the migrations on disk are already in it, and
-  refusing every base they do not describe is what lets them describe the
-  base's schema too. *Behind* is `migrate`'s own plan over every leaf, read
-  against the base, so squashed migrations count the way `migrate` counts them.
-  *Ahead* is an applied migration that no migration on disk is or replaces, so
-  the records a squash leaves behind once its replaced files are deleted do not
-  refuse a good base. A base that does not exist is refused by name. Each
-  message names a few of the migrations that differ and the remedy.
+  **A base behind the migrations on disk is migrated forward in the copy; only
+  one ahead of them is refused**, with the new `UnusableBase`, before anything
+  is created. Migrating forward always ends at the checkout's schema, whatever
+  prefix of the history the base holds, so the key stays sound without the
+  base's applied migrations entering it -- the same reason Django's own
+  PostgreSQL `TEST: {"TEMPLATE": ...}` can migrate a copy forward. A base far
+  behind pays its `migrate` once per key, never more than building from empty,
+  and the base a project has most often, one behind because a branch added a
+  migration, builds rather than being refused. *Ahead* is an applied migration
+  of an installed app that no migration on disk is or replaces: the one case
+  where the template cannot end up with the checkout's schema, since a branch
+  migration that adds only an index would otherwise build silently and skew
+  plan assertions. The rows a squash leaves behind while it still lists them in
+  `replaces`, and the rows of an app that is no longer installed, are not
+  ahead. The message names up to three migrations and both remedies:
+  `manage.py migrate <app> --prune` for rows left by squashed migrations deleted
+  after their squash's `replaces` was removed, and migrating the base back or
+  recreating it for a migration from another branch. A base that does not exist
+  is refused by name.
 
   The key also takes the base's name and its database oid, so dropping and
   recreating a base -- the usual way one restored from a schema dump is
