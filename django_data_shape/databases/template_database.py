@@ -7,6 +7,7 @@ import re
 from collections.abc import Iterable, Mapping
 from typing import Any
 
+import django
 from django.apps import apps
 from django.conf import settings
 from django.core.management import call_command
@@ -146,8 +147,8 @@ def template_database(
     the base has applied only in part, when a replaced migration it has yet to
     apply is gone from disk -- Django then runs neither the squash nor the rest
     of what it replaces, and the copy would lack them silently -- and a base
-    holding the tables of an app with migrations that it records no applied
-    migration for, which ``migrate`` would try to create again: a base with no
+    holding the tables of an app with a migration on disk that it records no
+    applied migration for, which ``migrate`` would try to create again: a base with no
     ``django_migrations`` table, one restored from ``pg_dump --schema-only``,
     which brings that table back empty, or one made before an app had
     migrations. So does a base
@@ -468,13 +469,22 @@ def _refuse_history(connection: Any, base: str) -> None:
     Three cases, read off one loader built while connected to the base:
 
     - **ahead**, an applied migration that no migration on disk is or replaces,
-      as :func:`_ahead_of_disk` reckons it. When the app has a squash on disk
-      that still lists what it replaces, the message says to finish that squash
-      before pruning, because ``migrate --prune`` declines while one does --
+      as :func:`_ahead_of_disk` reckons it. The message says to prune, and
+      names a squash to finish first wherever ``migrate --prune`` would decline
+      over one, by the test Django itself makes: a squash that still lists a
+      migration the base records as applied and that is gone from disk --
+      every app's such migrations up to Django 5.0, and from 5.1 only the
+      pruned app's. Finishing a squash means dropping its ``replaces``, which
+      breaks the graph while a replaced file is still on disk, so naming one
+      that Django would not decline over does harm.
       ``test_a_base_ahead_only_of_a_squash_of_a_squash_says_to_finish_the_squash``
-      follows the advice through to a base that builds, and
-      ``test_a_squash_in_another_app_is_not_named_as_one_to_finish`` holds that
-      only the squashes of the apps ahead are named;
+      follows the advice through to a base that builds;
+      ``test_a_squash_listing_nothing_prune_would_remove_is_not_named_as_one_to_finish``
+      holds both that the squash must list such a migration and that one on
+      disk does not count; and
+      ``test_a_squash_in_another_app_is_named_only_where_prune_declines_for_it``
+      holds which apps' migrations count on each side of 5.1, against what
+      ``migrate --prune`` does there;
     - **a squash applied in part** whose replaced migrations the base still
       needs are gone from disk, as :func:`_stranded_squashes` reckons it;
     - **tables with no record of what made them**: an app with migrations
@@ -488,7 +498,17 @@ def _refuse_history(connection: Any, base: str) -> None:
       one-app form, once the app gains them. So it is judged per app, which
       ``test_so_is_one_with_no_record_of_a_single_app_whose_tables_it_holds``
       holds, and an empty database, holding no tables, is migrated in full.
-      Only those apps' tables count. An app without migrations gets its tables
+      An app is judged only once a migration of its is on disk, which
+      ``test_but_an_app_whose_migrations_package_holds_no_migration_is_not``
+      holds: an empty migrations package makes an app migrated, which keeps
+      ``run_syncdb`` off it, with nothing for ``migrate`` to run, so its tables
+      stay as they are and the copy migrates. One history is refused although
+      ``migrate`` would accept it: an app whose migrations on disk, applied to
+      the base, would create nothing -- a ``0001_initial`` holding only
+      ``SeparateDatabaseAndState`` state operations, say. Telling that app
+      apart would mean reading what each of its operations does to the
+      database, which this check does not. Only those apps' tables count. An
+      app without migrations gets its tables
       from ``run_syncdb``, which records nothing, and a project with no
       migrated app at all never makes a ``django_migrations`` table, so a base
       holding only such tables is one ``migrate`` could have made --
@@ -513,9 +533,13 @@ def _refuse_history(connection: Any, base: str) -> None:
     try:
         loader = MigrationLoader(connection)
         recorded = {app_label for app_label, _name in loader.applied_migrations}
+        # An empty migrations package makes an app migrated, which takes it out
+        # of run_syncdb, and gives migrate nothing to run for it, so its tables
+        # are left alone: only an app with a migration on disk can fail.
+        judged = loader.migrated_apps & {app_label for app_label, _name in loader.disk_migrations}
         unrecorded = {
             app_label: tables
-            for app_label in sorted(loader.migrated_apps - recorded)
+            for app_label in sorted(judged - recorded)
             if (tables := _tables_of(connection, [app_label]))
         }
         ahead = _ahead_of_disk(
@@ -528,8 +552,20 @@ def _refuse_history(connection: Any, base: str) -> None:
             ],
             installed={app_config.label for app_config in apps.get_app_configs()},
         )
+        # The squashes migrate --prune declines over, by Django's own test: one
+        # that lists a migration the base records as applied and that is gone
+        # from disk. Up to Django 5.0 every app's such migrations count; from
+        # 5.1, only those of the app being pruned.
+        ahead_apps = {app_label for app_label, _name in ahead}
+        prunable = {
+            key
+            for key in set(loader.applied_migrations) - set(loader.disk_migrations)
+            if django.VERSION < (5, 1) or key[0] in ahead_apps
+        }
         unfinished = sorted(
-            squash for squash in loader.replacements if squash[0] in {key[0] for key in ahead}
+            squash
+            for squash, migration in loader.replacements.items()
+            if prunable.intersection(migration.replaces)
         )
         stranded = _stranded_squashes(
             loader.applied_migrations,
@@ -554,12 +590,12 @@ def _refuse_history(connection: Any, base: str) -> None:
         )
     if ahead:
         prune = " and ".join(
-            f"manage.py migrate {app_label} --prune"
-            for app_label in sorted({app_label for app_label, _name in ahead})
+            f"manage.py migrate {app_label} --prune" for app_label in sorted(ahead_apps)
         )
         finish = (
             " A squashed migration still lists the migrations it replaces, "
-            f"{_examples(_dotted(unfinished))}, and --prune declines to run while one does: "
+            f"{_examples(_dotted(unfinished))}, among them one the base records as applied "
+            "that is gone from disk, and --prune declines to run while one does: "
             "finish it first, by running manage.py migrate against the base so that it is "
             "recorded as applied and then removing its replaces attribute, which makes it an "
             "ordinary migration."
@@ -599,19 +635,26 @@ def _tables_of(connection: Any, app_labels: Iterable[str]) -> list[str]:
     Read the way ``migrate``'s ``run_syncdb`` phase reads them, because the
     drop list has to be exactly the set it then makes: a table dropped that it
     does not make again is lost, and one kept that it does make fails its
-    create with ``already exists``. That is the models the router lets migrate
-    on this alias, less what ``can_migrate`` refuses -- a proxy, an unmanaged
+    create with ``already exists``. That is the models of the apps that have a
+    models module, which ``run_syncdb`` requires before it looks at an app's
+    models at all, that the router lets migrate on this alias, less what
+    ``can_migrate`` refuses -- a proxy, an unmanaged
     or a swapped model -- and for each of those, the auto-created
     many-to-many tables of the relations it declares, which ``run_syncdb``
     makes only as part of making that model. Not the through models on their
     own: Django counts an auto-created through as managed when either end is,
     so the through of an unmanaged model's relation to a managed one reads as
     migratable and is still never made. A through model a relation names is a
-    model of its own, and is judged as one.
+    model of its own, and is judged as one. The names are compared as
+    PostgreSQL stores them, by :func:`_stored_name`, because it shortens a long
+    one where ``run_syncdb`` does not: there, a table the base holds under a
+    shortened name is looked for under the full one, missed, and created a
+    second time.
 
     Each condition is held by a test, because each filter is one arc to a
     branch gate:
 
+    - a models module: ``test_an_app_with_no_models_module_is_carried``;
     - the router: ``test_a_table_the_router_keeps_off_the_alias_is_carried``;
     - ``can_migrate``: ``test_an_unmanaged_models_table_in_the_base_is_carried``,
       where dropping the table would lose it, since nothing makes it again;
@@ -622,13 +665,17 @@ def _tables_of(connection: Any, app_labels: Iterable[str]) -> list[str]:
       ``test_a_declared_through_model_is_judged_as_a_model_of_its_own``;
     - existing: ``test_an_empty_base_is_migrated_in_full``, and
       ``test_migrate_still_runs_over_the_copy``, whose base has no table of an
-      app without migrations to drop.
+      app without migrations to drop;
+    - existing under the name PostgreSQL stores:
+      ``test_a_table_postgres_stores_under_a_shortened_name_is_rebuilt``, whose
+      name straddles the limit with a two-byte character, so a cut by
+      characters or one splitting the character fails it as well.
     """
     labels = set(app_labels)
     models = [
         model
         for app_config in apps.get_app_configs()
-        if app_config.label in labels
+        if app_config.models_module is not None and app_config.label in labels
         for model in router.get_migratable_models(
             app_config, connection.alias, include_auto_created=False
         )
@@ -642,7 +689,23 @@ def _tables_of(connection: Any, app_labels: Iterable[str]) -> list[str]:
             through: Any = field.remote_field.through
             if through._meta.auto_created:
                 made.add(through._meta.db_table)
-    return sorted(made & set(connection.introspection.table_names()))
+    limit = connection.ops.max_name_length()
+    stored = {_stored_name(table, limit) for table in made}
+    return sorted(stored & set(connection.introspection.table_names()))
+
+
+def _stored_name(name: str, limit: int) -> str:
+    """``name`` as PostgreSQL stores it: its first ``limit`` bytes, cut back to a whole character.
+
+    PostgreSQL shortens a longer identifier rather than refusing it, and Django
+    shortens only a table name it makes up, never a ``db_table`` a model or a
+    many-to-many field spells out, so the name a model gives and the name the
+    catalogue lists can differ. Counted in UTF-8, which Django assumes every
+    database it talks to uses. Decoding with ``errors="ignore"`` is the cut
+    back: valid UTF-8 cut at a byte count can end only in part of one
+    character, and that part is what it drops, as PostgreSQL does.
+    """
+    return name.encode()[:limit].decode(errors="ignore")
 
 
 def _ahead_of_disk(

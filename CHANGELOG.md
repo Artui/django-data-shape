@@ -23,9 +23,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the base has yet to and firing `post_migrate`. Apps without migrations have
   no history, so the tables `run_syncdb` makes for them -- their managed
   models' tables and the many-to-many tables Django creates for those models'
-  relations, read the way `run_syncdb` reads them, router included -- are
-  dropped from the copy first and made again from the current models, as in an
-  empty database. `run_syncdb` never alters an existing table, so a table the
+  relations, read the way `run_syncdb` reads them, router and models module
+  included, and found under the name PostgreSQL stores, which cuts a
+  `db_table` longer than 63 bytes -- are dropped from the copy first and made
+  again from the current models, as in an empty database. `run_syncdb` never alters an existing table, so a table the
   base made from an older model would otherwise survive under a key naming the
   new one. The base's rows in those tables do not carry over; the rest of its
   rows, an unmanaged model's table and the tables of an app no longer installed
@@ -54,18 +55,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and both remedies: `manage.py migrate <app> --prune` for rows left by
   squashed migrations deleted after their squash's `replaces` was removed, and
   migrating the base back or recreating it for a migration from another
-  branch; when the app has a squash that still lists `replaces`, which
-  `--prune` declines to run beside, it says to finish that squash first. Two
+  branch. Where `--prune` would decline, because a squash on disk still lists
+  in `replaces` a migration the base records as applied and that is gone from
+  disk -- one of the app being pruned from Django 5.1, of any app before -- it
+  names the squash and says to finish it first, and nowhere else, since
+  finishing a squash whose replaced files are still on disk splits the app
+  into two leaf migrations. Two
   histories `migrate` would mishandle are refused too: a squash applied to the
   base only in part, when a replaced migration it has yet to apply is gone
   from disk -- Django then runs neither the squash nor the rest of what it
-  replaces, so the template would silently lack them, and from Django 6.0 this
-  is read off the plan Django made, so a squash of a squash is judged over
-  everything under it -- and a base holding the tables of an app with
-  migrations that it records no applied migration for, which `migrate` would
-  try to create again: one with no `django_migrations` table, one restored
-  from `pg_dump --schema-only`, which brings that table back empty, or one
-  made before the app had migrations. A base that does not
+  replaces, so the template would silently lack them, read off the graph
+  Django's loader builds, so that from Django 6.0 a squash of a squash is
+  judged over everything under it -- and a base holding the tables of an app
+  with a migration on disk that it records no applied migration for, which
+  `migrate` would try to create again: one with no `django_migrations` table,
+  one restored from `pg_dump --schema-only`, which brings that table back
+  empty, or one made before the app had migrations. An app whose migrations
+  would create nothing, such as a `0001_initial` holding only
+  `SeparateDatabaseAndState` state operations, is refused the same way,
+  although `migrate` would accept it. A base that does not
   exist, one that does not accept connections, a name holding a double quote
   -- which Django's quoting cannot carry intact, so the database checked and
   the database copied could differ -- and a template this package made or the

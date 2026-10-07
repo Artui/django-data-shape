@@ -8,6 +8,7 @@ from collections.abc import Iterator
 import django
 import psycopg
 import pytest
+from django.apps import apps
 from django.contrib.auth.models import Group
 from django.core.management import call_command
 from django.db import connection, connections, migrations, transaction
@@ -1005,6 +1006,53 @@ def test_an_unmanaged_models_table_in_the_base_is_carried(
     assert _rows_in(target, f"SELECT email FROM {Subscriber._meta.db_table}") == [("kept@base",)]
 
 
+def test_a_table_postgres_stores_under_a_shortened_name_is_rebuilt(
+    temporary_databases: list[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # PostgreSQL keeps the first 63 bytes of a name, cut back to a character
+    # boundary, and Django shortens only a table name it makes up, never one a
+    # model spells out. Looked for under the model's own name, the base's table
+    # is not there: it was left in place, and run_syncdb, which looks for it
+    # the same way, failed on it with "already exists". The two-byte character
+    # straddles byte 63, so a cut by characters, or one that splits it, still
+    # misses.
+    spelled = "testapp_subscriber_" + "x" * 43 + "\N{LATIN SMALL LETTER E WITH ACUTE}tail"
+    stored = spelled.encode()[:62].decode()
+    base = _base(temporary_databases)
+    _execute_in(base, f'ALTER TABLE {Subscriber._meta.db_table} RENAME TO "{spelled}"')
+    _execute_in(base, f"INSERT INTO \"{stored}\" (email) VALUES ('stale@base')")
+    monkeypatch.setattr(Subscriber._meta, "db_table", spelled)
+
+    name = template_database(_shape(rows=40, seed=61), base=base)
+    temporary_databases.append(name)
+    target = f"{name}_end"
+    temporary_databases.append(target)
+    clone_database(name, target)
+
+    assert _rows_in(base, f'SELECT count(*) FROM "{stored}"') == [(1,)]
+    assert _rows_in(target, f'SELECT count(*) FROM "{stored}"') == [(0,)]
+
+
+def test_an_app_with_no_models_module_is_carried(
+    temporary_databases: list[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # run_syncdb passes over an app whose models were registered from
+    # somewhere other than a models module, so it never makes that app's
+    # tables, and dropping them would lose them. Holds that the drop list skips
+    # such an app as run_syncdb does.
+    monkeypatch.setattr(apps.get_app_config("testapp"), "models_module", None)
+    base = _base(temporary_databases)
+    _execute_in(base, f"INSERT INTO {Subscriber._meta.db_table} (email) VALUES ('kept@base')")
+
+    name = template_database(_shape(rows=40, seed=62), base=base)
+    temporary_databases.append(name)
+    target = f"{name}_end"
+    temporary_databases.append(target)
+    clone_database(name, target)
+
+    assert _rows_in(target, f"SELECT email FROM {Subscriber._meta.db_table}") == [("kept@base",)]
+
+
 def _columns_of(table: str) -> str:
     """Every column of ``table`` as information_schema describes it."""
     return (
@@ -1224,7 +1272,7 @@ def test_a_connection_already_on_the_base_does_not_stop_the_copy(
     assert _oid(name) is not None
 
 
-def _squash_on_disk(monkeypatch: pytest.MonkeyPatch, *, replaced_files: bool = False) -> None:
+def _squash_on_disk(monkeypatch: pytest.MonkeyPatch, *, replaced_files: bool = False) -> Migration:
     """A squash of two contenttypes migrations, added to what the loader reads from disk.
 
     No installed app ships one, so it is made here -- a real Migration, shaped as
@@ -1253,6 +1301,7 @@ def _squash_on_disk(monkeypatch: pytest.MonkeyPatch, *, replaced_files: bool = F
         loader.disk_migrations.update(added)
 
     monkeypatch.setattr(MigrationLoader, "load_disk", load_disk_with_the_squash)
+    return squash
 
 
 _SQUASH_RAN = "SELECT to_regclass('squash_marker') IS NOT NULL"
@@ -1415,13 +1464,18 @@ def _nested_squash_on_disk(
     return made[_OUTER[1]]
 
 
-def test_a_squash_in_another_app_is_not_named_as_one_to_finish(
+def test_a_squash_in_another_app_is_named_only_where_prune_declines_for_it(
     temporary_databases: list[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # The advice is about the app the ahead rows belong to: a squash elsewhere
-    # has nothing to do with them, and naming it would send someone to edit a
-    # migration that is not the cause. Holds that only the ahead apps' squashes
-    # are named.
+    # The contenttypes squash lists two migrations the base applied and that
+    # are gone from disk, and the ahead row is auth's. Up to Django 5.0,
+    # migrate --prune declines over such a squash in any app; from 5.1 it looks
+    # only at the app being pruned, so there the squash has nothing to do with
+    # the ahead row and naming it would send someone to edit a migration that
+    # is not the cause. Checked against migrate itself rather than against a
+    # version table: the message names the squash exactly when pruning, as the
+    # message says to, declines. Holds both halves of which rows the advice
+    # reads, the ahead apps' from 5.1 and every app's before.
     _squash_on_disk(monkeypatch)
     base = _base(temporary_databases)
     _execute_in(
@@ -1434,9 +1488,60 @@ def test_a_squash_in_another_app_is_not_named_as_one_to_finish(
     with pytest.raises(UnusableBase) as refused:
         temporary_databases.append(template_database(_shape(rows=40, seed=58), base=base))
 
-    message = str(refused.value)
+    message = " ".join(str(refused.value).split())
     assert "auth.9999_ghost" in message
+    assert "manage.py migrate auth --prune" in message
+    named = "contenttypes.0003_squashed_0004" in message
+
+    _migrate(base, "auth", "--prune")
+    pruned = _rows_in(base, _GHOST_RECORDED) == [(False,)]
+
+    assert named is not pruned
+    assert named is (django.VERSION < (5, 1))
+
+
+_GHOST_RECORDED = "SELECT EXISTS (SELECT FROM django_migrations WHERE name = '9999_ghost')"
+
+
+def test_a_squash_listing_nothing_prune_would_remove_is_not_named_as_one_to_finish(
+    temporary_databases: list[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # --prune declines only over a squash that lists a migration it would
+    # remove: one the base records as applied and that is gone from disk.
+    # This squash's replaced files are still on disk -- one of them applied --
+    # so pruning the ahead row works as it stands, while removing the squash's
+    # replaces beside those files, as finishing it means, would leave the app
+    # with two leaf nodes. Holds that a squash is named only when what it lists
+    # includes a migration --prune would remove: the applied 0003_folded would
+    # name it if a file on disk counted, and naming every squash of an ahead
+    # app would name it regardless.
+    squash = _squash_on_disk(monkeypatch, replaced_files=True)
+    base = _base(temporary_databases)
+    _execute_in(
+        base,
+        "INSERT INTO django_migrations (app, name, applied) VALUES "
+        "('contenttypes', '0003_folded', now()), ('contenttypes', '9999_ghost', now())",
+    )
+
+    with pytest.raises(UnusableBase) as refused:
+        temporary_databases.append(template_database(_shape(rows=40, seed=59), base=base))
+
+    message = " ".join(str(refused.value).split())
+    assert "contenttypes.9999_ghost" in message
+    assert "manage.py migrate contenttypes --prune" in message
     assert "still lists" not in message
+
+    # And the remedy the message does give is the one that works.
+    _migrate(base, "contenttypes", "--prune")
+    name = template_database(_shape(rows=40, seed=59), base=base)
+    temporary_databases.append(name)
+
+    assert _rows_in(base, _GHOST_RECORDED) == [(False,)]
+    assert _oid(name) is not None
+    # While finishing the squash, as the message would have had it, splits the
+    # app in two.
+    squash.replaces = []
+    assert "contenttypes" in MigrationLoader(None).detect_conflicts()
 
 
 @nested_squashes
@@ -1611,6 +1716,35 @@ def test_so_is_one_with_no_record_of_a_single_app_whose_tables_it_holds(
     assert "auth_group" in message
     # contenttypes still records its migrations, so its table is not named.
     assert "django_content_type" not in message
+
+
+def test_but_an_app_whose_migrations_package_holds_no_migration_is_not(
+    temporary_databases: list[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # An app that gains an empty migrations package counts as migrated, so
+    # run_syncdb stops making its tables, and has no migration for migrate to
+    # run, so the tables the base made for it are left as they are and migrate
+    # over the copy succeeds. Nothing would make them again, so they are
+    # carried. Holds that only an app with a migration on disk is judged.
+    load_disk = MigrationLoader.load_disk
+
+    def load_disk_with_an_empty_package(loader: MigrationLoader) -> None:
+        load_disk(loader)
+        loader.unmigrated_apps.discard("testapp")
+        loader.migrated_apps.add("testapp")
+
+    monkeypatch.setattr(MigrationLoader, "load_disk", load_disk_with_an_empty_package)
+    base = _base(temporary_databases)
+    _execute_in(base, f"INSERT INTO {Subscriber._meta.db_table} (email) VALUES ('kept@base')")
+
+    name = template_database(_shape(rows=40, seed=60), base=base)
+    temporary_databases.append(name)
+    target = f"{name}_end"
+    temporary_databases.append(target)
+    clone_database(name, target)
+
+    assert _rows_in(target, f"SELECT email FROM {Subscriber._meta.db_table}") == [("kept@base",)]
+    assert _rows_in(target, f"SELECT count(*) FROM {Catalogue._meta.db_table}") == [(40,)]
 
 
 def test_but_a_table_of_an_app_without_migrations_does_not_count(

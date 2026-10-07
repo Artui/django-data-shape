@@ -283,9 +283,14 @@ and made again from the current models, as in an empty database. `run_syncdb`
 creates a missing table and never alters an existing one, so this is what stops
 a table the base made from an older model surviving under a key that names the
 new one -- and it means the base's rows in those tables do not carry over.
-Everything else is carried as the base has it: the rows in the tables of apps
-with migrations, an unmanaged model's table and the tables of an app that is no
-longer installed. `post_migrate` fires as it does from empty.
+A table is found under the name PostgreSQL stores, which for a `db_table`
+longer than 63 bytes is its first 63, cut back to a whole character: Django
+does not shorten a name a model spells out, and `run_syncdb` on its own would
+miss such a table and fail creating it again. Everything else is carried as
+the base has it: the rows in the tables of apps with migrations, an unmanaged
+model's table, the tables of an app that is no longer installed and those of
+an app with no models module, which `run_syncdb` passes over. `post_migrate`
+fires as it does from empty.
 
 **A base behind the migrations on disk is migrated forward; only a history
 migrating cannot repair is refused.** Migrating forward always ends at the
@@ -317,12 +322,16 @@ anything is created, with the one exception marked, and naming the base:
   `manage.py migrate <app> --prune` against the base (Django 4.1 and later). A
   migration from another branch is undone by migrating the base back from a
   checkout that has it, or by recreating the base -- pruning its row would leave
-  its schema in place and only silence the refusal. When the app has a squash
-  on disk that still lists what it replaces, the message says so, because
-  `--prune` declines to run while one does: finish the squash first, by running
-  `migrate` against the base so that it is recorded as applied and then
-  removing its `replaces`, which makes it an ordinary migration, and prune
-  after.
+  its schema in place and only silence the refusal. `--prune` declines to run
+  while a squash on disk still lists, in its `replaces`, a migration the base
+  records as applied and that is gone from disk -- from Django 5.1 one of the
+  app being pruned, and up to 5.0 one of any app -- so where that holds the
+  message names the squash and says to finish it first, by running `migrate`
+  against the base so that it is recorded as applied and then removing its
+  `replaces`, which makes it an ordinary migration, and prune after. Where it
+  does not hold, the message says nothing about squashes, because pruning
+  works as it is and removing `replaces` from a squash whose replaced files
+  are still on disk would leave the app with two leaf migrations.
 - **a squash applied in part, with its replaced files deleted** -- the base
   records some of the migrations a squash on disk replaces, and one it has yet
   to apply is no longer on disk. Django runs a squash only when all or none of
@@ -331,10 +340,11 @@ anything is created, with the one exception marked, and naming the base:
   would silently lack what they do. Migrate the base from a checkout that
   still has the replaced migrations, or recreate it. A squash applied in part
   whose replaced files are still there is not refused: Django finishes it one
-  replaced migration at a time. From Django 6.0 a squash can replace another
-  squash, and Django judges "in part" over everything the two come down to, so
-  this is read off the plan Django actually made rather than off what the outer
-  squash lists: a squash of a squash is refused when the base applied some of
+  replaced migration at a time. Which squashes Django set aside is read off
+  the graph Django's loader builds, on every version, rather than worked out
+  again from what each squash lists. From Django 6.0 a squash can replace
+  another squash, and Django judges "in part" over everything the two come
+  down to, so a squash of a squash is refused when the base applied some of
   what the inner one replaces and a migration after it is gone from disk.
 - **tables with no record of their migrations** -- the base holds the tables of
   an app with migrations and records no applied migration for that app, so
@@ -346,7 +356,12 @@ anything is created, with the one exception marked, and naming the base:
   `django_migrations` with the schema, or recreate the base with `migrate`. An
   empty database holds none of those tables and is migrated in full; the tables
   of an app without migrations do not count, because `run_syncdb` records
-  nothing for them.
+  nothing for them, and nor do those of an app whose migrations package holds
+  no migration yet, which `migrate` leaves alone. One history is refused
+  although `migrate` would accept it: an app whose migrations would create
+  nothing when applied, such as a `0001_initial` holding only
+  `SeparateDatabaseAndState` state operations, because telling it apart would
+  mean reading what each operation does to the database.
 - **a reference into a rebuilt table** -- something in the base outside the
   tables being rebuilt depends on one of them: a foreign key or a view. Those tables are dropped in one statement without `CASCADE`,
   because `CASCADE` would remove the reference silently, `run_syncdb` would not
@@ -382,8 +397,9 @@ any are left, are carried like any other table the shape does not declare. The
 rows a squash of a squash leaves are a different matter: once only the outer
 squash is on disk, the migrations the inner one replaced are listed by nothing
 on disk, so their rows read as ahead although Django counts the base as
-migrated. That is the case the ahead message's advice to finish the squash
-first is for.
+migrated. The outer squash lists the inner one and the migration after it,
+both applied and both gone from disk, so `--prune` declines over it, and this is
+the case the ahead message's advice to finish the squash first is for.
 
 The base is checked on every call, a cache hit included, because its oid is part
 of the key. That is also what makes refreshing a base safe: dropping and
