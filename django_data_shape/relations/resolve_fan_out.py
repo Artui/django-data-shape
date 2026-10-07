@@ -136,6 +136,14 @@ def _require_every_named_parent(
     filtered differently from the one in the reader's head. None of them is
     visible in the shape.
 
+    Inside :func:`~django_data_shape.scaling.scaled_world.scaled_world` a key
+    can vanish one more way, and the message names it: a world empties every
+    table its shape declares before building, so a parent table declared in the
+    same shape has lost the caller's rows by the time this reads it. That is the
+    only way left -- a world no longer empties a table its shape does not
+    declare -- and naming it keeps the refusal from blaming the caller's key
+    for the world's own emptying.
+
     **Every missing key, not the first.** A list built from the wrong queryset is
     wrong in several places at once, and finding that out one round trip at a
     time is the slow way to learn it.
@@ -153,7 +161,10 @@ def _require_every_named_parent(
         "that would have gone to it go to the other parents named instead, and to none at all if "
         "it was the only one, so the world would be built and quietly not be the declared one. "
         "The usual causes are a key from another test, a factory row that was rolled back, and a "
-        "list built from a queryset filtered differently from the one you meant."
+        "list built from a queryset filtered differently from the one you meant. Inside "
+        "scaled_world there is one more: a world empties the tables its shape declares before "
+        f"building, so if {parent._meta.db_table} is declared in the same shape, a key from a row "
+        "made before the world is gone by the time this fan-out reads it."
     )
 
 

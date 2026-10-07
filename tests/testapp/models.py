@@ -1029,3 +1029,34 @@ class Shipment(models.Model):
     requested_amount = models.IntegerField()
     approved_amount = models.IntegerField()
     settled_amount = models.IntegerField()
+
+
+class Club(models.Model):
+    """A parent that a chain of foreign keys leads back to from its own child.
+
+    ``Section`` points at a club, ``MemberFee`` at a section, and a club at the
+    fee it has selected -- the loop an application with billing grows without
+    anyone drawing it. It is what a scaled world declaring only ``Section`` has
+    to leave alone: every table here references a section transitively, so a
+    statement that empties by schema rather than by row reaches the clubs
+    through the fees, whatever rows the fees hold.
+    """
+
+    name = models.CharField(max_length=50)
+    selected_fee = models.ForeignKey(
+        "MemberFee", null=True, on_delete=models.SET_NULL, related_name="+"
+    )
+
+
+class Section(models.Model):
+    """The declared child in a scaled world over a caller's clubs."""
+
+    club = models.ForeignKey(Club, on_delete=models.CASCADE, related_name="sections")
+    name = models.CharField(max_length=50)
+
+
+class MemberFee(models.Model):
+    """An undeclared table holding a foreign key into the declared one."""
+
+    section = models.ForeignKey(Section, on_delete=models.CASCADE, related_name="fees")
+    amount = models.IntegerField()

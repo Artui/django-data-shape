@@ -85,41 +85,85 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A scaled world no longer empties tables it does not declare, including
+  parents reached through a chain of foreign keys.** On PostgreSQL the emptying
+  was `TRUNCATE ... CASCADE`, and `CASCADE` follows foreign keys by schema,
+  transitively, whatever the rows hold. In an application whose billing points
+  back at its clubs -- a section belongs to a club, a fee to a section, and a
+  club references its selected fee -- a shape declaring only `Section` emptied
+  the clubs too. A fan-out narrowed to a club the caller had made, with
+  `parents=`, was then refused with `InvalidShape` for naming a key that was
+  "not a row of" the club table, blaming the caller's key for the package's own
+  statement; without `parents=` nothing was refused, and tables the caller had
+  filled were silently empty for the life of the block.
+
+  A world now removes the rows of its declared tables and nothing else, and
+  never changes a table its shape does not declare, even inside the block. On
+  PostgreSQL it reads, from `pg_constraint`, every table referencing a declared
+  table that holds rows -- the set `CASCADE` would have taken -- and when none
+  of those holds rows it issues one `TRUNCATE` that lists them all, without
+  `CASCADE`: nothing outside the declaration loses a row, and a list that ever
+  missed a table would be refused by PostgreSQL rather than silently widened.
+  That is the route a session world under a scaled world over the same graph
+  takes every time. Otherwise each declared table is emptied by `DELETE`,
+  children first, and every undeclared row stays where it was. A world over
+  empty tables issues no emptying statement and fires no foreign-key checks.
+
+  **One behaviour changes: a scaled world declaring a parent over rows whose
+  undeclared children reference it is now refused**, where before it silently
+  emptied them. Removing the parent's rows would leave those references
+  pointing at nothing or take the children along, so the world raises the new
+  `ShapeReferenced` before removing anything, naming each reference as
+  `referencing_table.column -> declared_table` and the three ways out: declare
+  that table in the shape too, so its rows are the world's; give the declared
+  table `Disjoint` keys, so the world builds beside the rows already there; or
+  do not create those rows in the test. A scaled world over part of a session
+  world's graph meets it the same way, and the remedy is the same. A foreign key
+  left null is not a reference. The refusal is made on every backend:
+  PostgreSQL's catalogue answers it there, and Django's introspection
+  everywhere else, where a `DELETE` alone would have reached an undeclared table
+  through a database-level `ON DELETE`.
+
+  The `parents=` refusal names the one way a key can still vanish inside a
+  world: a parent table declared in the same shape, which the world empties
+  before building. The `scaled_world`, `scale_fixture` and `shape_fixture`
+  docstrings and the pytest page describe the rule, where the two fixtures'
+  docstrings still said a scaled world could not build over a session world at
+  all.
+
 - **A scaled world builds over child rows the caller wrote earlier in the same
   transaction.** On PostgreSQL it failed on the way in with `cannot TRUNCATE
   "..." because it has pending trigger events`. Django creates PostgreSQL
-  foreign keys `DEFERRABLE INITIALLY DEFERRED`, so a child row -- a declared
-  table's, or one `TRUNCATE ... CASCADE` reaches -- leaves its foreign-key check
-  queued until commit, and PostgreSQL refuses to truncate a table with checks
-  still pending. An insert into a parent alone queues nothing, which is why only
-  a caller who wrote a child met it; the usual way in is a factory's
-  `SubFactory` in a test's own setup.
+  foreign keys `DEFERRABLE INITIALLY DEFERRED`, so a child row leaves its
+  foreign-key check queued until commit, and PostgreSQL refuses to truncate a
+  table with checks still pending. An insert into a parent alone queues nothing,
+  which is why only a caller who wrote a child met it; the usual way in is a
+  factory's `SubFactory` in a test's own setup.
 
-  `scaled_world` now fires the pending checks before emptying the declared
-  tables. That changes only *when* they run: a row that genuinely violates a
-  constraint now raises `IntegrityError` at world entry, naming the constraint,
-  rather than when the enclosing transaction next checks. The constraint mode
-  it sets is transaction state, so the rollback of the world's own block
-  restores the caller's. Off PostgreSQL nothing changes: the tables are emptied
-  by `DELETE`, which has no such refusal.
+  `scaled_world` now fires the pending checks before a `TRUNCATE`. That changes
+  only *when* they run: a row that genuinely violates a constraint now raises
+  `IntegrityError` at world entry, naming the constraint, rather than when the
+  enclosing transaction next checks. The constraint mode it sets is transaction
+  state, so the rollback of the world's own block restores the caller's. Where
+  the world empties by `DELETE` instead -- off PostgreSQL, and on it when an
+  undeclared table holds rows -- nothing is fired, because `DELETE` has no such
+  refusal.
 
   The docstring claimed this package never issues a destructive statement
-  against a table it did not fill. Beside `CASCADE` that was untrue: a table
-  holding a foreign key into a declared one is emptied too, so the caller's
-  block does not see its rows during the world. It now says what holds --
-  nothing destructive survives the block -- and states the cascade plainly. Its
-  claim that the `DELETE` used off PostgreSQL reaches no other table is
-  narrowed too: it reaches one through a database-level `ON DELETE`, such as
-  Django's `DB_CASCADE`.
+  against a table it did not fill. Beside `CASCADE` that was untrue. What holds
+  now, and what the docstring says, is that a world never changes a table its
+  shape does not declare: the only statement naming an undeclared table is a
+  `TRUNCATE` of tables that hold no rows.
 
-  The PostgreSQL statement count a capture around a world sees moved from
-  nineteen to twenty-one, still the same at every factor. The figure quoted in
-  the `scaled_world` and `scale_fixture` docstrings and in the pytest page had
-  drifted from the measured one in all three places; they now quote it, and a
-  test holds them to it. The `execute_wrapper` figure the `scaled_world`
-  docstring quotes beside it, nineteen -- two fewer, because `COPY` reaches the
-  debug cursor's log but not the wrapper hook -- is now measured and held to the
-  prose the same way.
+  The PostgreSQL statement count a capture around a world sees over empty
+  tables is nineteen, the same at every factor; over a session world declaring
+  the same tables, emptying them first adds five more, also the same at every
+  factor. The figure quoted in the `scaled_world` and `scale_fixture` docstrings
+  and in the pytest page had drifted from the measured one in all three places;
+  they now quote both, and a test holds them to it. The `execute_wrapper` figure
+  the `scaled_world` docstring quotes beside it, seventeen -- two fewer, because
+  `COPY` reaches the debug cursor's log but not the wrapper hook -- is now
+  measured and held to the prose the same way.
 
 - **The `ShapeNotEmpty` message and the pytest page describe the refusal the
   package makes.** Since 0.17.0 a scaled world empties the tables it declares

@@ -21,6 +21,7 @@ from django_data_shape import (
     Skew,
     Table,
     Zipf,
+    build,
     scaled_world,
 )
 from django_data_shape.fixtures import scale_fixture
@@ -187,12 +188,23 @@ def test_it_also_undoes_a_world_it_opened_the_transaction_for() -> None:
 # truncate a table a caller's deferred check is still pending against. Two
 # statements whatever the shape and whatever the factor, so still a constant,
 # and PostgreSQL only, because the DELETE path has no such refusal.
-_POSTGRES_STATEMENTS = 21
+#
+# And down by two on PostgreSQL, and by one off it, when a world stopped emptying
+# tables that hold nothing. Over empty tables -- which is what every measurement
+# above counts -- a world now reads which declared tables hold rows, in one
+# statement whatever the shape, and issues nothing else: no constraint-mode
+# statements, no TRUNCATE, no DELETE. Emptying tables that do hold rows costs a
+# fixed handful more, measured separately below.
+_POSTGRES_STATEMENTS = 19
 # Two fewer through execute_wrapper: the COPY for each of the two declared tables
 # reaches CaptureQueriesContext through Django's debug cursor, which logs it, but
 # never passes through the wrapper hook, which sees only execute and executemany.
 _WRAPPED_STATEMENTS = _POSTGRES_STATEMENTS - 2
-_PORTABLE_STATEMENTS = 12
+# Over a session world declaring the same two tables: the read of every foreign
+# key into them, the read of whether any table holding one holds rows, the two
+# constraint-mode statements, and the TRUNCATE. Per world, never per row.
+_EMPTYING_STATEMENTS = 5
+_PORTABLE_STATEMENTS = 11
 _ROWS_PER_INSERT = 1000
 
 
@@ -225,7 +237,7 @@ def _wrapped_statements(shape: Shape, factor: int, alias: str) -> int:
 def test_building_a_world_costs_the_same_on_postgres_at_every_factor() -> None:
     # The half that makes a capture around the block merely wrong rather than
     # catastrophic: one COPY loads a table however many rows it carries, so the
-    # overhead is that, the two constraint-mode statements, the TRUNCATE, the
+    # overhead is that, the read of which declared tables hold rows, the
     # emptiness check, the statistics-target read, the parent key read, the two
     # sequence resets, the ANALYZE and the savepoints -- none of which depend on
     # how many rows there are.
@@ -233,6 +245,22 @@ def test_building_a_world_costs_the_same_on_postgres_at_every_factor() -> None:
 
     assert _statements(shape, 1, DEFAULT_DB_ALIAS) == _POSTGRES_STATEMENTS
     assert _statements(shape, 5, DEFAULT_DB_ALIAS) == _POSTGRES_STATEMENTS
+
+
+@pytest.mark.skipif(
+    connection.vendor != "postgresql", reason="the COPY route needs PostgreSQL to be measured"
+)
+def test_and_over_a_session_world_the_emptying_adds_a_fixed_handful() -> None:
+    # The composition the pytest page recommends, where the declared tables
+    # already hold rows when each world starts. Emptying them is the read of
+    # what references them, the check that none of that holds rows, the two
+    # constraint-mode statements and one TRUNCATE -- none of it per row, so the
+    # count is still the same at every factor.
+    build(_graph(companies=7, sessions=7), require_statistics=False)
+    shape = _graph(companies=10, sessions=_ROWS_PER_INSERT)
+
+    assert _statements(shape, 1, DEFAULT_DB_ALIAS) == _POSTGRES_STATEMENTS + _EMPTYING_STATEMENTS
+    assert _statements(shape, 5, DEFAULT_DB_ALIAS) == _POSTGRES_STATEMENTS + _EMPTYING_STATEMENTS
 
 
 @pytest.mark.skipif(
@@ -249,7 +277,7 @@ def test_and_a_capture_built_on_execute_wrapper_sees_two_fewer() -> None:
     assert _wrapped_statements(shape, 5, DEFAULT_DB_ALIAS) == _WRAPPED_STATEMENTS
 
 
-_SPELLED_OUT = {19: "nineteen", 21: "twenty-one"}
+_SPELLED_OUT = {5: "five", 17: "seventeen", 19: "nineteen"}
 
 
 def test_the_figure_the_prose_quotes_is_the_one_measured() -> None:
@@ -266,6 +294,12 @@ def test_the_figure_the_prose_quotes_is_the_one_measured() -> None:
     }
 
     assert [name for name, text in quoted_in.items() if figure not in " ".join(text.split())] == []
+    # The cost of emptying a session world's tables first, quoted in the same
+    # three places beside it.
+    emptying = f"{_SPELLED_OUT[_EMPTYING_STATEMENTS]} more"
+    assert [
+        name for name, text in quoted_in.items() if emptying not in " ".join(text.split())
+    ] == []
     # And the execute_wrapper figure, which only the scaled_world docstring
     # quotes, held to its own constant.
     wrapped = f"is {_SPELLED_OUT[_WRAPPED_STATEMENTS]}, because ``COPY``"
