@@ -7,6 +7,7 @@ from django_data_shape.databases.drop_database import drop_database
 from django_data_shape.databases.shape_digest import shape_digest
 from django_data_shape.databases.template_database import template_database
 from django_data_shape.databases.unhashable_shape import UnhashableShape
+from django_data_shape.databases.unusable_base import UnusableBase
 from django_data_shape.declaration.check_constraints import check_constraints
 from django_data_shape.declaration.invalid_shape import InvalidShape
 from django_data_shape.declaration.projection import Projection
@@ -105,6 +106,7 @@ __all__ = [
     "UnhashableShape",
     "Uniform",
     "UnsupportedBackend",
+    "UnusableBase",
     "UuidKeys",
     "WorldChanged",
     "Zipf",

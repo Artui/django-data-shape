@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import secrets
 from collections.abc import Iterator
 
 import psycopg
 import pytest
+from django.core.management import call_command
 from django.db import connection, connections, transaction
+from django.db.migrations import Migration
+from django.db.migrations.loader import MigrationLoader
 from django.db.transaction import TransactionManagementError
 from django.test import override_settings
 
@@ -22,12 +26,20 @@ from django_data_shape import (
     UnhashableShape,
     Uniform,
     UnsupportedBackend,
+    UnusableBase,
     Zipf,
     clone_database,
     drop_database,
     template_database,
 )
-from django_data_shape.databases.template_database import PREFIX, _context, _key, _schema_digest
+from django_data_shape.databases.template_database import (
+    PREFIX,
+    _ahead_of_disk,
+    _base_context,
+    _context,
+    _key,
+    _schema_digest,
+)
 from django_data_shape.version import __version__
 from tests.testapp.models import Catalogue, Event, EventSession, SlugPk, Template, TemplateSession
 
@@ -90,6 +102,49 @@ def _rows_in(database: str, statement: str) -> list[tuple[object, ...]]:
     ):
         cursor.execute(statement)
         return cursor.fetchall()
+
+
+def _execute_in(database: str, statement: str) -> None:
+    """Write to a database directly, as an operator editing a base by hand would."""
+    settings = connections["default"].settings_dict
+    with (
+        psycopg.connect(
+            dbname=database,
+            host=settings["HOST"] or None,
+            port=settings["PORT"] or None,
+            user=settings["USER"] or None,
+            password=settings["PASSWORD"] or None,
+        ) as opened,
+        opened.cursor() as cursor,
+    ):
+        cursor.execute(statement)
+
+
+def _base(made: list[str]) -> str:
+    """A migrated database to start templates from, dropped with everything else.
+
+    A copy of the test database, which pytest-django has already migrated --
+    the same thing a project keeping a base for its own test databases has, and
+    a copy rather than a second migrate because it is the migrated state that
+    matters here and not the minutes it took to reach it. Not named with the
+    package's prefix, so that it is never counted as a template.
+    """
+    name = f"shape_base_{secrets.token_hex(4)}"
+    source = connection.settings_dict["NAME"]
+    quote = connection.ops.quote_name
+    # PostgreSQL refuses to copy a database anything is attached to, and the
+    # test's own connection is.
+    connection.close()
+    with connection._nodb_cursor() as cursor:
+        cursor.execute(f"CREATE DATABASE {quote(name)} TEMPLATE {quote(source)}")
+    made.append(name)
+    return name
+
+
+def _templates_on_the_server() -> set[str]:
+    with connection.cursor() as cursor:
+        cursor.execute("SELECT datname FROM pg_database WHERE datname LIKE %s", [f"{PREFIX}%"])
+        return {row[0] for row in cursor.fetchall()}
 
 
 def _oid(database: str) -> int | None:
@@ -396,10 +451,20 @@ def test_and_so_does_everything_around_it() -> None:
     # and would serve a database built by an older release or into an older
     # schema.
     shape = _shape()
+    context = ("version", "schema", "True", "UTC")
 
-    assert _key(shape, ("version", "schema", "True", "UTC")) != _key(
-        shape, ("version", "different schema", "True", "UTC")
-    )
+    assert _key(shape, context) != _key(shape, ("version", "different schema", "True", "UTC"))
+    # And a base, when there is one: its name and its database oid follow the
+    # rest of the context. The oid is the part doing the work -- a base dropped
+    # and recreated under the same name, which is how one restored from a dump
+    # is usually refreshed, is a new oid and so a new key.
+    keys = {
+        _key(shape, context),
+        _key(shape, (*context, "base", "16384")),
+        _key(shape, (*context, "base", "16385")),
+        _key(shape, (*context, "other", "16384")),
+    }
+    assert len(keys) == 4
 
 
 def test_the_schema_digest_moves_when_a_model_does() -> None:
@@ -441,3 +506,275 @@ def test_the_settings_that_decide_what_a_datetime_holds_are_too(
 
     with override_settings(**settings_override):
         assert _context() != before
+
+
+# Starting from a migrated base. A project with a long migration history pays
+# for the replay on every template it builds from empty, and usually already
+# keeps a migrated database for exactly that reason.
+
+
+def test_a_template_can_start_from_a_migrated_base(temporary_databases: list[str]) -> None:
+    base = _base(temporary_databases)
+    # A row in a table the shape does not declare, so that the template can be
+    # told apart from one built from empty: nothing else would put it there.
+    _execute_in(base, "INSERT INTO auth_group (name) VALUES ('from the base')")
+
+    name = template_database(_shape(rows=40), base=base)
+    temporary_databases.append(name)
+    target = f"{name}_end"
+    temporary_databases.append(target)
+    clone_database(name, target)
+
+    assert name.startswith(PREFIX)
+    assert _rows_in(target, "SELECT name FROM auth_group") == [("from the base",)]
+    assert _rows_in(target, f"SELECT count(*) FROM {Catalogue._meta.db_table}") == [(40,)]
+
+
+def test_migrate_still_runs_over_the_copy(temporary_databases: list[str]) -> None:
+    # Finding no migration to apply is not the same as having nothing to do: an
+    # app with no migrations gets its tables from run_syncdb, and a base made by
+    # a plain migrate does not have them. The test app is such an app, so a
+    # template that skipped migrate because it started from a base would have
+    # no table to build the shape into.
+    base = f"shape_base_{secrets.token_hex(4)}"
+    with connection._nodb_cursor() as cursor:
+        cursor.execute(f"CREATE DATABASE {connection.ops.quote_name(base)}")
+    temporary_databases.append(base)
+    original = connection.settings_dict["NAME"]
+    connection.close()
+    connection.settings_dict["NAME"] = base
+    try:
+        call_command("migrate", interactive=False, verbosity=0)
+    finally:
+        connection.close()
+        connection.settings_dict["NAME"] = original
+    assert _rows_in(base, f"SELECT to_regclass('{Catalogue._meta.db_table}') IS NULL") == [(True,)]
+
+    name = template_database(_shape(rows=40, seed=24), base=base)
+    temporary_databases.append(name)
+    target = f"{name}_end"
+    temporary_databases.append(target)
+    clone_database(name, target)
+
+    assert _rows_in(target, f"SELECT count(*) FROM {Catalogue._meta.db_table}") == [(40,)]
+
+
+def test_a_base_is_part_of_the_key(temporary_databases: list[str]) -> None:
+    # The same declaration from empty and from a base is two databases -- the
+    # base's rows are template content -- so it has to be two names.
+    shape = _shape(rows=40, seed=21)
+    base = _base(temporary_databases)
+
+    from_empty = _template(shape, temporary_databases)
+    from_base = template_database(shape, base=base)
+    temporary_databases.append(from_base)
+
+    assert from_empty != from_base
+
+
+def test_recreating_the_base_is_a_new_template(temporary_databases: list[str]) -> None:
+    # The way a base restored from a schema dump is refreshed: drop it, make it
+    # again under the same name. What it holds may have changed and nothing on
+    # disk would say so, which is what keying on its oid answers.
+    shape = _shape(rows=40, seed=22)
+    base = _base(temporary_databases)
+    first = template_database(shape, base=base)
+    temporary_databases.append(first)
+
+    drop_database(base)
+    with connection._nodb_cursor() as cursor:
+        cursor.execute(
+            f"CREATE DATABASE {connection.ops.quote_name(base)} "
+            f"TEMPLATE {connection.ops.quote_name(connection.settings_dict['NAME'])}"
+        )
+    again = template_database(shape, base=base)
+    temporary_databases.append(again)
+
+    assert again != first
+
+
+def test_what_the_key_absorbs_for_a_base_is_its_name_and_its_oid(
+    temporary_databases: list[str],
+) -> None:
+    base = _base(temporary_databases)
+
+    assert _base_context(connection, base) == (base, str(_oid(base)))
+
+
+def test_a_base_behind_the_migrations_on_disk_is_refused(temporary_databases: list[str]) -> None:
+    # Never migrated forward: replaying the history is what a base exists to
+    # skip, and a template that quietly did it would cost the thirteen minutes
+    # nobody asked for, every time a migration was added.
+    base = _base(temporary_databases)
+    _execute_in(
+        base,
+        "DELETE FROM django_migrations "
+        "WHERE app = 'contenttypes' AND name = '0002_remove_content_type_name'",
+    )
+    before = _templates_on_the_server()
+
+    with pytest.raises(UnusableBase) as refused:
+        template_database(_shape(), base=base)
+
+    message = str(refused.value)
+    assert base in message
+    assert "behind" in message
+    assert "contenttypes.0002_remove_content_type_name" in message
+    assert "migrate" in message
+    assert _templates_on_the_server() == before
+
+
+def test_a_base_that_goes_stale_is_refused_with_its_template_already_built(
+    temporary_databases: list[str],
+) -> None:
+    # A stale base keeps its name and its oid, so the template built from it
+    # while it matched is still the one the key names. The check runs before
+    # the key is looked up, so the cache hit is never reached.
+    base = _base(temporary_databases)
+    built = template_database(_shape(rows=40, seed=25), base=base)
+    temporary_databases.append(built)
+    _execute_in(
+        base,
+        "DELETE FROM django_migrations "
+        "WHERE app = 'contenttypes' AND name = '0002_remove_content_type_name'",
+    )
+
+    with pytest.raises(UnusableBase, match="behind"):
+        template_database(_shape(rows=40, seed=25), base=base)
+
+
+def test_a_base_ahead_of_the_migrations_on_disk_is_refused(temporary_databases: list[str]) -> None:
+    # A base migrated by a newer branch holds schema the migrations on disk do
+    # not describe, and those migrations are what the key says the template
+    # holds.
+    base = _base(temporary_databases)
+    _execute_in(
+        base,
+        "INSERT INTO django_migrations (app, name, applied) "
+        "VALUES ('contenttypes', '9999_ghost', now())",
+    )
+    before = _templates_on_the_server()
+
+    with pytest.raises(UnusableBase) as refused:
+        template_database(_shape(), base=base)
+
+    message = str(refused.value)
+    assert base in message
+    assert "ahead" in message
+    assert "contenttypes.9999_ghost" in message
+    assert "behind" not in message
+    assert _templates_on_the_server() == before
+
+
+def test_a_database_never_migrated_is_behind_by_all_of_it(temporary_databases: list[str]) -> None:
+    # The likeliest wrong base of all -- an empty database, or the wrong one --
+    # and the case that shows why the message names a few and counts the rest:
+    # on a real project the list would be hundreds of migrations long.
+    base = f"shape_base_{secrets.token_hex(4)}"
+    with connection._nodb_cursor() as cursor:
+        cursor.execute(f"CREATE DATABASE {connection.ops.quote_name(base)}")
+    temporary_databases.append(base)
+
+    with pytest.raises(UnusableBase, match=r"behind .* for example \S+, \S+, \S+ and \d+ more"):
+        template_database(_shape(), base=base)
+
+
+def test_a_base_that_does_not_exist_is_refused_by_name() -> None:
+    before = _templates_on_the_server()
+
+    with pytest.raises(UnusableBase, match="shape_base_that_was_never_made"):
+        template_database(_shape(), base="shape_base_that_was_never_made")
+
+    assert _templates_on_the_server() == before
+
+
+def test_a_connection_already_on_the_base_does_not_stop_the_copy(
+    temporary_databases: list[str],
+) -> None:
+    # A project's own test database is the likeliest base, so the process
+    # asking for the template is the likeliest thing attached to it -- and
+    # PostgreSQL refuses to copy a database anything is attached to. Holds that
+    # nothing between reading the base and copying it reopens the connection.
+    base = _base(temporary_databases)
+    original = connection.settings_dict["NAME"]
+    connection.close()
+    connection.settings_dict["NAME"] = base
+    try:
+        connection.ensure_connection()
+        name = template_database(_shape(rows=40, seed=23), base=base)
+        temporary_databases.append(name)
+
+        # And the caller's connection is left pointing where it pointed.
+        assert connection.settings_dict["NAME"] == base
+    finally:
+        connection.close()
+        connection.settings_dict["NAME"] = original
+
+    assert _oid(name) is not None
+
+
+def test_a_squash_whose_replaced_files_were_deleted_does_not_make_a_base_ahead(
+    temporary_databases: list[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The state a squash passes through on its way to being an ordinary
+    # migration: the replaced files are gone, the squash still lists them in
+    # ``replaces``, and every database migrated before the squash still records
+    # them. No installed app ships one, so the squash is added to what the
+    # loader reads from disk -- a real Migration, shaped as squashmigrations
+    # writes it -- and the base records the two migrations it replaced.
+    squash = Migration("0003_squashed_0004", "contenttypes")
+    squash.replaces = [("contenttypes", "0003_gone"), ("contenttypes", "0004_gone")]
+    squash.dependencies = [("contenttypes", "0002_remove_content_type_name")]
+    load_disk = MigrationLoader.load_disk
+
+    def load_disk_with_the_squash(loader: MigrationLoader) -> None:
+        load_disk(loader)
+        loader.disk_migrations[("contenttypes", squash.name)] = squash
+
+    monkeypatch.setattr(MigrationLoader, "load_disk", load_disk_with_the_squash)
+    base = _base(temporary_databases)
+    _execute_in(
+        base,
+        "INSERT INTO django_migrations (app, name, applied) VALUES "
+        "('contenttypes', '0003_gone', now()), ('contenttypes', '0004_gone', now())",
+    )
+
+    name = template_database(_shape(rows=40, seed=26), base=base)
+    temporary_databases.append(name)
+
+    assert name.startswith(PREFIX)
+
+
+# The ahead check's arithmetic, apart from any database, because the case that
+# needs the exclusion -- a squash whose replaced files were deleted -- needs a
+# squashed migration on disk to reach through a real base.
+
+
+def test_a_migration_on_disk_is_not_ahead_of_it() -> None:
+    applied = [("shop", "0001_initial"), ("shop", "0002_order")]
+
+    assert _ahead_of_disk(applied, disk=applied, replaced=[]) == []
+
+
+def test_one_recorded_and_missing_from_disk_is() -> None:
+    applied = [("shop", "0003_ghost"), ("shop", "0001_initial"), ("auth", "0099_ghost")]
+
+    assert _ahead_of_disk(applied, disk=[("shop", "0001_initial")], replaced=[]) == [
+        ("auth", "0099_ghost"),
+        ("shop", "0003_ghost"),
+    ]
+
+
+def test_unless_a_migration_on_disk_replaces_it() -> None:
+    # A squash whose replaced files were deleted leaves their records behind,
+    # legitimately: the squash on disk is what they became.
+    applied = [("shop", "0001_initial"), ("shop", "0002_order"), ("shop", "0001_squashed_0002")]
+
+    assert (
+        _ahead_of_disk(
+            applied,
+            disk=[("shop", "0001_squashed_0002")],
+            replaced=[("shop", "0001_initial"), ("shop", "0002_order")],
+        )
+        == []
+    )

@@ -59,14 +59,15 @@ def fan_out_sizes(
 
     The one thing recomputation depends on is that **the parent table still
     holds the parents the children were spread across**. Where the parent is
-    declared in the same shape -- which every cacheable shape is, since a
-    template is built into a freshly migrated database and a fan-out over an
-    empty parent is refused -- that is checked here, and a mismatch raises
+    declared in the same shape -- which every cacheable shape built from empty
+    is, since that template starts as a freshly migrated database and a fan-out
+    over an empty parent is refused -- that is checked here, and a mismatch raises
     :class:`~django_data_shape.relations.world_changed.WorldChanged` rather than returning
     a plausible partition of a world that never existed. Where the parents were
-    built outside the shape, by the ORM or a factory, there is nothing to check
-    against and nothing is claimed: the answer describes the parents that are
-    there now, so ask before a test starts creating more of them.
+    built outside the shape, by the ORM, a factory or a template's migrated
+    ``base``, there is nothing to check against and nothing is claimed: the
+    answer describes the parents that are there now, so ask before a test starts
+    creating more of them.
 
     Costs one ``SELECT`` over the parent table. Everything else is arithmetic
     over the parent count, which is the asymmetry worth having -- fifty

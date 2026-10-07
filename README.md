@@ -225,6 +225,10 @@ clone_database(template, "test_myapp", replace=True)
 
 The template is named after a content hash of the declaration, the schema, the
 relevant settings and this package's version, so a stale one is never asked for.
+A project with a long migration history can start templates from a database it
+already keeps migrated, `template_database(shape, base="myproject_base")`, rather
+than replaying every migration into an empty one; a base whose migrations differ
+from the ones on disk is refused, never migrated forward.
 A shape holding a `Derived` or a `KeyFunction` is refused rather than hashed --
 there is no honest digest of a callable, and every way of guessing one agrees
 while the data has changed. See

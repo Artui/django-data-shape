@@ -124,8 +124,8 @@ clone_database(template, "test_myapp", replace=True)
 [`template_database`][django_data_shape.databases.template_database.template_database]
 names the database after a content hash of everything that decides what is in it,
 so reuse is safe rather than merely fast. Change the declaration, the schema, the
-time-zone settings or this package's version and the name changes, so the old
-database is simply never asked for again.
+time-zone settings, this package's version or the base it starts from and the
+name changes, so the old database is simply never asked for again.
 
 ### The key
 
@@ -237,6 +237,80 @@ def django_db_modify_db_settings(django_db_modify_db_settings_parallel_suffix, d
 deciding whether the database you have is the one you want, and the template
 *is* the reuse.
 
+### Starting from a migrated base
+
+By default a template is built into a database that `migrate` fills from empty,
+and on a project with a long migration history that replay is most of the cost: one with
+about 330 migrations measured thirteen and a half minutes of `migrate` against
+about one minute to build a four-million-row shape -- paid again by every
+template a change to the declaration makes. Such a project usually keeps a
+migrated database already, and clones its test databases from it. Name it as
+the base and the template starts as a copy of it instead:
+
+```python
+# conftest.py
+import pytest
+from django.db import connections
+
+from django_data_shape import clone_database, drop_database, template_database
+
+BASE = "myproject_base"  # a database you keep migrated to the migrations on disk
+
+
+@pytest.fixture(scope="session")
+def django_db_setup(django_test_environment, django_db_modify_db_settings, django_db_blocker):
+    connection = connections["default"]
+    settings = connection.settings_dict
+    target = settings["TEST"]["NAME"] or f"test_{settings['NAME']}"
+
+    with django_db_blocker.unblock():
+        clone_database(template_database(SHAPE, base=BASE), target, replace=True)
+        connection.close()
+        settings["NAME"] = target
+        yield
+        connection.close()
+        drop_database(target)
+```
+
+`migrate` still runs over the copy. On an accepted base it finds nothing to
+apply, and it is still what creates the tables of an app with no migrations and
+what fires `post_migrate`, so a template from a base is filled exactly as one
+from empty is.
+
+**A base whose migrations are not the ones on disk is refused, never migrated
+forward.** The migrations on disk are already part of the key; refusing every
+base they do not describe is what lets them describe the base's schema too, so
+the key stays a statement about what the template holds. It also means a
+template never quietly re-runs a long `migrate` because a branch added one
+migration. There are three refusals, each raising
+[`UnusableBase`][django_data_shape.databases.unusable_base.UnusableBase] before
+anything is created and naming the base:
+
+- **behind** -- a migration on disk is not applied to the base. Migrate the
+  base, which applies only what is new, and ask again.
+- **ahead** -- the base records an applied migration that no migration on disk
+  is or replaces, usually because another branch migrated it. Migrate it back
+  from a checkout that has those migrations, or recreate it. A squash whose
+  replaced files were deleted is not ahead while the squash still lists them in
+  its `replaces`; once that attribute is removed too, their leftover rows in
+  `django_migrations` are, and deleting those rows is the remedy.
+- **missing** -- no database by that name exists.
+
+The base is checked on every call, a cache hit included, because its oid is part
+of the key. That is also what makes refreshing a base safe: dropping and
+recreating it, which is how one restored from a schema dump is usually updated,
+gives it a new oid and so a new template.
+
+Whatever else the base holds becomes template content, which is what lets the
+base carry reference data the shape does not declare. Rows in a table the shape
+*does* declare are refused by the build's emptiness check as they would be
+anywhere, except in a table with `Disjoint` keys, which is exempt from it.
+
+The base must have nothing attached to it while the template is copied -- the
+same rule as for cloning a template, and for the same reason. This process's own
+connection is closed first, so a project whose test database is the base can
+pass it as one.
+
 ### What it does not support
 
 - **Anything but PostgreSQL.** `CREATE DATABASE ... TEMPLATE` has no equivalent
@@ -259,6 +333,13 @@ deciding whether the database you have is the one you want, and the template
   every migration's name and every model's fields, so ordinary schema changes
   move it; editing the body of a migration that has already been created changes
   neither. Drop the template by hand when that happens.
+- **Rows edited in a base in place.** The key covers a base's name and oid and,
+  through the refusal, its migrations; changing the rows it holds with no
+  migration and no recreate changes none of them, so the template built from the
+  old rows is still the one asked for. Drop it with `drop_database` when that
+  happens, or recreate the base rather than editing it.
+- **Migrating a base.** A base behind or ahead of the migrations on disk is
+  refused with the remedy, as above, rather than brought up to date.
 
 Parallel runs *are* supported. Under `pytest-xdist` every worker asks for the
 same template at once; the first takes a PostgreSQL advisory lock on the digest

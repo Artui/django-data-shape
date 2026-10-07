@@ -199,10 +199,10 @@ that drew differently is never the one being read.
 
 The one thing recomputation needs is that the parent table still holds the
 parents the children were spread across. Where the parent is declared in the
-same shape — which every cacheable shape is, since a template is built into a
-freshly migrated database — that is checked, and a mismatch raises
-`WorldChanged` rather than returning a plausible partition of a world nobody
-built:
+same shape — which every cacheable shape built from empty is, since that
+template starts as a freshly migrated database with no parent rows to draw on —
+that is checked, and a mismatch raises `WorldChanged` rather than returning a
+plausible partition of a world nobody built:
 
 ```text
 Company holds 41 rows and this shape declares 40, so the fan-out for
@@ -210,8 +210,9 @@ Session.company would be spread over parents the children were never spread
 across.
 ```
 
-Where the parents came from the ORM instead, there is nothing to check against
-and nothing is claimed: the answer describes the parents that are there. Ask
+Where the parents came from the ORM instead, or from rows a template's migrated
+`base` already held, there is nothing to check against and nothing is claimed:
+the answer describes the parents that are there. Ask
 before the test starts making more.
 
 ### The sizes are not ordered on the parent key

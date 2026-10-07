@@ -134,6 +134,8 @@
 
 ::: django_data_shape.databases.unhashable_shape.UnhashableShape
 
+::: django_data_shape.databases.unusable_base.UnusableBase
+
 ::: django_data_shape.invariants.invariant_violated.InvariantViolated
 
 ::: django_data_shape.relations.world_changed.WorldChanged

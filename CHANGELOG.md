@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`template_database(shape, base=...)` starts a template from a database
+  that is already migrated.** A template was always built into an empty
+  database that `migrate` replayed the whole history into, and on a project
+  with a long one that replay is most of the cost: a consumer with about 330
+  migrations measured thirteen and a half minutes of `migrate` against about a
+  minute to build a 4.4-million-row shape, paid again by every template a
+  change to the declaration makes. With a base, the template starts as
+  `CREATE DATABASE ... TEMPLATE <base>`. `migrate --run-syncdb` still runs over
+  the copy -- finding nothing to apply, but still creating an unmigrated app's
+  tables and firing `post_migrate` -- so it is filled exactly as one from empty
+  is. `base=None`, the default, behaves and keys exactly as before.
+
+  **A base whose migrations are not the ones on disk is refused, never migrated
+  forward**, with the new `UnusableBase`, before anything is created. That is
+  what keeps the cache key sound: the migrations on disk are already in it, and
+  refusing every base they do not describe is what lets them describe the
+  base's schema too. *Behind* is `migrate`'s own plan over every leaf, read
+  against the base, so squashed migrations count the way `migrate` counts them.
+  *Ahead* is an applied migration that no migration on disk is or replaces, so
+  the records a squash leaves behind once its replaced files are deleted do not
+  refuse a good base. A base that does not exist is refused by name. Each
+  message names a few of the migrations that differ and the remedy.
+
+  The key also takes the base's name and its database oid, so dropping and
+  recreating a base -- the usual way one restored from a schema dump is
+  refreshed -- is a new template. The base is checked on a cache hit too. Rows
+  the base holds become template content; editing them in place, with no
+  migration and no recreate, is not seen by the key, and is stated beside the
+  existing `RunSQL` gap with the same remedy, `drop_database`. The process's own
+  connection is closed before the copy, so a project whose test database is the
+  base can pass it as one.
+
 ### Changed
 
 - **Every module the package owns now lives in a subpackage named for a
