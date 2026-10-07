@@ -56,6 +56,7 @@ from django_data_shape.relations.world_changed import WorldChanged
 from django_data_shape.scaling.scale_protocol import ScaleProtocol
 from django_data_shape.scaling.scaled_shape import scaled_shape
 from django_data_shape.scaling.scaled_world import scaled_world
+from django_data_shape.scaling.shape_referenced import ShapeReferenced
 from django_data_shape.types.build_result import BuildResult
 from django_data_shape.types.canonical import Canonical
 from django_data_shape.types.children_per_parent import ChildrenPerParent
@@ -98,6 +99,7 @@ __all__ = [
     "SequentialKeys",
     "Shape",
     "ShapeNotEmpty",
+    "ShapeReferenced",
     "Skew",
     "SqlKeys",
     "SqlValue",

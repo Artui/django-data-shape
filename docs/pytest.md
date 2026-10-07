@@ -93,8 +93,28 @@ from empty every time. They can still point at one model: a scaled world empties
 its declared tables inside the transaction it rolls back, so inside the block it
 sees only its own world, and the session rows are back after it. That is the
 shape a first consumer arrives with -- a big session world for plan assertions,
-small scaled worlds for growth assertions over the same flow -- and it needs no
-arrangement.
+small scaled worlds for growth assertions over the same flow -- and over the
+same graph it needs no arrangement.
+
+A scaled world removes the rows of its declared tables **and nothing else**, so
+it never changes a table its shape does not declare, even for the life of the
+block. Where a row it did not make references a row it would have to remove --
+a session table the scaled shape leaves out, or a row the test wrote -- it
+refuses before removing anything, rather than leave the reference pointing at
+nothing:
+
+```text
+A scaled world cannot empty testapp_company without changing a table its shape
+does not declare: rows it did not make reference the rows it would remove
+(testapp_session.company_id -> testapp_company). ...
+```
+
+The refusal is `ShapeReferenced`, and its message names each reference and the
+three ways out: declare the referencing table in the scaled shape too, so its
+rows are the world's; give the declared table `Disjoint` keys (`UuidKeys` or
+`Md5Keys`), so the world builds beside the rows already there instead of
+emptying the table; or do not create those rows in that test. A foreign key
+left null is not a reference, and the refusal is made on every backend.
 
 What is still refused is a second *build* over rows that stay: two
 session-scoped `shape_fixture`s over one model, or `build()` called directly over
@@ -192,15 +212,21 @@ remember either. Each world is built inside that transaction and undone by
 rolling back to a savepoint, so the next factor starts from an empty table and
 the test's own transaction survives.
 
-A world first empties the tables its shape declares, inside that same
-transaction, and on PostgreSQL the emptying is `TRUNCATE ... CASCADE`: a table
-holding a foreign key into a declared one is empty inside the block too, whether
-the shape declares it or not, and its rows come back with the rollback. Rows the
-test wrote before entering are fine, children included -- the foreign-key checks
-Django leaves deferred on them are fired before the `TRUNCATE`, because
-PostgreSQL refuses to truncate a table with checks still pending. A row that
-genuinely breaks a constraint therefore raises `IntegrityError` on the way into
-the world, naming the constraint, rather than at the end of the test.
+A world first empties the tables its shape declares that hold rows, inside
+that same transaction, and changes no other table: rows the test wrote in a
+declared table are gone inside the block and back after it, and a row the test
+wrote that *references* a declared table is refused, as above, rather than
+emptied or orphaned. On PostgreSQL the emptying is one `TRUNCATE` listing the
+declared tables and every table that references them, when none of those holds
+rows, and otherwise a `DELETE` per declared table holding rows. Never
+`TRUNCATE ... CASCADE`, which follows foreign keys by schema rather than by row:
+through a chain of keys leading from a declared child back to its own parent, it
+emptied the parent too.
+Before the `TRUNCATE`, the foreign-key checks Django leaves deferred on the
+test's own writes are fired, because PostgreSQL refuses to truncate a table with
+checks still pending. A row that genuinely breaks a constraint therefore raises
+`IntegrityError` on the way into the world, naming the constraint, rather than
+at the end of the test.
 
 Outside a fixture, the same thing is a context manager:
 
@@ -234,12 +260,14 @@ def test_the_dashboard_query_does_not_grow(world, django_assert_num_queries):
                 dashboard()
 ```
 
-On PostgreSQL the hazard is mild and fixed -- twenty-one statements for a
-two-table shape, at every factor, because one `COPY` loads a table however many
-rows it carries, and everything else a world emits -- the foreign-key checks
-fired before emptying, the `TRUNCATE`, the emptiness check, the statistics-target
-read, the parent key read, the sequence resets, the `ANALYZE` and the savepoints
--- is counted per table or per world, never per row. Off PostgreSQL it is neither mild nor fixed: the inserts are
+On PostgreSQL the hazard is mild and fixed -- nineteen statements for a
+two-table shape over empty tables, at every factor, because one `COPY` loads a
+table however many rows it carries, and everything else a world emits -- the
+read of which declared tables hold rows, the emptiness check, the
+statistics-target read, the parent key read, the sequence resets, the `ANALYZE`
+and the savepoints -- is counted per table or per world, never per row. Over a
+session world declaring the same tables, emptying them adds five more, the same
+at every factor. Off PostgreSQL it is neither mild nor fixed: the inserts are
 ordinary statements, one per thousand rows, so the count a capture sees **grows
 with the factor**, and a growth assertion measuring from outside the block would
 read the loader's curve as its subject's.

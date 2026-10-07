@@ -17,7 +17,9 @@ import contextlib
 
 import pytest
 from django.db import IntegrityError, connection, transaction
+from django.test.utils import CaptureQueriesContext
 
+import django_data_shape
 from django_data_shape import Constant, FanOut, Shape, Table, Zipf, scaled_world
 from tests.testapp.models import Company, Session
 
@@ -59,19 +61,27 @@ def test_a_child_the_caller_wrote_does_not_stop_a_world_declaring_it() -> None:
     ]
 
 
-def test_nor_does_a_child_only_the_cascade_reaches() -> None:
-    # The shape declares the parent alone, so the child is emptied only because
-    # TRUNCATE ... CASCADE follows its foreign key -- and PostgreSQL refuses the
-    # cascaded table for its pending checks exactly as it refuses a named one.
-    # It is also the consequence the docstring states: inside the block the
-    # caller does not see rows in an undeclared table that references a
-    # declared one, and they are back afterwards.
+def test_a_world_declaring_only_the_parent_refuses_the_callers_child() -> None:
+    # The shape declares the parent alone, and the caller's child references
+    # it. Emptying the parent used to empty the child too, through TRUNCATE ...
+    # CASCADE, so the block ran without rows the caller had made in a table the
+    # shape never named. A world now removes the rows of its declared tables and
+    # nothing else, so it refuses instead, naming the reference -- before any
+    # statement that would meet the child's pending check.
     company, session = _caller_writes_a_parent_and_a_child()
 
-    with scaled_world(Shape(Table(Company, rows=3, name=Constant("world"))), 1):
-        assert Company.objects.count() == 3
-        assert not Session.objects.exists()
+    with (
+        pytest.raises(
+            Exception, match=r"testapp_session\.company_id -> testapp_company"
+        ) as refused,
+        contextlib.ExitStack() as entering,
+    ):
+        entering.enter_context(
+            scaled_world(Shape(Table(Company, rows=3, name=Constant("world"))), 1)
+        )
 
+    assert refused.type is django_data_shape.ShapeReferenced
+    assert list(Company.objects.values_list("pk", "name")) == [(company.pk, "caller")]
     assert list(Session.objects.values_list("pk", "company_id")) == [(session.pk, company.pk)]
 
 
@@ -93,8 +103,13 @@ def test_the_constraint_mode_the_world_set_does_not_outlive_it() -> None:
             "REFERENCES shape_parent DEFERRABLE INITIALLY DEFERRED)"
         )
 
-    with scaled_world(_company_and_sessions(), 1):
+    # A world over empty tables fires nothing, so the caller writes rows first:
+    # the checks are fired only on the way to a TRUNCATE, and this test is
+    # about that route. The capture holds it there.
+    _caller_writes_a_parent_and_a_child()
+    with CaptureQueriesContext(connection) as captured, scaled_world(_company_and_sessions(), 1):
         ...
+    assert "SET CONSTRAINTS ALL DEFERRED" in [query["sql"] for query in captured]
 
     with connection.cursor() as cursor:
         with pytest.raises(IntegrityError), transaction.atomic():
