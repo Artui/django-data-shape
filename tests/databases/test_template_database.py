@@ -5,6 +5,7 @@ from __future__ import annotations
 import secrets
 from collections.abc import Iterator
 
+import django
 import psycopg
 import pytest
 from django.contrib.auth.models import Group
@@ -41,9 +42,11 @@ from django_data_shape.databases.template_database import (
     _context,
     _key,
     _schema_digest,
+    _stranded_squashes,
 )
 from django_data_shape.version import __version__
 from tests.testapp.models import (
+    Award,
     Catalogue,
     Company,
     Event,
@@ -52,6 +55,7 @@ from tests.testapp.models import (
     Subscriber,
     Template,
     TemplateSession,
+    Wearer,
 )
 
 # transaction=True throughout, and it is a requirement rather than a habit here:
@@ -768,13 +772,17 @@ def test_a_row_for_an_app_no_longer_installed_does_not_refuse_the_base(
     _execute_in(
         base,
         "INSERT INTO django_migrations (app, name, applied) "
-        "VALUES ('removedapp', '0001_initial', now())",
+        "VALUES ('removedapp', '0001_initial', now()); "
+        "CREATE TABLE removedapp_thing (id int); INSERT INTO removedapp_thing VALUES (5)",
     )
 
     name = template_database(_shape(rows=40, seed=28), base=base)
     temporary_databases.append(name)
+    target = f"{name}_end"
+    temporary_databases.append(target)
+    clone_database(name, target)
 
-    assert _oid(name) is not None
+    assert _rows_in(target, "SELECT id FROM removedapp_thing") == [(5,)]
 
 
 def test_a_base_that_does_not_exist_is_refused_by_name(temporary_databases: list[str]) -> None:
@@ -997,6 +1005,175 @@ def test_an_unmanaged_models_table_in_the_base_is_carried(
     assert _rows_in(target, f"SELECT email FROM {Subscriber._meta.db_table}") == [("kept@base",)]
 
 
+def _columns_of(table: str) -> str:
+    """Every column of ``table`` as information_schema describes it."""
+    return (
+        "SELECT column_name, data_type, is_nullable FROM information_schema.columns "
+        f"WHERE table_name = '{table}' ORDER BY column_name"
+    )
+
+
+def _drop_foreign_keys(database: str, table: str) -> None:
+    """Drop every foreign key ``table`` holds, as a legacy table often has none.
+
+    A table carried into the copy that points into a table being rebuilt stops
+    the rebuild, which ``test_a_reference_into_such_a_table_refuses_the_base``
+    holds; the tests here are about which tables are carried, so theirs go.
+    """
+    _execute_in(
+        database,
+        "DO $$ DECLARE constraint_name text; BEGIN "
+        "FOR constraint_name IN SELECT conname FROM pg_constraint "
+        f"WHERE conrelid = '{table}'::regclass AND contype = 'f' LOOP "
+        f"EXECUTE format('ALTER TABLE {table} DROP CONSTRAINT %I', constraint_name); "
+        "END LOOP; END $$",
+    )
+
+
+def test_a_stale_through_table_is_rebuilt_with_the_model_that_declares_it(
+    temporary_databases: list[str],
+) -> None:
+    # run_syncdb makes an auto-created many-to-many table only while making the
+    # model that declares the relation, so the copy has to drop it with that
+    # model: kept, it would survive stale, and the model's own create would
+    # fail on it with "already exists". Holds that those tables are dropped.
+    through = Wearer.badges.through._meta.db_table
+    base = _base(temporary_databases)
+    _execute_in(base, f"ALTER TABLE {through} ADD COLUMN left_over integer")
+    shape = _shape(rows=40, seed=49)
+
+    from_base = template_database(shape, base=base)
+    temporary_databases.append(from_base)
+    from_empty = _template(shape, temporary_databases)
+    targets = [f"{from_base}_end", f"{from_empty}_end"]
+    temporary_databases.extend(targets)
+    clone_database(from_base, targets[0])
+    clone_database(from_empty, targets[1])
+
+    assert _rows_in(targets[0], _columns_of(through)) == _rows_in(targets[1], _columns_of(through))
+    assert "left_over" not in str(_rows_in(targets[0], _columns_of(through)))
+
+
+def test_the_through_table_of_an_unmanaged_model_is_carried(
+    temporary_databases: list[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Django counts an auto-created through table as managed when either end
+    # is, so with the declaring end unmanaged the through still reads as one
+    # migrate builds -- and run_syncdb never builds it, because it builds it
+    # only from the declaring model, which it skips. Dropped, it would be lost.
+    # Holds that the through tables are read off the models run_syncdb makes.
+    monkeypatch.setattr(Wearer._meta, "managed", False)
+    through = Wearer.badges.through._meta.db_table
+    base = _base(temporary_databases)
+    _drop_foreign_keys(base, through)
+    _execute_in(
+        base,
+        f"INSERT INTO {Wearer._meta.db_table} (id, name) VALUES (1, 'kept'); "
+        f"INSERT INTO {through} (wearer_id, badge_id) VALUES (1, 7)",
+    )
+    assert Wearer.badges.through._meta.managed
+
+    name = template_database(_shape(rows=40, seed=50), base=base)
+    temporary_databases.append(name)
+    target = f"{name}_end"
+    temporary_databases.append(target)
+    clone_database(name, target)
+
+    assert _rows_in(target, f"SELECT wearer_id, badge_id FROM {through}") == [(1, 7)]
+
+
+def test_a_declared_through_model_is_judged_as_a_model_of_its_own(
+    temporary_databases: list[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A through model a relation names is not made by the declaring model's
+    # create, so it is never dropped on that model's account: unmanaged, its
+    # table is carried like any other unmanaged model's. Holds that only the
+    # auto-created through tables go with the model that declares them.
+    monkeypatch.setattr(Award._meta, "managed", False)
+    base = _base(temporary_databases)
+    _drop_foreign_keys(base, Award._meta.db_table)
+    _execute_in(base, f"INSERT INTO {Award._meta.db_table} (wearer_id, badge_id) VALUES (3, 4)")
+
+    name = template_database(_shape(rows=40, seed=51), base=base)
+    temporary_databases.append(name)
+    target = f"{name}_end"
+    temporary_databases.append(target)
+    clone_database(name, target)
+
+    assert _rows_in(target, f"SELECT wearer_id, badge_id FROM {Award._meta.db_table}") == [(3, 4)]
+
+
+class _NotSubscribersOnDefault:
+    """A database router that keeps ``Subscriber`` off the default alias."""
+
+    def allow_migrate(
+        self, db: str, app_label: str, model_name: str | None = None, **hints: object
+    ) -> bool | None:
+        return False if (app_label, model_name) == ("testapp", "subscriber") else None
+
+
+def test_a_table_the_router_keeps_off_the_alias_is_carried(
+    temporary_databases: list[str],
+) -> None:
+    # run_syncdb asks the router which models to make on the alias it runs on,
+    # and makes none of the rest, so a table the router keeps off it is one
+    # nothing would make again. Holds that the router is asked.
+    base = _base(temporary_databases)
+    _execute_in(base, f"INSERT INTO {Subscriber._meta.db_table} (email) VALUES ('routed@base')")
+
+    with override_settings(DATABASE_ROUTERS=[_NotSubscribersOnDefault()]):
+        name = template_database(_shape(rows=40, seed=52), base=base)
+    temporary_databases.append(name)
+    target = f"{name}_end"
+    temporary_databases.append(target)
+    clone_database(name, target)
+
+    assert _rows_in(target, f"SELECT email FROM {Subscriber._meta.db_table}") == [("routed@base",)]
+
+
+def test_what_a_migration_did_to_a_rebuilt_table_is_lost_from_a_base_and_kept_from_empty(
+    temporary_databases: list[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The gap the docs state rather than detect. A migration of an app with
+    # migrations may index a table of an app without them; the base applied it,
+    # so the copy rebuilds the table and never runs the migration again. From
+    # empty, run_syncdb makes the table first and the migration indexes it.
+    index = Migration("0003_index_catalogue", "contenttypes")
+    index.dependencies = [("contenttypes", "0002_remove_content_type_name")]
+    index.operations = [
+        migrations.RunSQL(
+            f"CREATE INDEX catalogue_name_by_hand ON {Catalogue._meta.db_table} (name)",
+            migrations.RunSQL.noop,
+        )
+    ]
+    load_disk = MigrationLoader.load_disk
+
+    def load_disk_with_the_index(loader: MigrationLoader) -> None:
+        load_disk(loader)
+        loader.disk_migrations[("contenttypes", index.name)] = index
+
+    monkeypatch.setattr(MigrationLoader, "load_disk", load_disk_with_the_index)
+    base = _base(temporary_databases)
+    _migrate(base)
+    indexed = (
+        "SELECT count(*) FROM pg_indexes WHERE indexname = 'catalogue_name_by_hand' "
+        f"AND tablename = '{Catalogue._meta.db_table}'"
+    )
+    assert _rows_in(base, indexed) == [(1,)]
+    shape = _shape(rows=40, seed=57)
+
+    from_base = template_database(shape, base=base)
+    temporary_databases.append(from_base)
+    from_empty = _template(shape, temporary_databases)
+    targets = [f"{from_base}_end", f"{from_empty}_end"]
+    temporary_databases.extend(targets)
+    clone_database(from_base, targets[0])
+    clone_database(from_empty, targets[1])
+
+    assert _rows_in(targets[0], indexed) == [(0,)]
+    assert _rows_in(targets[1], indexed) == [(1,)]
+
+
 def test_a_reference_into_such_a_table_refuses_the_base(temporary_databases: list[str]) -> None:
     # Rebuilding drops the table without CASCADE. CASCADE would remove the
     # reference silently, run_syncdb would not put it back, and the template
@@ -1179,6 +1356,203 @@ def test_a_squash_applied_in_part_with_its_replaced_files_deleted_is_refused(
     assert _templates_on_the_server() == before
 
 
+# A squash of a squash, as squashmigrations writes one from Django 6.0: the outer
+# squash lists the inner one in its replaces, beside the migration after it, and
+# the loader judges both over the migrations they come down to.
+_INNER = ("contenttypes", "0003_squashed_0004")
+_OUTER = ("contenttypes", "0003_squashed_0005")
+_NESTED_RAN = (
+    "SELECT to_regclass('nested_marker_a') IS NOT NULL, to_regclass('nested_marker_b') IS NOT NULL"
+)
+
+nested_squashes = pytest.mark.skipif(
+    django.VERSION < (6, 0), reason="Django resolves a squash of a squash from 6.0"
+)
+
+
+def _nested_squash_on_disk(
+    monkeypatch: pytest.MonkeyPatch, *, on_disk: tuple[str, ...]
+) -> Migration:
+    """The outer squash, and whichever of the migrations under it ``on_disk`` names.
+
+    The inner squash folds ``0003_folded`` and ``0004_folded``, which make one
+    table; the outer one folds the inner one and ``0005_more``, which makes a
+    second. So whether a template ran all of it, or lost the part after the
+    inner squash, can be read back. ``0005_more`` depends on the inner squash,
+    as a migration made while that squash was the app's latest does.
+    """
+    first_table = migrations.RunSQL("CREATE TABLE nested_marker_a (id int)", migrations.RunSQL.noop)
+    second_table = migrations.RunSQL(
+        "CREATE TABLE nested_marker_b (id int)", migrations.RunSQL.noop
+    )
+    after = [("contenttypes", "0002_remove_content_type_name")]
+    made: dict[str, Migration] = {}
+    for name, replaces, dependencies, operations in (
+        ("0003_folded", [], after, []),
+        ("0004_folded", [], [("contenttypes", "0003_folded")], [first_table]),
+        (
+            _INNER[1],
+            [("contenttypes", "0003_folded"), ("contenttypes", "0004_folded")],
+            after,
+            [first_table],
+        ),
+        ("0005_more", [], [_INNER], [second_table]),
+        (_OUTER[1], [_INNER, ("contenttypes", "0005_more")], after, [first_table, second_table]),
+    ):
+        migration = Migration(name, "contenttypes")
+        migration.replaces = replaces
+        migration.dependencies = dependencies
+        migration.operations = operations
+        made[name] = migration
+    added = {("contenttypes", name): made[name] for name in (*on_disk, _OUTER[1])}
+    load_disk = MigrationLoader.load_disk
+
+    def load_disk_with_the_squashes(loader: MigrationLoader) -> None:
+        load_disk(loader)
+        loader.disk_migrations.update(added)
+
+    monkeypatch.setattr(MigrationLoader, "load_disk", load_disk_with_the_squashes)
+    return made[_OUTER[1]]
+
+
+def test_a_squash_in_another_app_is_not_named_as_one_to_finish(
+    temporary_databases: list[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The advice is about the app the ahead rows belong to: a squash elsewhere
+    # has nothing to do with them, and naming it would send someone to edit a
+    # migration that is not the cause. Holds that only the ahead apps' squashes
+    # are named.
+    _squash_on_disk(monkeypatch)
+    base = _base(temporary_databases)
+    _execute_in(
+        base,
+        "INSERT INTO django_migrations (app, name, applied) VALUES "
+        "('contenttypes', '0003_folded', now()), ('contenttypes', '0004_folded', now()), "
+        "('auth', '9999_ghost', now())",
+    )
+
+    with pytest.raises(UnusableBase) as refused:
+        temporary_databases.append(template_database(_shape(rows=40, seed=58), base=base))
+
+    message = str(refused.value)
+    assert "auth.9999_ghost" in message
+    assert "still lists" not in message
+
+
+@nested_squashes
+def test_a_base_behind_a_squash_of_a_squash_is_migrated_through_it(
+    temporary_databases: list[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Nothing under either squash is applied, so Django runs the outer one,
+    # and takes the inner one out of the graph because the outer one replaces
+    # it -- not because it was set aside. Holds that a squash missing from the
+    # graph is set aside only when no squash that replaces it is in use.
+    _nested_squash_on_disk(monkeypatch, on_disk=(_INNER[1], "0005_more"))
+    base = _base(temporary_databases)
+
+    name = template_database(_shape(rows=40, seed=53), base=base)
+    temporary_databases.append(name)
+    target = f"{name}_end"
+    temporary_databases.append(target)
+    clone_database(name, target)
+
+    assert _rows_in(target, _NESTED_RAN) == [(True, True)]
+
+
+@nested_squashes
+def test_a_squash_of_a_squash_applied_in_part_is_finished_by_the_files_on_disk(
+    temporary_databases: list[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Both squashes are set aside, and Django runs 0004 and 0005 themselves.
+    # The outer squash replaces the inner one, which is missing from the graph
+    # and unapplied, but it is a squash judged on its own rather than a file
+    # gone from disk. Holds that a squash is never counted as a stranded
+    # migration of the squash that replaces it.
+    _nested_squash_on_disk(
+        monkeypatch, on_disk=("0003_folded", "0004_folded", _INNER[1], "0005_more")
+    )
+    base = _base(temporary_databases)
+    _execute_in(
+        base,
+        "INSERT INTO django_migrations (app, name, applied) "
+        "VALUES ('contenttypes', '0003_folded', now())",
+    )
+
+    name = template_database(_shape(rows=40, seed=54), base=base)
+    temporary_databases.append(name)
+    target = f"{name}_end"
+    temporary_databases.append(target)
+    clone_database(name, target)
+
+    assert _rows_in(target, _NESTED_RAN) == [(True, True)]
+
+
+@nested_squashes
+def test_a_squash_of_a_squash_applied_in_part_with_a_replaced_file_deleted_is_refused(
+    temporary_databases: list[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The loader judges the outer squash over everything under it, so 0003
+    # applied sets it aside although none of what it lists directly is: the
+    # inner squash is not applied, and 0005 is not. With 0005's file gone,
+    # Django finishes the inner squash from 0004 and nothing ever runs 0005, so
+    # the copy would lack its table under a key that names it.
+    _nested_squash_on_disk(monkeypatch, on_disk=("0003_folded", "0004_folded", _INNER[1]))
+    base = _base(temporary_databases)
+    _execute_in(
+        base,
+        "INSERT INTO django_migrations (app, name, applied) "
+        "VALUES ('contenttypes', '0003_folded', now())",
+    )
+    before = _templates_on_the_server()
+
+    with pytest.raises(UnusableBase) as refused:
+        temporary_databases.append(template_database(_shape(rows=40, seed=55), base=base))
+
+    message = str(refused.value)
+    assert "contenttypes.0003_squashed_0005" in message
+    assert "contenttypes.0005_more" in message
+    assert "ahead" not in message
+    assert _templates_on_the_server() == before
+
+
+def test_a_base_ahead_only_of_a_squash_of_a_squash_says_to_finish_the_squash(
+    temporary_databases: list[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Once only the outer squash is on disk, the rows of the migrations the
+    # inner squash replaced are listed by nothing on disk, so they read as
+    # ahead although Django has the base as fully migrated. --prune declines
+    # while a squash still lists replaces, so the message says what to do
+    # first; and following it, against the base, is what makes the base usable.
+    squash = _nested_squash_on_disk(monkeypatch, on_disk=())
+    base = _base(temporary_databases)
+    _execute_in(
+        base,
+        "INSERT INTO django_migrations (app, name, applied) VALUES "
+        "('contenttypes', '0003_folded', now()), ('contenttypes', '0004_folded', now()), "
+        "('contenttypes', '0003_squashed_0004', now()), ('contenttypes', '0005_more', now())",
+    )
+
+    with pytest.raises(UnusableBase) as refused:
+        temporary_databases.append(template_database(_shape(rows=40, seed=56), base=base))
+
+    message = " ".join(str(refused.value).split())
+    assert "ahead" in message
+    assert "contenttypes.0003_folded" in message
+    assert (
+        "A squashed migration still lists the migrations it replaces, "
+        "for example contenttypes.0003_squashed_0005"
+    ) in message
+    assert "removing its replaces attribute" in message
+
+    _migrate(base)
+    squash.replaces = []
+    _migrate(base, "contenttypes", "--prune")
+    name = template_database(_shape(rows=40, seed=56), base=base)
+    temporary_databases.append(name)
+
+    assert _oid(name) is not None
+
+
 def test_a_base_with_tables_but_no_django_migrations_is_refused(
     temporary_databases: list[str],
 ) -> None:
@@ -1197,6 +1571,46 @@ def test_a_base_with_tables_but_no_django_migrations_is_refused(
     assert "django_migrations" in message
     assert "auth_group" in message
     assert _templates_on_the_server() == before
+
+
+def test_a_base_whose_django_migrations_records_nothing_is_refused(
+    temporary_databases: list[str],
+) -> None:
+    # What a base restored from pg_dump --schema-only looks like: the table is
+    # there, so a check for the table alone passes, and it holds no rows, so
+    # migrate would create every table again and fail on the first with
+    # "already exists" from inside the executor.
+    base = _base(temporary_databases)
+    _execute_in(base, "DELETE FROM django_migrations")
+    before = _templates_on_the_server()
+
+    with pytest.raises(UnusableBase) as refused:
+        temporary_databases.append(template_database(_shape(rows=40, seed=47), base=base))
+
+    message = str(refused.value)
+    assert base in message
+    assert "auth_group" in message
+    assert "--schema-only" in message
+    assert _templates_on_the_server() == before
+
+
+def test_so_is_one_with_no_record_of_a_single_app_whose_tables_it_holds(
+    temporary_databases: list[str],
+) -> None:
+    # The same history one app at a time, which is what a base made while an
+    # app had no migrations looks like once the app gains a 0001_initial: its
+    # tables are there and nothing records them. Holds that the check is made
+    # per app, rather than once for the whole table.
+    base = _base(temporary_databases)
+    _execute_in(base, "DELETE FROM django_migrations WHERE app = 'auth'")
+
+    with pytest.raises(UnusableBase) as refused:
+        temporary_databases.append(template_database(_shape(rows=40, seed=48), base=base))
+
+    message = str(refused.value)
+    assert "auth_group" in message
+    # contenttypes still records its migrations, so its table is not named.
+    assert "django_content_type" not in message
 
 
 def test_but_a_table_of_an_app_without_migrations_does_not_count(
@@ -1263,4 +1677,69 @@ def test_nor_one_recorded_for_an_app_that_is_not_installed() -> None:
     assert (
         _ahead_of_disk(applied, disk=[("shop", "0001_initial")], replaced=[], installed={"shop"})
         == []
+    )
+
+
+# The stranded check's arithmetic, apart from any database, for the one condition
+# a real base reaches only through a dependency Django would refuse first: a
+# replaced migration applied and then deleted, under a squash set aside.
+
+
+def test_one_unapplied_and_in_no_graph_is_stranded() -> None:
+    squash = ("shop", "0001_squashed_0002")
+
+    assert _stranded_squashes(
+        [("shop", "0001_initial")],
+        graph=[("shop", "0001_initial")],
+        replacements={squash: [("shop", "0001_initial"), ("shop", "0002_order")]},
+    ) == {squash: [("shop", "0002_order")]}
+
+
+def test_but_one_already_applied_is_not() -> None:
+    # Applied needs no running, whether or not its file is still there.
+    squash = ("shop", "0001_squashed_0002")
+
+    assert (
+        _stranded_squashes(
+            [("shop", "0001_initial")],
+            graph=[("shop", "0002_order")],
+            replacements={squash: [("shop", "0001_initial"), ("shop", "0002_order")]},
+        )
+        == {}
+    )
+
+
+def test_nor_one_that_is_itself_a_squash() -> None:
+    # The inner squash of a squash of a squash is missing from the graph when it
+    # is set aside, and is judged as a squash of its own rather than as a file.
+    inner, outer = ("shop", "0001_squashed_0002"), ("shop", "0001_squashed_0003")
+
+    assert (
+        _stranded_squashes(
+            [("shop", "0001_initial")],
+            graph=[("shop", "0001_initial"), ("shop", "0002_order"), ("shop", "0003_more")],
+            replacements={
+                inner: [("shop", "0001_initial"), ("shop", "0002_order")],
+                outer: [inner, ("shop", "0003_more")],
+            },
+        )
+        == {}
+    )
+
+
+def test_nor_one_under_a_squash_the_loader_replaced_rather_than_set_aside() -> None:
+    # Nothing applied: the loader uses the outer squash, which takes the inner
+    # one out of the graph, and with it the migrations the inner one replaced.
+    inner, outer = ("shop", "0001_squashed_0002"), ("shop", "0001_squashed_0003")
+
+    assert (
+        _stranded_squashes(
+            [],
+            graph=[outer],
+            replacements={
+                inner: [("shop", "0001_initial"), ("shop", "0002_order")],
+                outer: [inner, ("shop", "0003_more")],
+            },
+        )
+        == {}
     )

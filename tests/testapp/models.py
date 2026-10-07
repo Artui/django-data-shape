@@ -1088,3 +1088,33 @@ class MemberFee(models.Model):
 
     section = models.ForeignKey(Section, on_delete=models.CASCADE, related_name="fees")
     amount = models.IntegerField()
+
+
+class Badge(models.Model):
+    """The end of a many-to-many relation that does not declare it.
+
+    ``Wearer.badges`` gives the pair a through table Django creates itself, and
+    ``Wearer.awards`` one declared as a model of its own, ``Award``. The
+    difference is what a template from a base turns on: ``migrate
+    --run-syncdb`` makes the auto-created table only while making the model
+    that declares the relation, so the copy drops and remakes it with that
+    model, while the declared one is a model like any other and is judged as
+    one.
+    """
+
+    name = models.CharField(max_length=50)
+
+
+class Wearer(models.Model):
+    """The end that declares both relations to ``Badge``."""
+
+    name = models.CharField(max_length=50)
+    badges = models.ManyToManyField(Badge, related_name="wearers")
+    awards = models.ManyToManyField(Badge, through="Award", related_name="awarded_to")
+
+
+class Award(models.Model):
+    """The through model ``Wearer.awards`` declares rather than leaving to Django."""
+
+    wearer = models.ForeignKey(Wearer, on_delete=models.CASCADE, related_name="+")
+    badge = models.ForeignKey(Badge, on_delete=models.CASCADE, related_name="+")

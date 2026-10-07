@@ -12,7 +12,6 @@ from django.conf import settings
 from django.core.management import call_command
 from django.db import DEFAULT_DB_ALIAS, InternalError, connections, router
 from django.db.migrations.loader import MigrationLoader
-from django.db.migrations.recorder import MigrationRecorder
 from django.db.transaction import TransactionManagementError
 
 from django_data_shape.backends.require_postgres import require_postgres
@@ -94,26 +93,36 @@ def template_database(
     a new template would copy while the key stays where it was. Drop the
     template by hand --
     :func:`~django_data_shape.databases.drop_database.drop_database` -- when either happens.
-    With a base, an edited migration goes one step further, and it is the one
-    case here that nothing could detect: a migration regenerated under a name
+    With a base, an edited migration goes one step further, and it is a case
+    nothing could detect: a migration regenerated under a name
     the base has already applied is read by ``migrate`` as applied and skipped,
     so the copy keeps the version the base ran, and a template rebuilt from the
     same base would keep it again. Recreate the base, which gives it a new oid
-    and so a new template.
+    and so a new template. And one more a base brings that nothing detects,
+    where recreating the base does not help: SQL that an applied migration of
+    an app with migrations ran against a table of an app without them -- an
+    index, a trigger, a policy, a grant or a comment -- is lost when the copy
+    rebuilds that table, because the migration counts as applied and never
+    runs again, and a recreated base has applied it too. Build that template
+    from empty, with ``base=None``, where ``run_syncdb`` makes the table before
+    the migration runs.
 
     **Starting from a migrated base.** With ``base`` naming a database that is
     already migrated, the template starts as a copy of it rather than as an
     empty database that ``migrate`` replays the whole history into -- which on
     a project with hundreds of migrations is most of the cost, and repaid by
-    every template a change to the declaration makes. A base contributes what
-    its migration history contributes, and nothing else. An app with migrations
-    is brought forward by that history: ``migrate`` runs over the copy and
+    every template a change to the declaration makes. The tables ``migrate``
+    builds for apps without migrations are rebuilt from the models, and
+    everything else the base holds is carried as it is. An app with migrations
+    is brought forward by its history: ``migrate`` runs over the copy and
     applies whatever the base has yet to. An app without them has no history to
-    bring forward, so its tables are dropped from the copy first and
-    ``run_syncdb`` makes them from the current models, as it does in an empty
+    bring forward, so the tables ``run_syncdb`` makes for it are dropped from
+    the copy first and made again from the current models, as in an empty
     database -- a table the base made from an older model is not kept under a
     key naming the new one, and the base's rows in those tables do not carry
-    over. ``post_migrate`` fires as it does from empty.
+    over. Everything else is carried: the rows in the tables of apps with
+    migrations, an unmanaged model's table, and the tables of an app that is
+    no longer installed. ``post_migrate`` fires as it does from empty.
 
     **A base behind the migrations on disk is migrated forward; only a history
     migrating cannot repair is refused.** Migrating forward always ends at this
@@ -137,24 +146,27 @@ def template_database(
     the base has applied only in part, when a replaced migration it has yet to
     apply is gone from disk -- Django then runs neither the squash nor the rest
     of what it replaces, and the copy would lack them silently -- and a base
-    with no ``django_migrations`` table that holds the tables of an app with
-    migrations, which ``migrate`` would try to create again. So does a base
+    holding the tables of an app with migrations that it records no applied
+    migration for, which ``migrate`` would try to create again: a base with no
+    ``django_migrations`` table, one restored from ``pg_dump --schema-only``,
+    which brings that table back empty, or one made before an app had
+    migrations. So does a base
     that does not exist, one that refuses connections, a template this package
     made or the partial of one, and a name holding a double quote, which
     Django's quoting cannot carry intact. One more is raised from the copy
     rather than before it, because only the copy can find it: something outside
-    the tables of the apps without migrations that depends on one of them -- a
-    foreign key or a view -- stops those tables being dropped and made again,
-    and the partial goes with the refusal. Ahead is the one case where the
-    template cannot end up with the checkout's schema: migrating moves only
-    forward, so whatever those migrations did stays in the copy, and a branch
+    the tables being rebuilt that depends on one of them -- a foreign key or a
+    view -- stops those tables being dropped and made again,
+    and the partial goes with the refusal. Of the histories a base can record,
+    ahead is the one migrating cannot bring to the checkout's schema: it moves
+    only forward, so whatever those migrations did stays in the copy, and a branch
     migration that adds only an index would otherwise build silently and skew
     plan assertions. Rows for an app that is not installed are ignored, because
     they describe nothing the checkout's models use. The check runs on every
     call, a cache hit included, because the oid it reads is part of the name.
 
-    Whatever else the base holds, outside the tables of apps without
-    migrations, becomes template content. Rows in a table the shape declares
+    Whatever else the base holds, outside the tables being rebuilt, becomes
+    template content. Rows in a table the shape declares
     are refused by :func:`~django_data_shape.loading.build.build`'s
     emptiness check as they would be anywhere, with a message that names the
     base as one place they come from, and the partial is dropped with the
@@ -295,14 +307,15 @@ def _create(
 def _fill(shape: Shape, connection: Any, database: str, using: str, base: str | None) -> None:
     """Migrate the schema into ``database`` and build the shape there.
 
-    A database copied from a base contributes what its migration history
-    contributes and nothing else. Its migrated apps are brought forward by that
-    history -- whatever migrations on disk the base has yet to apply, none for a
-    base kept up to date. Its tables for apps with no migrations have no history
-    to bring forward, so they are dropped first, and ``run_syncdb`` makes them
-    from the current models as it does in an empty database; the base's rows in
-    them do not carry over. ``migrate`` is run either way, because it is also
-    what fires ``post_migrate``.
+    In a database copied from a base, the tables ``run_syncdb`` makes are
+    rebuilt and everything else is carried as the base has it. Its migrated
+    apps are brought forward by their history -- whatever migrations on disk
+    the base has yet to apply, none for a base kept up to date. The tables
+    ``run_syncdb`` makes for apps with no migrations have no history to bring
+    forward, so they are dropped first, and ``run_syncdb`` makes them from the
+    current models as it does in an empty database; the base's rows in them do
+    not carry over. ``migrate`` is run either way, because it is also what
+    fires ``post_migrate``.
 
     Pointing an existing connection at another database by rewriting
     ``settings_dict["NAME"]`` is what Django's own test runner does to create a
@@ -342,8 +355,13 @@ def _drop_unmigrated_tables(connection: Any, base: str) -> None:
     under a key that names the current one -- the key absorbs every model's
     columns, which is exactly what would be stale. Dropped, it is made again
     from the model, as it is in an empty database. The apps are the ones
-    ``migrate``'s own loader reads as unmigrated off disk, so the set dropped is
-    the set ``run_syncdb`` then makes.
+    ``migrate``'s own loader reads as unmigrated off disk, and the tables the
+    ones its ``run_syncdb`` phase reads off their models, as :func:`_tables_of`
+    describes, so the set dropped is the set ``run_syncdb`` then makes. What a
+    migration of another app did to one of those tables goes with it, and is
+    not made again: the migration counts as applied. That is a stated gap
+    rather than a refusal, because nothing in the copy says which index or
+    trigger a migration made.
 
     One ``DROP TABLE`` for all of them, so the references between them do not
     order it, and without ``CASCADE``. Anything outside the set that refers to
@@ -384,7 +402,7 @@ def _base_context(connection: Any, base: str) -> tuple[str, str]:
     """Refuse a base no migration can bring to the disk's schema; else what the key takes.
 
     The name and the database's oid. The oid is the part doing the work: a base
-    dropped and recreated -- the usual way one restored from a schema dump is
+    dropped and recreated -- the usual way one restored from a dump is
     refreshed -- gets a new one, so the template built from the old base is
     simply not asked for again. A rename re-keys too, which costs a build and is
     otherwise harmless. The base's applied migrations are not hashed: a base
@@ -450,18 +468,30 @@ def _refuse_history(connection: Any, base: str) -> None:
     Three cases, read off one loader built while connected to the base:
 
     - **ahead**, an applied migration that no migration on disk is or replaces,
-      as :func:`_ahead_of_disk` reckons it;
+      as :func:`_ahead_of_disk` reckons it. When the app has a squash on disk
+      that still lists what it replaces, the message says to finish that squash
+      before pruning, because ``migrate --prune`` declines while one does --
+      ``test_a_base_ahead_only_of_a_squash_of_a_squash_says_to_finish_the_squash``
+      follows the advice through to a base that builds, and
+      ``test_a_squash_in_another_app_is_not_named_as_one_to_finish`` holds that
+      only the squashes of the apps ahead are named;
     - **a squash applied in part** whose replaced migrations the base still
       needs are gone from disk, as :func:`_stranded_squashes` reckons it;
-    - **tables with no record of what made them.** A base with no
-      ``django_migrations`` table reads as having applied nothing. That is true
-      of an empty database, which is migrated in full, but not of one holding
-      the tables of an app with migrations: ``migrate`` would create them a
-      second time and fail on the first, with ``already exists`` from inside
-      the executor. Only those apps' tables count. An app without migrations
-      gets its tables from ``run_syncdb``, which records nothing, and a project
-      with no migrated app at all never makes a ``django_migrations`` table, so
-      a base holding only such tables is one ``migrate`` could have made --
+    - **tables with no record of what made them**: an app with migrations
+      whose tables the base holds and for which it records no applied
+      migration. ``migrate`` would create those tables a second time and fail
+      on the first, with ``already exists`` from inside the executor. A base
+      with no ``django_migrations`` table is the whole-database form, and
+      reads as having applied nothing; a base restored from ``pg_dump
+      --schema-only`` is the commonest, because the table comes back with
+      none of its rows; and a base made while an app had no migrations is the
+      one-app form, once the app gains them. So it is judged per app, which
+      ``test_so_is_one_with_no_record_of_a_single_app_whose_tables_it_holds``
+      holds, and an empty database, holding no tables, is migrated in full.
+      Only those apps' tables count. An app without migrations gets its tables
+      from ``run_syncdb``, which records nothing, and a project with no
+      migrated app at all never makes a ``django_migrations`` table, so a base
+      holding only such tables is one ``migrate`` could have made --
       ``test_but_a_table_of_an_app_without_migrations_does_not_count`` holds
       that.
 
@@ -482,11 +512,12 @@ def _refuse_history(connection: Any, base: str) -> None:
     connection.settings_dict["NAME"] = base
     try:
         loader = MigrationLoader(connection)
-        unrecorded = (
-            []
-            if MigrationRecorder(connection).has_table()
-            else _tables_of(connection, loader.migrated_apps)
-        )
+        recorded = {app_label for app_label, _name in loader.applied_migrations}
+        unrecorded = {
+            app_label: tables
+            for app_label in sorted(loader.migrated_apps - recorded)
+            if (tables := _tables_of(connection, [app_label]))
+        }
         ahead = _ahead_of_disk(
             loader.applied_migrations,
             disk=loader.disk_migrations,
@@ -497,40 +528,56 @@ def _refuse_history(connection: Any, base: str) -> None:
             ],
             installed={app_config.label for app_config in apps.get_app_configs()},
         )
+        unfinished = sorted(
+            squash for squash in loader.replacements if squash[0] in {key[0] for key in ahead}
+        )
         stranded = _stranded_squashes(
             loader.applied_migrations,
-            disk=loader.disk_migrations,
+            graph=loader.graph.nodes,
             replacements={key: squash.replaces for key, squash in loader.replacements.items()},
         )
     finally:
         connection.close()
         connection.settings_dict["NAME"] = original
     if unrecorded:
+        tables = sorted(table for app_tables in unrecorded.values() for table in app_tables)
         raise UnusableBase(
-            f"The base database {base!r} has no django_migrations table, yet holds "
-            f"{len(unrecorded)} table(s) of apps that have migrations, {_examples(unrecorded)}. "
-            "Nothing records which migrations made them, so migrating it would create them "
-            "again and fail on the first. A base with no django_migrations table is started "
-            "from only when it holds none of those tables, as an empty database does. Restore "
-            "it from a dump that includes django_migrations, or recreate it with migrate, or "
-            "pass base=None to build from empty."
+            f"The base database {base!r} records no applied migrations for "
+            f"{len(unrecorded)} app(s) whose tables it holds, {_examples(list(unrecorded))}, "
+            f"with {len(tables)} table(s) among them, {_examples(tables)}. Nothing records "
+            "which migrations made those tables, so migrating it would create them again and "
+            "fail on the first. A base that migrate made records them in django_migrations; "
+            "one restored from pg_dump --schema-only has that table but none of its rows, and "
+            "one made while an app had no migrations has none for that app once it gains them. "
+            "Restore the base with the rows of django_migrations as well as its schema, or "
+            "recreate it with migrate, or pass base=None to build from empty."
         )
     if ahead:
         prune = " and ".join(
             f"manage.py migrate {app_label} --prune"
             for app_label in sorted({app_label for app_label, _name in ahead})
         )
+        finish = (
+            " A squashed migration still lists the migrations it replaces, "
+            f"{_examples(_dotted(unfinished))}, and --prune declines to run while one does: "
+            "finish it first, by running manage.py migrate against the base so that it is "
+            "recorded as applied and then removing its replaces attribute, which makes it an "
+            "ordinary migration."
+            if unfinished
+            else ""
+        )
         raise UnusableBase(
             f"The base database {base!r} is ahead of the migrations on disk: it records "
             f"{len(ahead)} applied migration(s) of installed apps that no migration on disk "
-            f"is or replaces, {_examples(_dotted(ahead))}. This is the one case where a "
-            "template cannot end up with this checkout's schema: migrating moves only forward, "
-            "so whatever those migrations did stays in the copy, and a branch migration that "
-            "adds only an index would otherwise build silently and skew plan assertions. If "
+            f"is or replaces, {_examples(_dotted(ahead))}. Of the histories a base can "
+            "record, this is the one migrating cannot bring to this checkout's schema: it moves "
+            "only forward, so whatever those migrations did stays in the copy, and a branch "
+            "migration that adds only an index would otherwise build silently and skew plan "
+            "assertions. If "
             "the rows were left behind by squashed migrations whose files were deleted after "
             "the squash's replaces attribute was removed, run "
-            f"{prune} against the base. If they come from another branch, migrate the base "
-            "back from a checkout that has them, or recreate it."
+            f"{prune} against the base.{finish} If they come from another branch, migrate the "
+            "base back from a checkout that has them, or recreate it."
         )
     if stranded:
         missing = sorted(key for keys in stranded.values() for key in keys)
@@ -547,34 +594,55 @@ def _refuse_history(connection: Any, base: str) -> None:
 
 
 def _tables_of(connection: Any, app_labels: Iterable[str]) -> list[str]:
-    """The tables of these apps' models that the connected database already holds.
+    """The tables ``run_syncdb`` would make for these apps that the connected database holds.
 
-    The models are the ones ``migrate`` builds a table for, read the way its
-    ``run_syncdb`` phase reads them: what the router lets migrate on this
-    alias, auto-created many-to-many tables included, less what
-    ``can_migrate`` refuses -- a proxy, an unmanaged or a swapped model. Each
-    condition is held by a test, because the filter is one arc to a branch
-    gate:
+    Read the way ``migrate``'s ``run_syncdb`` phase reads them, because the
+    drop list has to be exactly the set it then makes: a table dropped that it
+    does not make again is lost, and one kept that it does make fails its
+    create with ``already exists``. That is the models the router lets migrate
+    on this alias, less what ``can_migrate`` refuses -- a proxy, an unmanaged
+    or a swapped model -- and for each of those, the auto-created
+    many-to-many tables of the relations it declares, which ``run_syncdb``
+    makes only as part of making that model. Not the through models on their
+    own: Django counts an auto-created through as managed when either end is,
+    so the through of an unmanaged model's relation to a managed one reads as
+    migratable and is still never made. A through model a relation names is a
+    model of its own, and is judged as one.
 
+    Each condition is held by a test, because each filter is one arc to a
+    branch gate:
+
+    - the router: ``test_a_table_the_router_keeps_off_the_alias_is_carried``;
     - ``can_migrate``: ``test_an_unmanaged_models_table_in_the_base_is_carried``,
       where dropping the table would lose it, since nothing makes it again;
+    - the through tables, and only those of the models made:
+      ``test_a_stale_through_table_is_rebuilt_with_the_model_that_declares_it``
+      and ``test_the_through_table_of_an_unmanaged_model_is_carried``;
+    - auto-created ones only:
+      ``test_a_declared_through_model_is_judged_as_a_model_of_its_own``;
     - existing: ``test_an_empty_base_is_migrated_in_full``, and
       ``test_migrate_still_runs_over_the_copy``, whose base has no table of an
       app without migrations to drop.
     """
     labels = set(app_labels)
-    existing = set(connection.introspection.table_names())
-    return sorted(
-        {
-            table
-            for app_config in apps.get_app_configs()
-            if app_config.label in labels
-            for model in router.get_migratable_models(
-                app_config, connection.alias, include_auto_created=True
-            )
-            if model._meta.can_migrate(connection) and (table := model._meta.db_table) in existing
-        }
-    )
+    models = [
+        model
+        for app_config in apps.get_app_configs()
+        if app_config.label in labels
+        for model in router.get_migratable_models(
+            app_config, connection.alias, include_auto_created=False
+        )
+        if model._meta.can_migrate(connection)
+    ]
+    made = {model._meta.db_table for model in models}
+    for model in models:
+        for field in model._meta.local_many_to_many:
+            # Optional on the relation's type, and set on every many-to-many
+            # field by the time the app registry is ready, which it is here.
+            through: Any = field.remote_field.through
+            if through._meta.auto_created:
+                made.add(through._meta.db_table)
+    return sorted(made & set(connection.introspection.table_names()))
 
 
 def _ahead_of_disk(
@@ -624,47 +692,93 @@ def _ahead_of_disk(
 def _stranded_squashes(
     applied: Iterable[tuple[str, str]],
     *,
-    disk: Iterable[tuple[str, str]],
+    graph: Iterable[tuple[str, str]],
     replacements: Mapping[tuple[str, str], Iterable[tuple[str, str]]],
 ) -> dict[tuple[str, str], list[tuple[str, str]]]:
     """The squashes applied in part, each with the replaced migrations it still needs and lacks.
 
     Django's loader runs a squash only when all or none of what it replaces is
-    applied. In between, it takes the squash out of the graph and keeps the
-    replaced migrations, so ``migrate`` finishes the job one replaced migration
-    at a time -- which ends where the squash would have, provided their files
-    are there. With one deleted, nothing takes its place: the loader raises
-    nothing, ``migrate`` reports nothing, and the copy silently lacks what the
-    squash does under a key that names it, while a template from empty runs
-    the squash and has it.
+    applied. In between, it sets the squash aside -- takes it out of the graph
+    and keeps the replaced migrations -- so ``migrate`` finishes the job one
+    replaced migration at a time, which ends where the squash would have,
+    provided their files are there. With one deleted, nothing takes its place:
+    the loader raises nothing, ``migrate`` reports nothing, and the copy
+    silently lacks what the squash does under a key that names it, while a
+    template from empty runs the squash and has it.
 
-    So a squash is stranded when some of what it replaces is applied -- none
-    applied is a base behind the squash, which Django migrates through the
-    squash itself whatever happened to the files -- and a replaced migration
-    is both unapplied and missing from disk: one already applied needs no
-    running, and one on disk will be run.
+    Which squashes were set aside is read off the graph the loader built
+    rather than worked out again here, by :func:`_set_aside`, because from
+    Django 6.0 a squash can replace another squash and the loader judges "in
+    part" over everything both of them come down to: an outer squash can be
+    set aside while nothing it lists directly is applied. A squash set aside
+    is stranded when one of the migrations it lists is unapplied, missing from
+    the graph -- a file gone from disk -- and not a squash itself: one already
+    applied needs no running, one in the graph will be run, and a squash is
+    judged on its own entry rather than as a missing file of the one that
+    replaces it.
 
     Takes its inputs as arguments for the reason :func:`_ahead_of_disk` does.
     Each condition is held by a test, because a branch gate sees each filter
     as one arc and would stay green with any of them deleted:
 
-    - some applied: ``test_a_base_behind_a_squash_is_migrated_through_it``;
-    - unapplied, and that one is missing at all:
-      ``test_a_squash_whose_replaced_files_were_deleted_does_not_make_a_base_ahead``,
-      where all of it is applied and the files are gone;
-    - missing from disk:
+    - unapplied: ``test_but_one_already_applied_is_not``, which a real base
+      reaches only through a dependency Django refuses first;
+    - missing from the graph:
       ``test_a_squash_applied_in_part_is_finished_by_the_replaced_files_still_on_disk``;
+    - not a squash itself: ``test_nor_one_that_is_itself_a_squash`` and, from
+      Django 6.0,
+      ``test_a_squash_of_a_squash_applied_in_part_is_finished_by_the_files_on_disk``;
+    - set aside: the two conditions :func:`_set_aside` names;
     - and that a stranded squash refuses the base:
-      ``test_a_squash_applied_in_part_with_its_replaced_files_deleted_is_refused``.
+      ``test_a_squash_applied_in_part_with_its_replaced_files_deleted_is_refused``
+      and, from Django 6.0,
+      ``test_a_squash_of_a_squash_applied_in_part_with_a_replaced_file_deleted_is_refused``.
     """
     done = set(applied)
-    on_disk = set(disk)
+    in_graph = set(graph)
+    replaced = {squash: list(keys) for squash, keys in replacements.items()}
+    replacers = {
+        squash: [outer for outer, keys in replaced.items() if squash in keys] for squash in replaced
+    }
     stranded: dict[tuple[str, str], list[tuple[str, str]]] = {}
-    for squash, replaces in sorted(replacements.items()):
-        missing = [key for key in replaces if key not in done and key not in on_disk]
-        if missing and any(key in done for key in replaces):
+    for squash, keys in sorted(replaced.items()):
+        missing = [
+            key for key in keys if key not in done and key not in in_graph and key not in replaced
+        ]
+        if missing and _set_aside(squash, graph=in_graph, replacers=replacers):
             stranded[squash] = missing
     return stranded
+
+
+def _set_aside(
+    squash: tuple[str, str],
+    *,
+    graph: set[tuple[str, str]],
+    replacers: Mapping[tuple[str, str], list[tuple[str, str]]],
+) -> bool:
+    """Whether the loader set this squash aside, rather than using it or replacing it.
+
+    A squash is missing from the loader's graph for one of two reasons. Either
+    it was set aside, applied in part, or it was used -- all or none of it
+    applied -- and then replaced in turn by an outer squash that was used too,
+    which takes what it replaces out of the graph as any squash does. A squash
+    used is in the graph unless a used squash replaces it, so the outermost
+    used one always is; and a squash set aside has only squashes set aside
+    above it, since whatever is applied under it is under them as well. So a
+    squash was set aside when it is missing from the graph and so is every
+    squash that replaces it, directly or further out.
+
+    Both halves are held by a test, because they are one arc to a branch gate:
+
+    - missing from the graph: ``test_a_base_behind_a_squash_is_migrated_through_it``,
+      whose squash is used and whose replaced migrations it took out of the graph;
+    - and so is every squash replacing it:
+      ``test_nor_one_under_a_squash_the_loader_replaced_rather_than_set_aside`` and,
+      from Django 6.0, ``test_a_base_behind_a_squash_of_a_squash_is_migrated_through_it``.
+    """
+    return squash not in graph and all(
+        _set_aside(outer, graph=graph, replacers=replacers) for outer in replacers[squash]
+    )
 
 
 def _dotted(migrations: Iterable[tuple[str, str]]) -> list[str]:

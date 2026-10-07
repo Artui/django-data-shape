@@ -227,12 +227,13 @@ The template is named after a content hash of the declaration, the schema, the
 relevant settings and this package's version, so a stale one is never asked for.
 A project with a long migration history can start templates from a database it
 already keeps migrated, `template_database(shape, base="myproject_base")`, rather
-than replaying every migration into an empty one. A base contributes what its
-migration history contributes: apps with migrations are migrated forward in the
-copy, which always ends at the checkout's schema, and the tables of apps without
-them are rebuilt from the models, so the base's rows in those do not carry over.
-Only a history no forward migration can fix, such as a base ahead of the
-migrations on disk, is refused.
+than replaying every migration into an empty one. Apps with migrations are
+migrated forward in the copy, which always ends at the checkout's schema; the
+tables `migrate` builds for apps without them are rebuilt from the models, so the
+base's rows in those do not carry over; and everything else the base holds, its
+other rows and its unmanaged tables among them, is carried as it is. Only a
+history no forward migration can fix, such as a base ahead of the migrations on
+disk, is refused.
 A shape holding a `Derived` or a `KeyFunction` is refused rather than hashed --
 there is no honest digest of a callable, and every way of guessing one agrees
 while the data has changed. See
