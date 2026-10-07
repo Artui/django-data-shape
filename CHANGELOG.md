@@ -37,6 +37,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   obeyed exactly as far as files go, and the drift it permitted was invisible
   for twenty-one releases.
 
+### Fixed
+
+- **A scaled world builds over child rows the caller wrote earlier in the same
+  transaction.** On PostgreSQL it failed on the way in with `cannot TRUNCATE
+  "..." because it has pending trigger events`. Django creates PostgreSQL
+  foreign keys `DEFERRABLE INITIALLY DEFERRED`, so a child row -- a declared
+  table's, or one `TRUNCATE ... CASCADE` reaches -- leaves its foreign-key check
+  queued until commit, and PostgreSQL refuses to truncate a table with checks
+  still pending. An insert into a parent alone queues nothing, which is why only
+  a caller who wrote a child met it; the usual way in is a factory's
+  `SubFactory` in a test's own setup.
+
+  `scaled_world` now fires the pending checks before emptying the declared
+  tables. That changes only *when* they run: a row that genuinely violates a
+  constraint now raises `IntegrityError` at world entry, naming the constraint,
+  rather than when the enclosing transaction next checks. The constraint mode
+  it sets is transaction state, so the rollback of the world's own block
+  restores the caller's. Off PostgreSQL nothing changes: the tables are emptied
+  by `DELETE`, which has no such refusal.
+
+  The docstring claimed this package never issues a destructive statement
+  against a table it did not fill. Beside `CASCADE` that was untrue: a table
+  holding a foreign key into a declared one is emptied too, so the caller's
+  block does not see its rows during the world. It now says what holds --
+  nothing destructive survives the block -- and states the cascade plainly.
+
+  The PostgreSQL statement count a capture around a world sees moved from
+  nineteen to twenty-one, still the same at every factor. The figure quoted in
+  the `scaled_world` and `scale_fixture` docstrings and in the pytest page had
+  drifted from the measured one in all three places; they now quote it, and a
+  test holds them to it.
+
 ## [0.21.0] — 2026-09-06
 
 ### Added

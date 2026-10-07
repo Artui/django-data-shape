@@ -46,18 +46,20 @@ def scaled_world(shape: Shape, factor: int, *, using: str = DEFAULT_DB_ALIAS) ->
     **Open a query capture inside the block, never around it.** Building a world
     emits statements of its own, and a capture wrapped around ``world(factor)``
     counts them along with the block's. On PostgreSQL that is mild and **fixed**:
-    sixteen statements for a two-table shape at every factor, because ``COPY``
-    does not go through Django's ``execute_wrapper`` and only the emptiness
-    check, the statistics-target read, the parent key read, the sequence reset,
-    the ``ANALYZE`` and the savepoints do.
+    twenty-one statements for a two-table shape at every factor, because one
+    ``COPY`` loads a table however many rows it carries, and everything else a
+    world emits -- the foreign-key checks fired before emptying, the
+    ``TRUNCATE``, the emptiness check, the statistics-target read, the parent
+    key read, the sequence resets, the ``ANALYZE`` and the savepoints -- is
+    counted per table or per world, never per row.
 
-    That fourteen is counted with ``CaptureQueriesContext`` -- what
+    That twenty-one is counted with ``CaptureQueriesContext`` -- what
     ``django_assert_num_queries`` reads -- inside a non-transactional ``django_db``
     test. **Both halves of that sentence move the number**: the same shape counted
     through ``execute_wrapper``, which is what a capture built on that hook sees,
-    is eleven, because the savepoints and the emptiness check reach the query log
-    by a route the wrapper does not; and a ``transaction=True`` test drops one
-    more savepoint. So do not read the absolute figure as a constant of this package.
+    is nineteen, because ``COPY`` reaches the query log by a route the wrapper
+    does not; and a ``transaction=True`` test drops one more savepoint. So do not
+    read the absolute figure as a constant of this package.
     **What is invariant, and what the tests below pin, is the shape of each: fixed
     on PostgreSQL whatever the factor, growing off it.** Off PostgreSQL it is neither: the inserts are ordinary
     statements, one per thousand rows, **so the captured count grows with the
@@ -71,11 +73,27 @@ def scaled_world(shape: Shape, factor: int, *, using: str = DEFAULT_DB_ALIAS) ->
 
     **The teardown is a rollback, not a delete.** Building inside a transaction
     and rolling it back at the end restores exactly the state the block started
-    from, which matters twice: this package never issues a destructive statement
-    against a table it did not fill, and inside a pytest-django ``db`` test the
-    rollback is to a savepoint, so it costs nothing and leaves the enclosing
-    test transaction usable afterwards. Outside one it is an ordinary
-    transaction rollback, so the same code is correct in both places.
+    from, which matters twice: nothing destructive this package does survives
+    the block -- the emptying below included -- and inside a pytest-django
+    ``db`` test the rollback is to a savepoint, so it costs nothing and leaves
+    the enclosing test transaction usable afterwards. Outside one it is an
+    ordinary transaction rollback, so the same code is correct in both places.
+
+    **The declared tables are emptied first, and on PostgreSQL the emptying
+    reaches further than the declaration.** It is ``TRUNCATE ... CASCADE``, so
+    it also empties every table holding a foreign key into a declared one,
+    whether the shape declares that table or not: for the life of the block the
+    caller does not see the rows in it, and they come back with the rollback
+    like everything else. Before emptying, the foreign-key checks still pending
+    from the caller's own writes are fired. Django creates PostgreSQL foreign
+    keys ``DEFERRABLE INITIALLY DEFERRED``, so a child row written earlier in
+    the transaction -- by a factory's ``SubFactory``, say -- leaves its check
+    queued, and PostgreSQL refuses to truncate a table with pending trigger
+    events. Firing them changes only *when* they run: a row that genuinely
+    violates a constraint raises ``IntegrityError`` on the way into the world,
+    naming the constraint, rather than whenever the enclosing transaction next
+    checks. Off PostgreSQL the declared tables are emptied by one ``DELETE``
+    each, which reaches no other table, and nothing is fired first.
 
     One thing the rollback does not undo, because the database will not: an
     identity sequence moved past the keys a build assigned stays moved, since
@@ -149,6 +167,26 @@ def _empty_declared_tables(shape: Shape, using: str) -> None:
     quoted = ", ".join(connection.ops.quote_name(name) for name in tables)
     with connection.cursor() as cursor:
         if connection.vendor == "postgresql":
+            # Fire the foreign-key checks still queued from the caller's own
+            # writes before emptying anything. Django creates PostgreSQL foreign
+            # keys DEFERRABLE INITIALLY DEFERRED, so a child row written earlier
+            # in this transaction -- by a factory's SubFactory, typically --
+            # leaves its check pending until commit, and PostgreSQL refuses to
+            # TRUNCATE a table with pending trigger events, whether the shape
+            # names it or CASCADE reaches it. A parent row alone queues nothing,
+            # which is why only a caller who wrote a child ever saw the refusal.
+            #
+            # This moves *when* the checks run and nothing else: a row that
+            # genuinely violates a constraint now raises here, at world entry
+            # and under the constraint's name, rather than whenever the
+            # enclosing transaction next checks. check_constraints() ends with
+            # SET CONSTRAINTS ALL DEFERRED, which would defer even a constraint
+            # declared INITIALLY IMMEDIATE if it outlived the block -- it does
+            # not, because the mode is transaction state and rolling back this
+            # block's savepoint restores it with everything else. Not off
+            # PostgreSQL: DELETE has no such refusal, and SQLite's version of
+            # this call scans every table in the database.
+            connection.check_constraints()
             # TRUNCATE is transactional on PostgreSQL, so it rolls back with the
             # rest of the block. CASCADE covers a foreign key from a table this
             # shape does not declare; RESTART IDENTITY is deliberately omitted,

@@ -184,6 +184,16 @@ remember either. Each world is built inside that transaction and undone by
 rolling back to a savepoint, so the next factor starts from an empty table and
 the test's own transaction survives.
 
+A world first empties the tables its shape declares, inside that same
+transaction, and on PostgreSQL the emptying is `TRUNCATE ... CASCADE`: a table
+holding a foreign key into a declared one is empty inside the block too, whether
+the shape declares it or not, and its rows come back with the rollback. Rows the
+test wrote before entering are fine, children included -- the foreign-key checks
+Django leaves deferred on them are fired before the `TRUNCATE`, because
+PostgreSQL refuses to truncate a table with checks still pending. A row that
+genuinely breaks a constraint therefore raises `IntegrityError` on the way into
+the world, naming the constraint, rather than at the end of the test.
+
 Outside a fixture, the same thing is a context manager:
 
 ```python
@@ -216,11 +226,12 @@ def test_the_dashboard_query_does_not_grow(world, django_assert_num_queries):
                 dashboard()
 ```
 
-On PostgreSQL the hazard is mild and fixed -- fourteen statements for a two-table
-shape, at every factor, because `COPY` does not pass through Django's
-`execute_wrapper` and only
-the emptiness check, the parent key read, the sequence reset, the `ANALYZE` and
-the savepoints do. Off PostgreSQL it is neither mild nor fixed: the inserts are
+On PostgreSQL the hazard is mild and fixed -- twenty-one statements for a
+two-table shape, at every factor, because one `COPY` loads a table however many
+rows it carries, and everything else a world emits -- the foreign-key checks
+fired before emptying, the `TRUNCATE`, the emptiness check, the statistics-target
+read, the parent key read, the sequence resets, the `ANALYZE` and the savepoints
+-- is counted per table or per world, never per row. Off PostgreSQL it is neither mild nor fixed: the inserts are
 ordinary statements, one per thousand rows, so the count a capture sees **grows
 with the factor**, and a growth assertion measuring from outside the block would
 read the loader's curve as its subject's.

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import datetime
+from pathlib import Path
 
 import pytest
 from django.db import DEFAULT_DB_ALIAS, connection, connections
@@ -20,7 +21,10 @@ from django_data_shape import (
     Zipf,
     scaled_world,
 )
+from django_data_shape.fixtures import scale_fixture
 from tests.testapp.models import Company, Order, Session
+
+_ROOT = Path(__file__).resolve().parents[2]
 
 # No backend skip, unlike the loader's own tests, and the difference is the
 # point: a growth harness asks for rows and cardinality rather than for a
@@ -174,7 +178,13 @@ def test_it_also_undoes_a_world_it_opened_the_transaction_for() -> None:
 # declaration rather than the factor. PostgreSQL only: Django emits no sequence
 # reset for a SQLite table without AUTOINCREMENT, which is why the portable
 # constant did not move with it.
-_POSTGRES_STATEMENTS = 19
+#
+# And by two for the foreign-key checks fired before the TRUNCATE -- SET
+# CONSTRAINTS ALL IMMEDIATE, then ALL DEFERRED -- because PostgreSQL refuses to
+# truncate a table a caller's deferred check is still pending against. Two
+# statements whatever the shape and whatever the factor, so still a constant,
+# and PostgreSQL only, because the DELETE path has no such refusal.
+_POSTGRES_STATEMENTS = 21
 _PORTABLE_STATEMENTS = 12
 _ROWS_PER_INSERT = 1000
 
@@ -193,14 +203,34 @@ def _statements(shape: Shape, factor: int, alias: str) -> int:
 )
 def test_building_a_world_costs_the_same_on_postgres_at_every_factor() -> None:
     # The half that makes a capture around the block merely wrong rather than
-    # catastrophic: COPY is not a wrapped statement, so the overhead is the
-    # TRUNCATE, the emptiness check, the statistics-target read, the parent key
-    # read, the two sequence resets, the ANALYZE and the savepoints -- none of
-    # which depend on how many rows there are.
+    # catastrophic: one COPY loads a table however many rows it carries, so the
+    # overhead is that, the two constraint-mode statements, the TRUNCATE, the
+    # emptiness check, the statistics-target read, the parent key read, the two
+    # sequence resets, the ANALYZE and the savepoints -- none of which depend on
+    # how many rows there are.
     shape = _graph(companies=10, sessions=_ROWS_PER_INSERT)
 
     assert _statements(shape, 1, DEFAULT_DB_ALIAS) == _POSTGRES_STATEMENTS
     assert _statements(shape, 5, DEFAULT_DB_ALIAS) == _POSTGRES_STATEMENTS
+
+
+_SPELLED_OUT = {21: "twenty-one"}
+
+
+def test_the_figure_the_prose_quotes_is_the_one_measured() -> None:
+    # The PostgreSQL figure is quoted in three places a consumer reads, and it
+    # had drifted in all three -- sixteen in two, fourteen in the third -- while
+    # the constant above moved twice. Prose cannot be measured, but it can be
+    # held to the measurement: move the constant and this names every page that
+    # still quotes the old number.
+    figure = f"{_SPELLED_OUT[_POSTGRES_STATEMENTS]} statements"
+    quoted_in = {
+        "scaled_world": scaled_world.__doc__ or "",
+        "scale_fixture": scale_fixture.__doc__ or "",
+        "docs/pytest.md": (_ROOT / "docs" / "pytest.md").read_text(),
+    }
+
+    assert [name for name, text in quoted_in.items() if figure not in " ".join(text.split())] == []
 
 
 @pytest.mark.django_db(databases=["default", "not_postgres"])
