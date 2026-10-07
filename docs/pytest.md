@@ -90,16 +90,29 @@ order they are usually right:
 
 A session world holds its rows for the whole run, and a scaled world is built
 from empty every time. They can still point at one model: a scaled world empties
-its declared tables inside the transaction it rolls back, so inside the block it
-sees only its own world, and the session rows are back after it. That is the
-shape a first consumer arrives with -- a big session world for plan assertions,
-small scaled worlds for growth assertions over the same flow -- and over the
-same graph it needs no arrangement. That includes a declared table with
-`Disjoint` keys, which a world otherwise leaves alone and builds beside: when it
-holds rows and has a foreign key into a declared table the world empties --
-directly, or through another such table -- it is emptied too, because its rows
-are declared rows and cannot outlive the parents they point at. A `Disjoint`
-table pointing at nothing the world empties keeps its rows.
+its declared tables inside the transaction it rolls back, so inside the block
+those tables hold only its own world, and the session rows are back after it.
+That is the shape a first consumer arrives with -- a big session world for plan
+assertions, small scaled worlds for growth assertions over the same flow.
+
+A declared table with `Disjoint` keys is the exception, because a world leaves
+it alone and builds beside its rows. When it holds rows and has a foreign key
+into a declared table the world empties -- directly, or through another such
+table -- it is emptied too, because its rows are declared rows and cannot
+outlive the parents they point at. That join reads the models' foreign keys,
+not the database's, so a `ForeignKey(db_constraint=False)` pulls a table in,
+and a row referencing that table is then refused where the database's own keys
+would have left nothing to refuse.
+
+A `Disjoint` table pointing at nothing the world empties -- a UUID-keyed root,
+or every table of a graph keyed by UUIDs throughout -- keeps its rows, and over
+a session world declaring it those rows are the session's. The world's keys are
+a digest of each row's position and the shape's seed, and scaling keeps the
+seed, so with the session's seed the world makes the session's keys and the
+build fails on the primary key with `IntegrityError`. With another seed it
+builds, and a table fanned out over that one draws parents from the session's
+rows as well as the world's. Over the same graph, then, a session world needs no
+arrangement unless the graph has such a table.
 
 A scaled world removes the rows of its declared tables **and nothing else**:
 no statement it issues changes a table its shape does not declare, even for the
@@ -121,8 +134,11 @@ table it names can take them, it offers a third: give those tables `Disjoint`
 keys (`UuidKeys` or `Md5Keys`), so the world builds beside the rows already
 there instead of emptying them. Both strategies make UUIDs, so that one is
 offered only where the primary key accepts a UUID -- a `UUIDField`, or a text
-column with room for one -- and never for an integer key, a projected table, or
-a table whose keys are `Disjoint` already.
+column with room for one -- and never for an integer key, a primary key that is
+itself a foreign key, a projected table, or a table whose keys are `Disjoint`
+already. Nor is it offered for a table with a foreign key into another table the
+world empties, since with `Disjoint` keys that key would pull it back into the
+emptying and the refusal would come back unchanged.
 
 A foreign key left null is not a reference, and only a foreign key the database
 enforces is seen: a `ForeignKey(db_constraint=False)` or a `GenericForeignKey`
@@ -243,10 +259,24 @@ Before the `TRUNCATE`, the foreign-key checks Django leaves deferred on the
 test's own writes are fired, because PostgreSQL refuses to truncate a table with
 checks still pending. A row that genuinely breaks a constraint therefore raises
 `IntegrityError` on the way into the world, naming the constraint, rather than
-at the end of the test. After the `DELETE`s they are fired too, because each row
-a `DELETE` removes from a referenced table queues a check of its own, and
-PostgreSQL refuses the `ALTER TABLE ... SET STATISTICS` a table declaring
-`statistics=` is built with while checks are pending.
+at the end of the test. After the `DELETE`s they are fired too, so a row outside
+the declaration that breaks a constraint raises on the way in on either route.
+The build fires them again before the `ALTER TABLE ... SET STATISTICS` a table
+declaring `statistics=` is built with, because PostgreSQL refuses it while checks
+are pending: each row a `DELETE` removes from a referenced table queues one, and
+a world that empties nothing leaves the test's own queued.
+
+The two routes part on a row in a declared table that breaks a constraint, such
+as an orphan the test wrote. The `TRUNCATE` route checks it before the
+statement and raises `IntegrityError`. The `DELETE` route removes the row
+before it fires the checks, PostgreSQL skips a check whose row is gone, and the
+world builds; the orphan is back after the block.
+
+Firing the checks ends with `SET CONSTRAINTS ALL DEFERRED`, on either route, so
+from there until the block ends every deferrable constraint is deferred -- one
+declared `INITIALLY IMMEDIATE` included -- and the test's own code inside the
+block runs under that. The mode is transaction state, so the rollback that ends
+the block restores the test's.
 
 A `DELETE` fires row-level `DELETE` triggers, which `TRUNCATE` does not. A
 trigger on a declared table runs inside the world: an audit trigger writing into

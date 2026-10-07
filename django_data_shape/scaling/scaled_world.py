@@ -100,9 +100,22 @@ def scaled_world(shape: Shape, factor: int, *, using: str = DEFAULT_DB_ALIAS) ->
     world builds beside the rows already there -- unless it has a foreign key
     into a declared table that is being emptied, directly or through another
     such table, and holds rows. Then it is emptied too: its rows are declared
-    rows, and they cannot outlive the parents they point at. Over the same
-    graph, a session world under a scaled world therefore needs no arrangement
-    whatever its keys.
+    rows, and they cannot outlive the parents they point at. Those foreign keys
+    are read from the models, not the database, so a
+    ``ForeignKey(db_constraint=False)`` pulls a table in although the refusal
+    below does not see one -- and a row referencing that table is then
+    refused, where the database's own keys would have left nothing to refuse.
+
+    **So a session world under a scaled world over the same graph needs no
+    arrangement unless a declared ``Disjoint`` table holding the session's
+    rows is left alone** -- one pointing at nothing the world empties, such as
+    a UUID-keyed root, or any table of a graph keyed by UUIDs throughout. The
+    world builds beside those rows, and its keys are a digest of each row's
+    position and the shape's seed, which scaling keeps: with the session's seed
+    the world makes the session's keys and the build fails on the primary key
+    with ``IntegrityError``; with another seed it builds, and a table fanned
+    out over that one draws parents from the session's rows as well as the
+    world's.
 
     What the world's statements set off is another matter. A row-level
     ``DELETE`` trigger on a declared table runs when the world empties that
@@ -120,9 +133,10 @@ def scaled_world(shape: Shape, factor: int, *, using: str = DEFAULT_DB_ALIAS) ->
     table the shape does not declare. The message names each reference as
     ``referencing_table.column -> declared_table`` and the ways out: declare
     the referencing table too, so its rows are the world's; give the declared
-    table ``Disjoint`` keys -- offered only where every table named can take
-    them, which an integer primary key cannot; or do not create those rows in
-    that test. A reference left null is not one. Only a foreign key the
+    table ``Disjoint`` keys -- offered only where that would end the refusal,
+    so where every table named can take them, which an integer primary key
+    cannot, and none has a foreign key into another table being emptied, which
+    would pull it straight back in; or do not create those rows in that test. A reference left null is not one. Only a foreign key the
     database enforces is seen: a ``ForeignKey(db_constraint=False)`` and a
     ``GenericForeignKey`` are invisible to the refusal, so a row holding one
     is left pointing at whatever the world puts under that key. PostgreSQL's
@@ -151,9 +165,25 @@ def scaled_world(shape: Shape, factor: int, *, using: str = DEFAULT_DB_ALIAS) ->
     referencing a declared one -- and off PostgreSQL always, each declared
     table holding rows is emptied by one ``DELETE``, children first. On
     PostgreSQL the pending checks are fired after those ``DELETE`` statements,
-    since each row a ``DELETE`` removes from a referenced table queues a check
-    of its own, and PostgreSQL refuses the build's
-    ``ALTER TABLE ... SET STATISTICS`` on a table with checks still queued.
+    so that both routes enter the block alike: a row outside the declaration
+    that breaks a constraint raises ``IntegrityError`` on the way in either
+    way. PostgreSQL also refuses the build's ``ALTER TABLE ... SET STATISTICS``
+    on a table with checks still queued -- and each row a ``DELETE`` removes
+    from a referenced table queues one -- which the build answers itself: it
+    fires the pending checks before setting a declared statistics target,
+    whether or not the world emptied anything.
+
+    The two routes part on a row in a declared table that breaks a constraint,
+    such as an orphan the caller wrote. The ``TRUNCATE`` route fires its check
+    before the statement, so it raises ``IntegrityError``. The ``DELETE`` route
+    removes the row first, PostgreSQL skips a queued check whose row is gone,
+    and the world builds; the orphan is back after the block.
+
+    Firing the checks ends with ``SET CONSTRAINTS ALL DEFERRED``, on either
+    route, so from there to the end of the block every deferrable constraint
+    is deferred, one declared ``INITIALLY IMMEDIATE`` included, and the
+    caller's block runs under that. The mode is transaction state, and the
+    rollback that ends the block restores the caller's.
 
     One thing the rollback does not undo, because the database will not: an
     identity sequence moved past the keys a build assigned stays moved, since
@@ -268,8 +298,8 @@ def _empty_declared_tables(shape: Shape, using: str) -> None:
     Otherwise some referencing table holds rows, and after the refusal check
     the candidates are emptied by ``DELETE`` instead, children before parents
     (``test_the_delete_route_empties_children_before_parents``), and on
-    PostgreSQL the checks those statements queue are fired after them
-    (``test_statistics_on_the_parent_survive_the_delete_route``).
+    PostgreSQL the pending checks are fired after them
+    (``test_a_violation_outside_the_declaration_surfaces_at_entry_on_either_route``).
 
     **Off PostgreSQL the refusal is made through Django's introspection**,
     which reads every table's foreign keys -- a cost paid only by a world whose
@@ -316,13 +346,17 @@ def _empty_declared_tables(shape: Shape, using: str) -> None:
                 # genuinely violates a constraint now raises here, at world
                 # entry and under the constraint's name, rather than whenever
                 # the enclosing transaction next checks. check_constraints()
-                # ends with SET CONSTRAINTS ALL DEFERRED, which would defer even
-                # a constraint declared INITIALLY IMMEDIATE if it outlived the
-                # block -- it does not, because the mode is transaction state
-                # and rolling back this block's savepoint restores it with
-                # everything else. Before the statement on this route, because
-                # TRUNCATE is what refuses; the DELETE route below fires them
-                # after its statements instead, for the build's ALTER TABLE.
+                # ends with SET CONSTRAINTS ALL DEFERRED, which defers every
+                # deferrable constraint, one declared INITIALLY IMMEDIATE
+                # included, for the rest of the block and the caller's block
+                # with it (test_inside_the_block_every_deferrable_constraint_is_deferred,
+                # on both routes). It does not outlive the block, because the
+                # mode is transaction state and rolling the block back restores
+                # it with everything else
+                # (test_the_constraint_mode_the_world_set_does_not_outlive_it).
+                # Before the statement on this route, because TRUNCATE is what
+                # refuses; the DELETE route below fires them after its
+                # statements instead, for the build's ALTER TABLE.
                 connection.check_constraints()
                 # TRUNCATE is transactional on PostgreSQL, so it rolls back with
                 # the rest of the block. No CASCADE: the closure is listed, so
@@ -335,7 +369,7 @@ def _empty_declared_tables(shape: Shape, using: str) -> None:
                 return
         else:
             references = _referencing_tables(connection, cursor, candidates)
-        _refuse_held_references(connection, cursor, references, shape)
+        _refuse_held_references(connection, cursor, references, shape, candidates)
         # DELETE, because TRUNCATE cannot remove the declared rows here without
         # taking a table that references them along: its unit is a set closed
         # under references, and one of those tables holds rows that are not
@@ -347,18 +381,31 @@ def _empty_declared_tables(shape: Shape, using: str) -> None:
             cursor.execute(f"DELETE FROM {connection.ops.quote_name(name)}")
         if connection.vendor == "postgresql":
             # Fired after the DELETEs, where the TRUNCATE route fires them
-            # before its statement, and for a different refusal. DELETE itself is
-            # allowed with trigger events pending -- but every row it removes from
-            # a referenced table queues a deferred foreign-key check of its own,
-            # on top of any the caller's writes left, and PostgreSQL refuses
-            # ALTER TABLE on a table with events pending. The build's
-            # ALTER TABLE ... SET STATISTICS, for a table declaring
-            # statistics=, is the next statement to meet them
-            # (test_statistics_on_the_parent_survive_the_delete_route and its
-            # two siblings). Every check passes: the refusal above has ruled
+            # before its statement. DELETE itself is allowed with trigger events
+            # pending, so nothing here needs them first; they are fired so that
+            # both routes enter the block alike. A row outside the declaration
+            # that breaks a constraint raises here, under the constraint's
+            # name, as it does before a TRUNCATE
+            # (test_a_violation_outside_the_declaration_surfaces_at_entry_on_either_route),
+            # and every deferrable constraint is deferred for the rest of the
+            # block, which the rollback undoes
+            # (test_inside_the_block_every_deferrable_constraint_is_deferred).
+            #
+            # Every check the DELETEs queued passes -- each row they remove
+            # from a referenced table queues one: the refusal above has ruled
             # out a reference from outside the declaration, and the children
-            # went first. Off PostgreSQL nothing refuses a pending check, and
-            # SQLite's version of this call scans every table in the database.
+            # went first. One the caller queued on a row of a declared table is
+            # skipped, since the row is gone -- so an orphan there, which the
+            # TRUNCATE route raises for, is removed unchecked here
+            # (test_on_the_delete_route_an_orphan_in_a_declared_table_is_removed_unchecked).
+            # The build's ALTER TABLE ... SET STATISTICS, which PostgreSQL
+            # refuses while checks are queued, does not rest on this call:
+            # apply_statistics_targets fires them itself before any ALTER,
+            # because a world that empties nothing reaches it with the
+            # caller's checks still queued.
+            #
+            # Off PostgreSQL nothing refuses a pending check, and SQLite's
+            # version of this call scans every table in the database.
             connection.check_constraints()
 
 
@@ -388,7 +435,12 @@ def _candidates(shape: Shape, holding: set[str]) -> list[str]:
     Decided by schema and not row by row, like the ``TRUNCATE`` closure: a
     Disjoint table joins when one of its model's foreign keys points into the
     set, whatever its rows hold there. Read from the models rather than the
-    database, so it costs no statement.
+    database, so it costs no statement -- and so a ``db_constraint=False`` key,
+    which the refusal reads past because the database holds no constraint for
+    it, still pulls its table in. A row referencing that table is then refused,
+    where by the database's keys alone there was nothing of the table's to
+    empty
+    (``test_a_key_the_database_does_not_enforce_still_joins_a_disjoint_table``).
 
     Each condition fails a test of its own when it is removed, which a branch
     gate cannot show. Joining every Disjoint table, rather than one with a key
@@ -528,7 +580,7 @@ def _referencing_tables(connection: Any, cursor: Any, candidates: list[str]) -> 
 
 
 def _refuse_held_references(
-    connection: Any, cursor: Any, references: list[_Reference], shape: Shape
+    connection: Any, cursor: Any, references: list[_Reference], shape: Shape, candidates: list[str]
 ) -> None:
     """Raise :class:`ShapeReferenced` if any row holds one of ``references``.
 
@@ -540,7 +592,10 @@ def _refuse_held_references(
 
     The ``Disjoint`` way out is offered only where taking it would work for
     every declared table the message names, since each way out is offered as
-    one that ends the refusal on its own; see :func:`_disjoint_keys_fit`.
+    one that ends the refusal on its own: where the primary key takes the keys
+    (see :func:`_disjoint_keys_fit`), and where the table has no foreign key
+    into another of ``candidates``, through which :func:`_candidates` would
+    pull it straight back into the set.
     """
     quote = connection.ops.quote_name
     held = _exists(
@@ -568,10 +623,22 @@ def _refuse_held_references(
     # Every named table, not any: following the advice for one of two leaves
     # the other's reference refused, so the advice would not be a way out
     # (test_disjoint_keys_are_not_offered_unless_every_named_table_can_take_them).
+    # And none with a key into another candidate, because _candidates pulls a
+    # Disjoint table back into the set through exactly such a key, and the
+    # refusal comes back unchanged
+    # (test_disjoint_keys_are_not_offered_where_the_table_would_be_emptied_all_the_same).
+    # A key into itself does not count: a table the advice takes out of the
+    # set cannot pull itself back in
+    # (test_a_key_into_itself_does_not_withhold_disjoint_keys).
+    emptied = set(candidates)
     disjoint = (
         f"give {declared} Disjoint keys (UuidKeys or Md5Keys), so the world builds beside the "
         "rows already there instead of emptying the table; "
-        if all(_disjoint_keys_fit(by_name[name]) for name in names)
+        if all(
+            _disjoint_keys_fit(by_name[name])
+            and not _foreign_key_targets(by_name[name]) & (emptied - {name})
+            for name in names
+        )
         else ""
     )
     raise ShapeReferenced(
@@ -611,13 +678,36 @@ def _disjoint_keys_fit(table: Table | Projection) -> bool:
     an integer key never does, and following the advice there used to fail at
     the load, out of range for ``bigint`` on PostgreSQL and too large for an
     ``INTEGER`` on SQLite (``test_a_fee_the_caller_made_refuses_the_world_naming_its_column``).
+
+    Two things are decided before the field is asked, and each was removed in
+    turn to watch the test named beside it fail. A primary key that is itself a
+    foreign key -- a one-to-one key into its parent -- never accepts them, and
+    is not asked, because asking runs ``ForeignKey.validate``'s existence query
+    on the router's database rather than the world's
+    (``test_disjoint_keys_are_not_offered_for_a_key_that_is_a_relation``, which
+    asserts that nothing reads the parent). And a field that refuses with
+    ``ValueError`` or ``TypeError``, where Django's contract is a
+    ``ValidationError``, is taken to refuse, rather than raising in place of
+    the refusal; each of the two is exercised on its own
+    (``test_a_key_field_refusing_outside_its_contract_still_refuses_the_world``),
+    since one ``except`` naming both is a single branch to the coverage gate.
     """
     keys = getattr(table, "keys", None)
     if keys is None or isinstance(keys, Disjoint):
         return False
+    field = primary_key_field(table.model)
+    if field.is_relation:
+        # A primary key that is a foreign key holds its parent's keys, and a
+        # digest is never one of them. Asked anyway, the field would answer
+        # with ForeignKey.validate's existence query, run on the router's
+        # database whatever the world's is.
+        return False
     try:
-        primary_key_field(table.model).clean(_DISJOINT_KEY, None)
-    except ValidationError:
+        field.clean(_DISJOINT_KEY, None)
+    except (ValidationError, ValueError, TypeError):
+        # ValidationError is the contract. The other two are what a field
+        # breaking it raises from to_python, and either would otherwise escape
+        # in place of the refusal this is building.
         return False
     return True
 

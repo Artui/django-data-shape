@@ -50,15 +50,18 @@ def scale_fixture(shape: Shape, *, using: str = DEFAULT_DB_ALIAS) -> object:
     **Over a session world, too.** A table that
     :func:`~django_data_shape.fixtures.shape_fixture.shape_fixture` filled for
     the session is emptied by each world declaring it, inside the transaction
-    the world rolls back, so the world sees only its own rows and the session's
-    are back afterwards. A world removes the rows of its declared tables and
-    nothing else, so where a row it did not make references one it would
-    remove -- a session table this shape leaves out, or a row the test wrote --
-    it refuses with :class:`~django_data_shape.scaling.shape_referenced.ShapeReferenced`
-    and names the reference. Declare that table too, and a session world over
-    the same graph builds every time -- a declared table with ``Disjoint`` keys
-    included, which is emptied with the tables it points into rather than left
-    referencing rows the world removed.
+    the world rolls back, so the world sees only its own rows there and the
+    session's are back afterwards. A world removes the rows of its declared
+    tables and nothing else, so where a row it did not make references one it
+    would remove -- a session table this shape leaves out, or a row the test
+    wrote -- it refuses with
+    :class:`~django_data_shape.scaling.shape_referenced.ShapeReferenced` and
+    names the reference. Declare that table too, and a session world over the
+    same graph builds. A declared table with ``Disjoint`` keys is emptied only
+    with a table it points into; one pointing at nothing the world empties
+    keeps the session's rows, and with the session's seed the world's keys are
+    theirs and the build fails on the primary key -- see
+    :func:`~django_data_shape.scaling.scaled_world.scaled_world`.
 
     **Open a query capture inside the block, never around it.** Repeated here
     from :func:`~django_data_shape.scaling.scaled_world.scaled_world` and not merely

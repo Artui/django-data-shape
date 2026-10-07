@@ -160,7 +160,7 @@ def test_it_also_undoes_a_world_it_opened_the_transaction_for() -> None:
 # not change silently is which of the two is a constant and which is a curve.
 # Counted with CaptureQueriesContext inside a non-transactional django_db test,
 # which is what pytestmark above gives every test in this module. Both of those
-# choices move the number: through execute_wrapper the same shape is nineteen --
+# choices move the number: through execute_wrapper the same shape is seventeen --
 # pinned below as well, because the docstring quotes it -- and a
 # transaction=True test is one savepoint fewer. The constants are therefore a
 # regression guard on this module's own measurement, not a published figure.
@@ -187,8 +187,9 @@ def test_it_also_undoes_a_world_it_opened_the_transaction_for() -> None:
 # CONSTRAINTS ALL IMMEDIATE, then ALL DEFERRED -- because PostgreSQL refuses to
 # truncate a table a caller's deferred check is still pending against. Two
 # statements whatever the shape and whatever the factor, so still a constant,
-# and PostgreSQL only. (The DELETE route fires them too, after its DELETEs, for
-# the build's ALTER TABLE; none of the figures here takes that route.)
+# and PostgreSQL only. (The DELETE route fires them too, after its DELETEs, and
+# a build fires them before setting a declared statistics target; none of the
+# figures here takes that route or declares a target.)
 #
 # And down by two on PostgreSQL, and by one off it, when a world stopped emptying
 # tables that hold nothing. Over empty tables -- which is what every measurement

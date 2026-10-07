@@ -1118,3 +1118,78 @@ class Award(models.Model):
 
     wearer = models.ForeignKey(Wearer, on_delete=models.CASCADE, related_name="+")
     badge = models.ForeignKey(Badge, on_delete=models.CASCADE, related_name="+")
+
+
+class Thread(models.Model):
+    """A UUID-keyed table with a key into itself and one the database never sees.
+
+    The key into itself is for the ``Disjoint`` advice a scaled world's refusal
+    offers: giving a table those keys takes it out of the emptying unless one
+    of its keys points into another table being emptied, and a key into itself
+    is not one, because a table that is not emptied cannot pull itself back in.
+
+    The key into ``Company`` has no constraint behind it, and a scaled world
+    decides which ``Disjoint`` tables to empty from the models' keys rather
+    than the database's, so it still pulls this table in with the companies.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    parent = models.ForeignKey("self", null=True, on_delete=models.CASCADE, related_name="+")
+    company = models.ForeignKey(
+        Company, null=True, db_constraint=False, on_delete=models.DO_NOTHING, related_name="+"
+    )
+    title = models.CharField(max_length=50)
+
+
+class TenantProfile(models.Model):
+    """A primary key that is itself a one-to-one key into a UUID-keyed table.
+
+    A UUID fits the column, and still no key a ``Disjoint`` strategy makes is a
+    tenant's, so the advice to use one is never offered for it. Asking the
+    field whether it accepts one would run ``ForeignKey.validate``'s existence
+    query, against whichever database the router names rather than the world's.
+    """
+
+    tenant = models.OneToOneField(
+        Tenant, primary_key=True, on_delete=models.CASCADE, related_name="+"
+    )
+    text = models.CharField(max_length=50)
+
+
+class StrictCodeField(models.CharField):
+    """A character field whose ``to_python`` refuses with a plain exception.
+
+    Django's contract is a ``ValidationError``, and a third-party field does not
+    always keep it. ``refusal`` is a class attribute so that one model can stand
+    for a field raising either of the two such exceptions a scaled world catches.
+    """
+
+    refusal: type[Exception] = ValueError
+
+    def to_python(self, value: object) -> object:
+        text = super().to_python(value)
+        if text is not None and not str(text).startswith("code-"):
+            raise self.refusal(f"{text!r} is not a code")
+        return text
+
+
+class StrictCode(models.Model):
+    """A primary key on a ``StrictCodeField``, which refuses a UUID's text form."""
+
+    code = StrictCodeField(max_length=50, primary_key=True)
+    name = models.CharField(max_length=50)
+
+
+class Remark(models.Model):
+    """A row that references one of the three tables above, and none of them is declared.
+
+    Each key is nullable, so a test sets the one it is about and the others
+    reference nothing.
+    """
+
+    thread = models.ForeignKey(Thread, null=True, on_delete=models.CASCADE, related_name="+")
+    profile = models.ForeignKey(
+        TenantProfile, null=True, on_delete=models.CASCADE, related_name="+"
+    )
+    code = models.ForeignKey(StrictCode, null=True, on_delete=models.CASCADE, related_name="+")
+    text = models.CharField(max_length=50)

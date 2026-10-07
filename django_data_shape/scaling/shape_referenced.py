@@ -28,10 +28,13 @@ class ShapeReferenced(Exception):
     :class:`~django_data_shape.keys.disjoint.Disjoint` keys, so the world builds
     beside the rows already there rather than emptying them. That one is left
     out where it would not work: for an integer primary key, which cannot hold
-    the UUIDs ``UuidKeys`` and ``Md5Keys`` make; for a projected table, which a
-    scaled world empties whatever its keys; and for a table whose keys already
-    are Disjoint, which is emptied because it points into another table that
-    is.
+    the UUIDs ``UuidKeys`` and ``Md5Keys`` make; for a primary key that is
+    itself a foreign key, which holds its parent's keys and never a digest;
+    for a projected table, which a scaled world empties whatever its keys; for
+    a table whose keys already are Disjoint, which is emptied because it
+    points into another table that is; and for a table with a foreign key into
+    another table being emptied, which that key would pull back into the
+    emptying once its keys were Disjoint.
 
     Raised inside the world's own transaction and before any row is removed,
     so a world refused this way has changed nothing.

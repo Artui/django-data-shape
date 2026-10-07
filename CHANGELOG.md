@@ -155,23 +155,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   A declared table with `Disjoint` keys is still left alone and built beside --
   unless it holds rows and has a foreign key into a declared table the world
   empties, directly or through another such table. Then it is emptied too, since
-  its rows are declared rows and cannot outlive the parents they point at;
-  before, the world refused its own declaration, naming the `Disjoint` table's
-  key as a reference from outside it, so a session world under a scaled world
-  over the same graph failed whenever that graph had a UUID-keyed child.
+  its rows are declared rows and cannot outlive the parents they point at. In
+  0.21.0 `CASCADE` emptied such a table on PostgreSQL, along with everything
+  else referencing the declared tables, and off PostgreSQL its rows were left
+  pointing at parents the world had deleted. The foreign keys that decide it
+  are the models', so a `ForeignKey(db_constraint=False)` pulls its table in as
+  well. A `Disjoint` table pointing at nothing the world empties keeps its
+  rows, which over a session world declaring it are the session's: the world's
+  keys are a digest of each row and the seed, so with the session's seed they
+  are the session's keys and the build fails on the primary key. The pytest
+  page and the docstrings say so.
 
   **One behaviour changes: a scaled world declaring a parent over rows whose
-  undeclared children reference it is now refused**, where before it silently
-  emptied them. Removing the parent's rows would leave those references
-  pointing at nothing or take the children along, so the world raises the new
-  `ShapeReferenced` before removing anything, naming each reference as
+  undeclared children reference it is now refused**, where 0.21.0 silently
+  emptied them on PostgreSQL and left them pointing at nothing elsewhere.
+  Removing the parent's rows would leave those references pointing at nothing
+  or take the children along, so the world raises the new `ShapeReferenced`
+  before removing anything, naming each reference as
   `referencing_table.column -> declared_table` and the ways out: declare that
   table in the shape too, so its rows are the world's, or do not create those
-  rows in the test. Where every declared table it names can take them, it also
-  offers `Disjoint` keys, so the world builds beside the rows already there --
-  only where the primary key accepts the UUIDs `UuidKeys` and `Md5Keys` make,
-  so never for an integer key, where following that advice failed at the load,
-  nor for a projected table or one whose keys are `Disjoint` already. A scaled
+  rows in the test. Where following it would end the refusal, it also offers
+  `Disjoint` keys, so the world builds beside the rows already there: only
+  where every declared table it names has a primary key that accepts the UUIDs
+  `UuidKeys` and `Md5Keys` make, so never an integer key or one that is itself
+  a foreign key, and only where none of them is a projected table, has
+  `Disjoint` keys already, or has a foreign key into another table being
+  emptied, which would pull it back into the emptying. A scaled
   world over part of a session world's graph meets it the same way, and the
   remedy is the same. A foreign key left null is not a reference, and only a
   foreign key the database enforces is seen: `ForeignKey(db_constraint=False)`
@@ -201,16 +210,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `scaled_world` now fires the pending checks before a `TRUNCATE`. That changes
   only *when* they run: a row that genuinely violates a constraint now raises
   `IntegrityError` at world entry, naming the constraint, rather than when the
-  enclosing transaction next checks. The constraint mode it sets is transaction
-  state, so the rollback of the world's own block restores the caller's. Where
-  the world empties by `DELETE` instead on PostgreSQL -- when an undeclared
-  table holds rows -- the checks are fired after the `DELETE` statements: each
-  row they remove from a referenced table queues a check of its own, and
-  PostgreSQL refuses the `ALTER TABLE ... SET STATISTICS` the build issues for a
-  table declaring `statistics=` with checks still pending, so a world over a
-  caller's club and section failed as soon as the section declared statistics.
-  Off PostgreSQL nothing is fired, because nothing there refuses a pending
-  check.
+  enclosing transaction next checks. The `DELETE` route the entry above adds,
+  taken on PostgreSQL when an undeclared table holds rows, fires them after its
+  `DELETE` statements instead, so a row outside the declaration that breaks a
+  constraint raises at entry on either route. The two routes part on an orphan
+  the caller wrote in a declared table: the `TRUNCATE` route raises for it,
+  while the `DELETE` route removes it first, PostgreSQL skips the check of a row
+  that is gone, and the world builds. Once the checks are fired, on either
+  route, every deferrable constraint is deferred for the rest of the block, one
+  declared `INITIALLY IMMEDIATE` included; the mode is transaction state, so
+  the rollback of the world's own block restores the caller's. Off PostgreSQL
+  nothing is fired, because nothing there refuses a pending check.
+
+  **`build()` sets a declared statistics target over checks still queued in its
+  transaction**, where PostgreSQL refused the `ALTER TABLE ... SET STATISTICS`
+  with `cannot ALTER TABLE "..." because it has pending trigger events`. A table
+  with `Disjoint` keys is built beside the rows already there, so a row the
+  caller wrote into it earlier in the transaction left its check queued on the
+  very table the build then altered -- and a scaled world over such a table
+  empties nothing, so it met the same refusal. Each row a world's `DELETE`
+  removes from a referenced table queues a check too. `apply_statistics_targets`
+  now fires the pending checks before its first `ALTER TABLE`, and only for a
+  table that declares a target, so a table declaring none issues no statement
+  more. A row that breaks a constraint raises `IntegrityError` there, naming
+  it. Firing them ends with `SET CONSTRAINTS ALL DEFERRED`, so a build inside a
+  transaction of the caller's leaves every deferrable constraint deferred until
+  that transaction ends.
 
   The docstring claimed this package never issues a destructive statement
   against a table it did not fill. Beside `CASCADE` that was untrue. What holds

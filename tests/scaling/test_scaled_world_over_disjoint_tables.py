@@ -22,10 +22,26 @@ tree without the fix and fails on its assertions there.
 
 from __future__ import annotations
 
-import pytest
+import contextlib
 
+import pytest
+from django.db import IntegrityError
+
+import django_data_shape
 from django_data_shape import Constant, FanOut, Shape, Table, Zipf, build, scaled_world
-from tests.testapp.models import Event, SessionNote, Template, Tenant, TenantRecord, UuidSession
+from tests.testapp.models import (
+    Company,
+    Depot,
+    Event,
+    Region,
+    Remark,
+    SessionNote,
+    Template,
+    Tenant,
+    TenantRecord,
+    Thread,
+    UuidSession,
+)
 
 pytestmark = pytest.mark.django_db(databases=["default", "not_postgres"])
 
@@ -155,3 +171,99 @@ def test_a_disjoint_parent_the_world_does_not_reach_keeps_its_rows(alias: str) -
     assert list(TenantRecord.objects.using(alias).values_list("tenant_id", "label")) == [
         (tenant.pk, "caller")
     ]
+
+
+@pytest.mark.parametrize("alias", _ALIASES)
+def test_a_key_the_database_does_not_enforce_still_joins_a_disjoint_table(alias: str) -> None:
+    # The threads' only key into the companies is db_constraint=False, and the
+    # join reads the models' keys rather than the database's, so the threads are
+    # emptied with the companies -- and the caller's remark on one is refused.
+    # By the database's keys alone there would be nothing of the threads' to
+    # empty and nothing to refuse, which is the refusal the docs warn this adds.
+    company = Company.objects.using(alias).create(name="caller")
+    thread = Thread.objects.using(alias).create(company=company, title="caller")
+    Remark.objects.using(alias).create(thread=thread, text="caller")
+    shape = Shape(
+        Table(Company, rows=2, name=Constant("world")),
+        Table(Thread, rows=2, company=FanOut(Zipf()), title=Constant("world")),
+        seed=5,
+    )
+
+    with pytest.raises(Exception) as refused, contextlib.ExitStack() as entering:
+        entering.enter_context(scaled_world(shape, 1, using=alias))
+
+    assert refused.type is django_data_shape.ShapeReferenced
+    assert "(testapp_remark.thread_id -> testapp_thread)" in str(refused.value)
+
+
+def _tenants(label: str, tenants: int, *, seed: int = 5) -> Shape:
+    """UUID-keyed tenants, and records with integer keys pointing at them."""
+    return Shape(
+        Table(Tenant, rows=tenants, name=Constant(label)),
+        Table(TenantRecord, rows=tenants * 4, tenant=FanOut(Zipf()), label=Constant(label)),
+        seed=seed,
+    )
+
+
+def _regions(label: str, regions: int) -> Shape:
+    """A graph keyed by UUIDs throughout, so every table in it is Disjoint."""
+    return Shape(
+        Table(Region, rows=regions, name=Constant(label)),
+        Table(Depot, rows=regions * 2, region=FanOut(Zipf()), name=Constant(label)),
+        seed=5,
+    )
+
+
+# A Disjoint table pointing at nothing the world empties keeps its rows, and over
+# a session world declaring it those rows are the session's. Its keys are a
+# digest of the row and of the seed, which scaling keeps, so with the session's
+# seed the world makes the session's keys and the build collides with its rows.
+# Strict, so that whatever ends the collision has to remove the mark and say
+# what a world over such a table now sees.
+_SAME_SEED_COLLIDES = pytest.mark.xfail(
+    strict=True,
+    raises=IntegrityError,
+    reason="a Disjoint table nothing emptied points into keeps the session's rows",
+)
+
+
+@_SAME_SEED_COLLIDES
+@pytest.mark.parametrize("alias", _ALIASES)
+def test_a_session_world_with_a_disjoint_root_sits_under_the_same_graph(alias: str) -> None:
+    build(_tenants("session", 50), using=alias, require_statistics=False)
+    session_tenants = sorted(Tenant.objects.using(alias).values_list("pk", flat=True), key=str)
+
+    with scaled_world(_tenants("world", 2), 1, using=alias) as rows:
+        assert rows == 10
+
+    assert (
+        sorted(Tenant.objects.using(alias).values_list("pk", flat=True), key=str) == session_tenants
+    )
+
+
+@_SAME_SEED_COLLIDES
+@pytest.mark.parametrize("alias", _ALIASES)
+def test_a_session_world_keyed_by_uuids_throughout_sits_under_the_same_graph(alias: str) -> None:
+    build(_regions("session", 50), using=alias, require_statistics=False)
+    session_regions = sorted(Region.objects.using(alias).values_list("pk", flat=True), key=str)
+
+    with scaled_world(_regions("world", 2), 1, using=alias) as rows:
+        assert rows == 6
+
+    assert (
+        sorted(Region.objects.using(alias).values_list("pk", flat=True), key=str) == session_regions
+    )
+
+
+@pytest.mark.parametrize("alias", _ALIASES)
+def test_with_another_seed_a_disjoint_root_builds_beside_the_session_rows(alias: str) -> None:
+    # What the docs say a different seed buys: the build goes ahead, and the
+    # tenants it builds sit beside the session's -- so the fan-out into them
+    # reads both, and the world's records point at session tenants too.
+    build(_tenants("session", 50, seed=6), using=alias, require_statistics=False)
+
+    with scaled_world(_tenants("world", 2), 1, using=alias) as rows:
+        assert rows == 10
+        assert Tenant.objects.using(alias).count() == 52
+        assert TenantRecord.objects.using(alias).filter(label="session").count() == 0
+        assert TenantRecord.objects.using(alias).filter(tenant__name="session").exists()

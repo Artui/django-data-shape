@@ -7,11 +7,13 @@ queued against it. An insert into a parent alone queues nothing, which is why a
 suite that only ever wrote parents before entering a world never met it; the
 usual way in is a factory's ``SubFactory`` in the test's own setup.
 
-The same queue meets the other emptying route later. ``DELETE`` runs with
-checks pending, but every row it removes from a referenced table queues one of
-its own, and PostgreSQL refuses ``ALTER TABLE`` on a table with checks still
-queued -- which is the statement the build issues for a table declaring
-``statistics=``. So the world fires them after its ``DELETE``s too.
+The same queue meets the build later. PostgreSQL refuses ``ALTER TABLE`` on a
+table with checks still queued -- the statement the build issues for a table
+declaring ``statistics=`` -- and the queue reaches it two ways: every row a
+``DELETE`` removes from a referenced table queues a check of its own, and a
+world that empties nothing leaves the caller's checks where they were. So the
+build fires them before it sets a target, and the world fires them after its
+``DELETE``s as well, so that both emptying routes enter the block alike.
 
 PostgreSQL only, because the failure is PostgreSQL's: nothing else refuses a
 statement for checks still queued.
@@ -27,7 +29,17 @@ from django.test.utils import CaptureQueriesContext
 
 import django_data_shape
 from django_data_shape import Constant, FanOut, Shape, Table, Zipf, scaled_world
-from tests.testapp.models import Club, Company, OptionalChild, Section, Session
+from tests.testapp.models import (
+    Club,
+    Company,
+    Event,
+    MemberFee,
+    OptionalChild,
+    Section,
+    Session,
+    Template,
+    UuidSession,
+)
 
 pytestmark = [
     pytest.mark.django_db,
@@ -168,6 +180,95 @@ def _onto_the_delete_route() -> None:
     OptionalChild.objects.create(company=None, label="caller")
 
 
+def test_on_the_delete_route_an_orphan_in_a_declared_table_is_removed_unchecked() -> None:
+    # The two routes differ here. The TRUNCATE route fires the queued checks
+    # before its statement, so the orphan raises (the test above). The DELETE
+    # route fires them after its DELETEs, and by then the orphan is gone with
+    # the rest of the declared table: PostgreSQL skips a queued check whose row
+    # no longer exists, and the world builds.
+    Company.objects.create(name="caller")
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "INSERT INTO testapp_session (company_id, label) VALUES (999999, 'orphan') RETURNING id"
+        )
+        (orphan,) = cursor.fetchone()
+    _onto_the_delete_route()
+
+    try:
+        with (
+            CaptureQueriesContext(connection) as captured,
+            scaled_world(_company_and_sessions(), 1),
+        ):
+            assert not Session.objects.filter(label="orphan").exists()
+        assert 'DELETE FROM "testapp_session"' in [query["sql"] for query in captured]
+        # And back after the block, with its check queued again.
+        assert list(Session.objects.filter(label="orphan").values_list("pk", flat=True)) == [orphan]
+    finally:
+        Session.objects.filter(pk=orphan).delete()
+
+
+@pytest.mark.parametrize("route", ["truncate", "delete"])
+def test_a_violation_outside_the_declaration_surfaces_at_entry_on_either_route(route: str) -> None:
+    # A fee pointing at no section, in a table the shape does not declare.
+    # Neither route removes it, so both fire its check: the TRUNCATE route
+    # before its statement, the DELETE route after its own -- and either way
+    # the world refuses on the way in, under the constraint's name.
+    fee = MemberFee.objects.create(section_id=999999, amount=1)
+    with connection.cursor() as cursor:
+        constraints = connection.introspection.get_constraints(cursor, "testapp_memberfee")
+    (foreign_key,) = (name for name, info in constraints.items() if info["foreign_key"])
+    Company.objects.create(name="caller")
+    if route == "delete":
+        _onto_the_delete_route()
+
+    try:
+        with (
+            CaptureQueriesContext(connection) as captured,
+            pytest.raises(IntegrityError, match=foreign_key),
+            contextlib.ExitStack() as entering,
+        ):
+            entering.enter_context(scaled_world(_company_and_sessions(), 1))
+        # The TRUNCATE route raised before its statement; the DELETE route
+        # after its own.
+        emptying = [query["sql"].split()[0] for query in captured]
+        assert "TRUNCATE" not in emptying
+        assert ("DELETE" in emptying) is (route == "delete")
+    finally:
+        MemberFee.objects.filter(pk=fee.pk).delete()
+
+
+@pytest.mark.parametrize("route", ["truncate", "delete"])
+def test_inside_the_block_every_deferrable_constraint_is_deferred(route: str) -> None:
+    # Firing the checks ends with SET CONSTRAINTS ALL DEFERRED, on either
+    # route, and nothing sets the modes back until the block's rollback: for
+    # the rest of the block a constraint declared INITIALLY IMMEDIATE accepts
+    # a bad row it would otherwise refuse at once. The test above pins the
+    # restoring half; this pins what the caller's block runs under.
+    with connection.cursor() as cursor:
+        cursor.execute("CREATE TEMPORARY TABLE shape_parent (id integer PRIMARY KEY)")
+        cursor.execute(
+            "CREATE TEMPORARY TABLE shape_child_immediate (parent_id integer "
+            "REFERENCES shape_parent DEFERRABLE INITIALLY IMMEDIATE)"
+        )
+    _caller_writes_a_parent_and_a_child()
+    if route == "delete":
+        _onto_the_delete_route()
+
+    with (
+        CaptureQueriesContext(connection) as captured,
+        scaled_world(_company_and_sessions(), 1),
+        connection.cursor() as cursor,
+    ):
+        # Accepted, and rolled back with the block along with its queued check.
+        cursor.execute("INSERT INTO shape_child_immediate VALUES (1)")
+
+    emptying = [query["sql"].split()[0] for query in captured]
+    assert ("TRUNCATE" in emptying) is (route == "truncate")
+    assert ("DELETE" in emptying) is (route == "delete")
+    with connection.cursor() as cursor, pytest.raises(IntegrityError), transaction.atomic():
+        cursor.execute("INSERT INTO shape_child_immediate VALUES (1)")
+
+
 def _attstattarget(table: str, column: str) -> int:
     with connection.cursor() as cursor:
         cursor.execute(
@@ -239,3 +340,43 @@ def test_statistics_on_a_section_survive_a_world_over_the_callers_club() -> None
     assert list(Section.objects.values_list("pk", "club_id", "name")) == [
         (section.pk, club.pk, "caller")
     ]
+
+
+def test_statistics_on_a_disjoint_table_survive_the_callers_own_rows() -> None:
+    # The way round a refusal a consumer reached for: the sessions given
+    # Disjoint keys, so the world builds beside the caller's rows and empties
+    # nothing. With nothing emptied neither route fires the checks, and the
+    # session the caller wrote left one queued on the very table whose
+    # statistics the build sets -- so the build fires them itself.
+    template = Template.objects.create(name="caller")
+    event = Event.objects.create(template=template, name="caller")
+    session = UuidSession.objects.create(event=event, title="caller")
+    shape = Shape(
+        Table(
+            UuidSession,
+            rows=3,
+            event=FanOut(Zipf(), parents=[event.pk]),
+            title=Constant("world"),
+            statistics={"title": 200},
+        ),
+        seed=5,
+    )
+
+    with (
+        CaptureQueriesContext(connection) as captured,
+        scaled_world(shape, 1) as rows,
+    ):
+        assert rows == 3
+        assert _attstattarget("testapp_uuidsession", "title") == 200
+        assert sorted(UuidSession.objects.values_list("title", flat=True)) == [
+            "caller",
+            "world",
+            "world",
+            "world",
+        ]
+
+    # Nothing was emptied: the only statements naming the table are the build's.
+    assert not [
+        query["sql"] for query in captured if query["sql"].startswith(("TRUNCATE", "DELETE"))
+    ]
+    assert list(UuidSession.objects.values_list("pk", "title")) == [(session.pk, "caller")]

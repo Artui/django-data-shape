@@ -5,7 +5,8 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
-from django.db import connection
+from django.db import IntegrityError, connection, transaction
+from django.test.utils import CaptureQueriesContext
 
 from django_data_shape import Constant, FanOut, InvalidShape, Projection, Shape, Skew, Table, Zipf
 from django_data_shape import build as build_shape
@@ -17,6 +18,7 @@ from tests.testapp.models import (
     TargetedSession,
     Template,
     TemplateSession,
+    UuidSession,
 )
 
 pytestmark = [
@@ -253,6 +255,112 @@ def test_a_projection_takes_a_target_like_any_other_table() -> None:
 
     assert _target(TargetedSession, "title") == 250
     assert TargetedSession.objects.count() > 0
+
+
+def _sessions_of(event: Event, statistics: dict[str, int] | None) -> Shape:
+    return Shape(
+        Table(
+            UuidSession,
+            rows=3,
+            event=FanOut(Zipf(), parents=[event.pk]),
+            title=Constant("built"),
+            statistics=statistics,
+        ),
+        seed=5,
+    )
+
+
+def test_a_target_is_set_over_rows_the_caller_wrote_in_the_same_transaction() -> None:
+    # The sessions are UUID-keyed, so the build goes ahead beside the caller's
+    # session rather than refusing it -- and that session left its foreign-key
+    # check queued on the table, since Django creates PostgreSQL keys
+    # DEFERRABLE INITIALLY DEFERRED. PostgreSQL refuses ALTER TABLE on a table
+    # with checks still queued, so the target is set only once they are fired.
+    # One transaction around both, because this module's tests commit each
+    # statement, and a committed write has nothing left queued.
+    with transaction.atomic():
+        template = Template.objects.create(name="caller")
+        event = Event.objects.create(template=template, name="caller")
+        UuidSession.objects.create(event=event, title="caller")
+
+        with CaptureQueriesContext(connection) as captured:
+            build_shape(_sessions_of(event, {"title": 200}))
+
+        assert _target(UuidSession, "title") == 200
+        assert UuidSession.objects.count() == 4
+        transaction.set_rollback(True)
+
+    statements = [query["sql"] for query in captured]
+    fired = statements.index("SET CONSTRAINTS ALL IMMEDIATE")
+    assert fired < min(
+        position for position, sql in enumerate(statements) if sql.startswith("ALTER TABLE")
+    )
+
+
+def test_no_check_is_fired_for_a_table_that_sets_no_target() -> None:
+    # Only a table that declares statistics= issues an ALTER TABLE, so only
+    # its build has a reason to fire the queued checks. Firing them for every
+    # table would move every statement count a capture around a build sees.
+    with transaction.atomic():
+        template = Template.objects.create(name="caller")
+        event = Event.objects.create(template=template, name="caller")
+        UuidSession.objects.create(event=event, title="caller")
+
+        with CaptureQueriesContext(connection) as captured:
+            build_shape(_sessions_of(event, None))
+
+        transaction.set_rollback(True)
+
+    assert not [query["sql"] for query in captured if query["sql"].startswith("SET CONSTRAINTS")]
+
+
+def test_a_row_that_breaks_a_constraint_is_refused_before_the_target() -> None:
+    # Firing the queued checks changes when they run, not whether: a session
+    # pointing at no event, written by the caller, would have failed at commit
+    # and now fails here, under the constraint's name, before anything is set.
+    with transaction.atomic():
+        template = Template.objects.create(name="caller")
+        event = Event.objects.create(template=template, name="caller")
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "INSERT INTO testapp_uuidsession (id, event_id, title) "
+                "VALUES (gen_random_uuid(), %s, 'orphan')",
+                [event.pk + 1000],
+            )
+            constraints = connection.introspection.get_constraints(cursor, "testapp_uuidsession")
+        (foreign_key,) = (name for name, info in constraints.items() if info["foreign_key"])
+
+        with pytest.raises(IntegrityError, match=foreign_key):
+            build_shape(_sessions_of(event, {"title": 200}))
+
+        transaction.set_rollback(True)
+
+    assert _target(UuidSession, "title") == _default_target()
+
+
+def test_firing_them_defers_every_constraint_for_the_transaction() -> None:
+    # What the docstring owns up to: SET CONSTRAINTS ALL DEFERRED is the last
+    # statement of the firing and stays in force after the build, so a
+    # constraint declared INITIALLY IMMEDIATE accepts a bad row until commit.
+    # A temporary table rather than a model, because Django creates no such
+    # constraint by default.
+    with transaction.atomic():
+        with connection.cursor() as cursor:
+            cursor.execute("CREATE TEMPORARY TABLE shape_parent (id integer PRIMARY KEY)")
+            cursor.execute(
+                "CREATE TEMPORARY TABLE shape_child (parent_id integer "
+                "REFERENCES shape_parent DEFERRABLE INITIALLY IMMEDIATE)"
+            )
+        template = Template.objects.create(name="caller")
+        event = Event.objects.create(template=template, name="caller")
+
+        build_shape(_sessions_of(event, {"title": 200}))
+
+        with connection.cursor() as cursor:
+            cursor.execute("INSERT INTO shape_child VALUES (1)")
+            with pytest.raises(IntegrityError):
+                connection.check_constraints()
+        transaction.set_rollback(True)
 
 
 # A stub rather than a second database, for the reason every backend branch in
