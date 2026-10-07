@@ -107,13 +107,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   against a table it did not fill. Beside `CASCADE` that was untrue: a table
   holding a foreign key into a declared one is emptied too, so the caller's
   block does not see its rows during the world. It now says what holds --
-  nothing destructive survives the block -- and states the cascade plainly.
+  nothing destructive survives the block -- and states the cascade plainly. Its
+  claim that the `DELETE` used off PostgreSQL reaches no other table is
+  narrowed too: it reaches one through a database-level `ON DELETE`, such as
+  Django's `DB_CASCADE`.
 
   The PostgreSQL statement count a capture around a world sees moved from
   nineteen to twenty-one, still the same at every factor. The figure quoted in
   the `scaled_world` and `scale_fixture` docstrings and in the pytest page had
   drifted from the measured one in all three places; they now quote it, and a
-  test holds them to it.
+  test holds them to it. The `execute_wrapper` figure the `scaled_world`
+  docstring quotes beside it, nineteen -- two fewer, because `COPY` reaches the
+  debug cursor's log but not the wrapper hook -- is now measured and held to the
+  prose the same way.
 
 - **The `ShapeNotEmpty` message and the pytest page describe the refusal the
   package makes.** Since 0.17.0 a scaled world empties the tables it declares

@@ -93,7 +93,9 @@ def scaled_world(shape: Shape, factor: int, *, using: str = DEFAULT_DB_ALIAS) ->
     violates a constraint raises ``IntegrityError`` on the way into the world,
     naming the constraint, rather than whenever the enclosing transaction next
     checks. Off PostgreSQL the declared tables are emptied by one ``DELETE``
-    each, which reaches no other table, and nothing is fired first.
+    each, which reaches another table only through a database-level
+    ``ON DELETE`` -- Django's ``DB_CASCADE`` and its siblings -- and nothing is
+    fired first.
 
     One thing the rollback does not undo, because the database will not: an
     identity sequence moved past the keys a build assigned stays moved, since

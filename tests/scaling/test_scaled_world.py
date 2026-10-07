@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import contextlib
 import datetime
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import pytest
 from django.db import DEFAULT_DB_ALIAS, connection, connections
@@ -157,8 +159,9 @@ def test_it_also_undoes_a_world_it_opened_the_transaction_for() -> None:
 # not change silently is which of the two is a constant and which is a curve.
 # Counted with CaptureQueriesContext inside a non-transactional django_db test,
 # which is what pytestmark above gives every test in this module. Both of those
-# choices move the number: through execute_wrapper the same shape is eleven, and
-# a transaction=True test is one savepoint fewer. The constants are therefore a
+# choices move the number: through execute_wrapper the same shape is nineteen --
+# pinned below as well, because the docstring quotes it -- and a
+# transaction=True test is one savepoint fewer. The constants are therefore a
 # regression guard on this module's own measurement, not a published figure.
 #
 # It moved from fourteen to sixteen in 0.7.0, when statistics targets added one
@@ -185,6 +188,10 @@ def test_it_also_undoes_a_world_it_opened_the_transaction_for() -> None:
 # statements whatever the shape and whatever the factor, so still a constant,
 # and PostgreSQL only, because the DELETE path has no such refusal.
 _POSTGRES_STATEMENTS = 21
+# Two fewer through execute_wrapper: the COPY for each of the two declared tables
+# reaches CaptureQueriesContext through Django's debug cursor, which logs it, but
+# never passes through the wrapper hook, which sees only execute and executemany.
+_WRAPPED_STATEMENTS = _POSTGRES_STATEMENTS - 2
 _PORTABLE_STATEMENTS = 12
 _ROWS_PER_INSERT = 1000
 
@@ -196,6 +203,20 @@ def _statements(shape: Shape, factor: int, alias: str) -> int:
     ):
         pass
     return len(captured)
+
+
+def _wrapped_statements(shape: Shape, factor: int, alias: str) -> int:
+    seen: list[str] = []
+
+    def count(
+        execute: Callable[..., Any], sql: str, params: Any, many: bool, context: dict[str, Any]
+    ) -> Any:
+        seen.append(sql)
+        return execute(sql, params, many, context)
+
+    with connections[alias].execute_wrapper(count), scaled_world(shape, factor, using=alias):
+        pass
+    return len(seen)
 
 
 @pytest.mark.skipif(
@@ -214,7 +235,21 @@ def test_building_a_world_costs_the_same_on_postgres_at_every_factor() -> None:
     assert _statements(shape, 5, DEFAULT_DB_ALIAS) == _POSTGRES_STATEMENTS
 
 
-_SPELLED_OUT = {21: "twenty-one"}
+@pytest.mark.skipif(
+    connection.vendor != "postgresql", reason="the COPY route needs PostgreSQL to be measured"
+)
+def test_and_a_capture_built_on_execute_wrapper_sees_two_fewer() -> None:
+    # The second figure the docstring quotes, and the one a consumer counting
+    # through the hook rather than the debug cursor will read. It was quoted
+    # here as eleven long after it stopped being true, because nothing measured
+    # it.
+    shape = _graph(companies=10, sessions=_ROWS_PER_INSERT)
+
+    assert _wrapped_statements(shape, 1, DEFAULT_DB_ALIAS) == _WRAPPED_STATEMENTS
+    assert _wrapped_statements(shape, 5, DEFAULT_DB_ALIAS) == _WRAPPED_STATEMENTS
+
+
+_SPELLED_OUT = {19: "nineteen", 21: "twenty-one"}
 
 
 def test_the_figure_the_prose_quotes_is_the_one_measured() -> None:
@@ -231,6 +266,10 @@ def test_the_figure_the_prose_quotes_is_the_one_measured() -> None:
     }
 
     assert [name for name, text in quoted_in.items() if figure not in " ".join(text.split())] == []
+    # And the execute_wrapper figure, which only the scaled_world docstring
+    # quotes, held to its own constant.
+    wrapped = f"is {_SPELLED_OUT[_WRAPPED_STATEMENTS]}, because ``COPY``"
+    assert wrapped in " ".join((scaled_world.__doc__ or "").split())
 
 
 @pytest.mark.django_db(databases=["default", "not_postgres"])
