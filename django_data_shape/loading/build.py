@@ -293,10 +293,10 @@ def _require_empty(connection: Any, table: Table | Projection) -> None:
             "cause is a world that was already there: a session-scoped shape_fixture over this "
             "model holds its rows for the whole run, so a second build over it -- another "
             "shape_fixture, or build() called directly -- meets them; and a template started "
-            "from a base database copies whatever rows the base holds. Build the second world "
-            "inside scaled_world, which empties the declared tables and puts them back; give "
-            "the two different models; or empty this table first, in the base if that is where "
-            "the rows came from."
+            "from a base database keeps the rows the base holds in tables of apps with "
+            "migrations. Build the second world inside scaled_world, which empties the "
+            "declared tables and puts them back; give the two different models; or empty this "
+            "table first, in the base if that is where the rows came from."
         )
 
 
