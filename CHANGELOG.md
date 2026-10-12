@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **`scaled_world` is annotated `-> Generator[int]` instead of
+  `-> Iterator[int]`.** `ty` 0.0.86 warns that a `@contextmanager` function
+  annotated with `Iterator` is deprecated. Nothing changes at runtime, and a
+  caller's annotation of the context manager it returns is unaffected. The
+  protocol's docstring example and the type-level fixtures follow.
+
 ## [0.22.0] — 2026-10-07
 
 ### Added

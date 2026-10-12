@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from typing import Any, NamedTuple, cast
 from weakref import WeakKeyDictionary
@@ -42,7 +42,7 @@ _WORLD_KEYS = field_stream(0, "scaled_world", ":key")
 
 
 @contextmanager
-def scaled_world(shape: Shape, factor: int, *, using: str = DEFAULT_DB_ALIAS) -> Iterator[int]:
+def scaled_world(shape: Shape, factor: int, *, using: str = DEFAULT_DB_ALIAS) -> Generator[int]:
     """Build ``shape`` at ``factor``, run the caller's block, then undo it.
 
     The implementation of :class:`~django_data_shape.scaling.scale_protocol.ScaleProtocol`

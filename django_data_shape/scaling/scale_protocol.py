@@ -49,7 +49,7 @@ class ScaleProtocol(Protocol):
     consumer writes first::
 
         @contextmanager
-        def world(n: int) -> Iterator[None]:
+        def world(n: int) -> Generator[None]:
             build_my_fixtures(100 * n)
             yield
 
