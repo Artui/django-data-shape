@@ -11,7 +11,7 @@ parameter's *name* unless it is positional-only.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import AbstractContextManager, contextmanager
 from functools import partial
 
@@ -24,7 +24,7 @@ from tests.testapp.models import Company
 # ``factor`` -- a protocol that only accepted that spelling would be a protocol
 # about our naming rather than about the shape of the call.
 @contextmanager
-def hand_rolled(n: int) -> Iterator[int]:
+def hand_rolled(n: int) -> Generator[int]:
     made = [Company(name="acme") for _ in range(100 * n)]
     try:
         yield len(made)
@@ -38,7 +38,7 @@ def hand_rolled(n: int) -> Iterator[int]:
 # second time the protocol's prose promised more than its type allowed -- before
 # the yield was widened, ty rejected exactly this.
 @contextmanager
-def bare_world(n: int) -> Iterator[None]:
+def bare_world(n: int) -> Generator[None]:
     made = [Company(name="acme") for _ in range(100 * n)]
     try:
         yield

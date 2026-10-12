@@ -8,7 +8,7 @@ fail for the other one's passing to mean anything.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 
 from django_data_shape import ScaleProtocol
@@ -18,7 +18,7 @@ from django_data_shape import ScaleProtocol
 # factor positionally on purpose, and this is the mistake that makes the
 # difference visible.
 @contextmanager
-def keyword_only(*, factor: int) -> Iterator[int]:
+def keyword_only(*, factor: int) -> Generator[int]:
     yield factor
 
 
