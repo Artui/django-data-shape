@@ -96,6 +96,9 @@ def test_the_busiest_group_is_what_has_to_fit_and_the_refusal_says_so() -> None:
     message = str(raised.value)
     assert "distinct partners -- more than there are" in message
     assert "largest group against the partner count" in message
+    # The cap on the grouping fan-out is a remedy too: the plan it pairs with
+    # is that fan-out's partition, so capping it at the partner count fits.
+    assert "max_children=5" in message
 
 
 def test_a_weight_that_is_not_a_number_is_refused() -> None:

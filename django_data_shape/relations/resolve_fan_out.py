@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import math
 import numbers
 from decimal import Decimal
-from typing import Any
+from typing import Any, cast
 
 from django.db.models import Model
 
@@ -310,21 +311,116 @@ def _sizes(
                 "float, Decimal and Fraction all work, and the weights are normalised so their "
                 "scale does not matter."
             )
-        weights.append(float(weight))
+        # A weight is a share of the rows, so one below zero takes rows away
+        # from the others and an infinite one leaves nothing to divide by. Both
+        # used to reach the arithmetic: a negative size gave partitions whose
+        # sizes did not add up to the rows, or were themselves negative, and
+        # under max_children the water-filling ran past its last parent.
+        value = float(weight)
+        if value < 0 or not math.isfinite(value):
+            raise InvalidShape(
+                f"{table}.{field} needs fan-out sizes of zero or more, finite, but "
+                f"{fan_out.sizes!r} produced {weight!r}. A fan-out size weighs how many "
+                "children a parent gets, so it cannot be negative or infinite; childless= is "
+                "how a parent with none is asked for."
+            )
+        weights.append(value)
 
     total = sum(weights)
+    # Finite weights can still add up past what a float holds, and then every
+    # share is zero and the rows go wherever the rounding puts them.
+    if not math.isfinite(total):
+        raise InvalidShape(
+            f"{table}.{field} draws fan-out sizes from {fan_out.sizes!r} whose sum over "
+            f"{len(keys)} parents is too large to divide by. The sizes are normalised, so "
+            "their scale does not matter: declare the same distribution with smaller numbers."
+        )
     if total <= 0:
         raise InvalidShape(
             f"{table}.{field} gives all {len(keys)} of its parents a weight of zero, so there "
             f"is nowhere to put {rows} rows. Lower childless, or widen the size distribution."
         )
 
-    exact = [weight / total * rows for weight in weights]
+    exact = (
+        [weight / total * rows for weight in weights]
+        if fan_out.max_children is None
+        else _water_filled(weights, total, rows, fan_out, table, field)
+    )
     sizes = [int(value) for value in exact]
     remainder = rows - sum(sizes)
     # Hand the leftover rows to the parents with the largest fractional parts:
     # the ones that were closest to earning another row.
+    #
+    # Under a cap this never lifts a parent past it, and never gives a row to a
+    # childless one, with no filter needed. A capped parent's share is the cap
+    # exactly and a childless one's is 0.0, so both have no fractional part,
+    # while the leftover is the sum of the fractional parts, each below 1 -- so
+    # at least that many parents have one, and they sort first. An uncapped
+    # share is at most the cap, so one with a fractional part is below it.
     order = sorted(range(len(sizes)), key=lambda i: exact[i] - sizes[i], reverse=True)
     for index in order[:remainder]:
         sizes[index] += 1
     return sizes
+
+
+def _water_filled(
+    weights: list[float], total: float, rows: int, fan_out: FanOut, table: str, field: str
+) -> list[float]:
+    """Each parent's exact share of ``rows`` when no parent may exceed ``cap``.
+
+    Water-filling: the heaviest parent whose proportional share exceeds the cap
+    is fixed at it, the rows left are re-spread over the parents left by their
+    weights, and that repeats. Taking them heaviest first is what makes one pass
+    enough -- shares only grow as parents above them are fixed, and a parent
+    whose share fits does so with every lighter one fitting too, since a share
+    is proportional to its weight.
+
+    Refused rather than approximated when the parents that can hold rows cannot
+    hold them all. A childless parent has a weight of zero and holds nothing, so
+    the ceiling is the cap times the parents with a weight, not times the
+    parent table.
+    """
+    cap = cast("int", fan_out.max_children)
+    holding = [index for index, weight in enumerate(weights) if weight > 0]
+    if rows > cap * len(holding):
+        # Only the remedies the declaration has: telling a reader with no
+        # childless share to lower it sends them looking for a setting they
+        # never made.
+        remedies = (
+            "Raise max_children, lower childless, or declare fewer rows."
+            if fan_out.childless
+            else "Raise max_children or declare fewer rows."
+        )
+        raise InvalidShape(
+            f"{table}.{field} declares max_children={cap}, and {len(holding)} of its "
+            f"{len(weights)} parents have a non-zero weight, so at most {cap * len(holding)} rows "
+            f"fit; it declares {rows}. {remedies}"
+        )
+
+    exact = [0.0] * len(weights)
+    # Stable on ties, so equal weights are fixed in position order and the
+    # partition stays a function of the declaration.
+    heaviest_first = sorted(holding, key=lambda index: weights[index], reverse=True)
+    # The weight left once the heaviest are fixed is summed from the light end,
+    # not kept by subtracting each capped weight from the total. Once the
+    # capped weights dwarf the rest, a subtraction cancels the light ones away
+    # and the shares come out against a wrong total: weights thirteen orders of
+    # magnitude apart gave one parent -4 rows, another one past the cap, and a
+    # third a division by zero. Summing small to large keeps what is left.
+    left = [0.0] * (len(heaviest_first) + 1)
+    for position in range(len(heaviest_first) - 1, -1, -1):
+        left[position] = left[position + 1] + weights[heaviest_first[position]]
+    # Before anything is fixed the total is the one the uncapped path divides
+    # by, so a cap that never binds moves no row.
+    left[0] = total
+    # This stops by the lightest parent at the latest. By then the weight left
+    # is that parent's own, added to zero and so exact, its share is every row
+    # left, and the refusal above is what keeps those within one cap.
+    count, free_rows = 0, rows
+    while weights[heaviest_first[count]] / left[count] * free_rows > cap:
+        exact[heaviest_first[count]] = float(cap)
+        free_rows -= cap
+        count += 1
+    for rest in heaviest_first[count:]:
+        exact[rest] = weights[rest] / left[count] * free_rows
+    return exact

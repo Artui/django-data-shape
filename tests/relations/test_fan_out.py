@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any, cast
+
 import pytest
 
 from django_data_shape import Constant, FanOut, InvalidShape, Uniform, Zipf
@@ -71,9 +73,41 @@ def test_a_parent_named_twice_is_refused() -> None:
 def test_parents_are_part_of_what_the_declaration_says() -> None:
     # The template-database cache keys on canonical(), and two shapes differing
     # only in which parents they spread over are two different worlds.
-    assert FanOut(Zipf(), parents=[1]).canonical() != FanOut(Zipf(), parents=[2]).canonical()
-    assert FanOut(Zipf(), parents=[1]).canonical() != FanOut(Zipf()).canonical()
+    # One distribution shared, or two Zipf() instances would differ on their own.
+    sizes = Zipf()
+    assert FanOut(sizes, parents=[1]).canonical() == FanOut(sizes, parents=[1]).canonical()
+    assert FanOut(sizes, parents=[1]).canonical() != FanOut(sizes, parents=[2]).canonical()
+    assert FanOut(sizes, parents=[1]).canonical() != FanOut(sizes).canonical()
 
 
 def test_parents_reads_back_in_the_repr() -> None:
     assert "parents=(7, 9)" in repr(FanOut(Zipf(), parents=[7, 9]))
+
+
+def test_a_fan_out_is_uncapped_unless_a_cap_is_declared() -> None:
+    assert FanOut(Zipf()).max_children is None
+    assert FanOut(Zipf(), max_children=5).max_children == 5
+
+
+@pytest.mark.parametrize("cap", [0, -1, 2.5, "5", True])
+def test_a_cap_that_is_not_a_positive_count_is_refused(cap: object) -> None:
+    # True is an int equal to 1, and a cap of one written as True has almost
+    # certainly been written for a different argument.
+    with pytest.raises(InvalidShape, match="max_children"):
+        FanOut(Zipf(), max_children=cast("Any", cap))
+
+
+def test_the_cap_is_part_of_what_the_declaration_says() -> None:
+    # The template-database cache keys on canonical(), so a capped declaration
+    # served the uncapped world would be the cache answering for a world nobody
+    # declared. One distribution shared between them, because two Zipf()
+    # instances never compare equal and would make every pair here differ.
+    sizes = Zipf()
+    assert FanOut(sizes).canonical() == FanOut(sizes).canonical()
+    assert FanOut(sizes, max_children=5).canonical() != FanOut(sizes).canonical()
+    assert FanOut(sizes, max_children=5).canonical() != FanOut(sizes, max_children=6).canonical()
+
+
+def test_the_cap_reads_back_in_the_repr_only_when_declared() -> None:
+    assert "max_children=5" in repr(FanOut(Zipf(), max_children=5))
+    assert "max_children" not in repr(FanOut(Zipf()))

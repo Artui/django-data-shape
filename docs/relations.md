@@ -137,11 +137,74 @@ hand-written fixtures always omit, and the one that changes what a query returns
 a parent nobody references is the difference between an inner join and an outer
 join giving the same answer and giving different ones.
 
+## A ceiling on the tail
+
+A whale is the point when the question is how a plan copes with skew. When the
+question is whether a world looks like production, it is also a problem,
+because production's tails are bounded by the business. One consumer declared
+`FanOut(Zipf(1.2), childless=0.35)` over 2,000 projects and 2,800 rows, and one
+project got 431 of them where production's maximum is 69.
+
+`max_children=` caps the rows any one parent gets:
+
+```python
+Table(Task, rows=2_800, project=FanOut(Zipf(1.2), childless=0.35, max_children=69))
+```
+
+The cap applies to the partition, not to the distribution. Weights are
+normalised, so a parent's count is a share of `rows` that every other weight
+decides, and capping a weight would cap nothing. The rows a capped parent gives
+up are re-spread over the uncapped parents by their weights, so the order of
+the tail is unchanged and the head is flattened onto the cap. A childless parent
+still gets none. When the parents with a weight cannot hold every row under the
+cap, the declaration is refused with the arithmetic, rather than built over it.
+
+The cap counts every row the partition places, including the ones `null=`
+then leaves without a parent: those are drawn after the partition, so a parent
+at the cap can end up with fewer non-null children, never more. And
+`scaled_shape` multiplies rows but leaves the cap where it is, so a scaled shape
+can declare more rows than its parents hold under it -- most readily with
+`parents=`, whose named keys do not grow with the table -- and is then refused
+at build with the same arithmetic.
+
+**A cap flattens the head into the body, and the planner sees that.** A capped
+fan-out is a different world from the uncapped one, chosen for calibrating
+against production, not a free improvement on it. Often the better fix is the
+exponent: choose `s` so the busiest parent is already where production's is.
+
+The busiest parent's share of all the rows in the partition the build draws
+(the one `fan_out_sizes` reads back), over twenty seeds. Each cell is the median, with the second-lowest and second-highest
+in brackets. Multiply by `rows` for a count.
+
+| `s` | 100 parents | 1,000 parents | 10,000 parents |
+| --- | --- | --- | --- |
+| 1.05 | 16.8% (8.9-43.8%) | 21.6% (7.5-55.4%) | 7.8% (3.4-42.2%) |
+| 1.1 | 15.3% (8.3-40.6%) | 18.5% (6.4-48.6%) | 6.3% (2.8-35.1%) |
+| 1.2 | 12.9% (7.3-34.9%) | 13.7% (4.9-36.8%) | 4.3% (2.0-23.5%) |
+| 1.5 | 8.5% (5.3-23.5%) | 6.3% (2.5-15.6%) | 1.6% (0.8-7.1%) |
+| 2.0 | 5.3% (3.7-13.3%) | 2.5% (1.2-5.2%) | 0.5% (0.3-1.6%) |
+| 3.0 | 3.2% (2.5-6.3%) | 0.9% (0.5-1.5%) | 0.1% (0.1-0.3%) |
+
+Read the brackets before the median. Each parent's weight is one draw from a
+power law, so the busiest parent is whichever drew highest, and up to `s = 1.5`
+the seed moves it by a factor of about five over a hundred parents, and up to
+twelve over ten thousand. An exponent picked from this
+table sets where the maximum usually lands. Only a cap sets where it cannot go.
+
 ## One-to-one
 
-A `OneToOneField` is a fan-out whose partition never gives a parent two rows,
-and the spelling is a flat distribution over at least as many parents as this
-table has rows:
+A `OneToOneField` is a fan-out whose partition never gives a parent two rows.
+The direct spelling is a cap of one, which holds whatever the sizes weigh:
+
+```python
+# over a Table(User, rows=100): childless=0.3 leaves about seventy that can hold one
+Table(Profile, rows=50, user=FanOut(Zipf(), childless=0.3, max_children=1), headline=Constant("hi"))
+```
+
+The skew then decides *which* parents have a row rather than how many rows a
+parent has, and a declaration with more rows than the parents can hold one each
+is refused with the arithmetic. The other spelling is a flat distribution over
+at least as many parents as this table has rows:
 
 ```python
 # over a Table(User, rows=50) or more
@@ -152,11 +215,13 @@ Table(Profile, rows=50, user=FanOut(Constant(1)), headline=Constant("hi"))
 of one value is a range that says nothing, and a distribution asked for
 variation it cannot supply is more likely a typo than an intention.
 
-Anything skewed is refused here, and the refusal is not conservative. A skew
-exists to give some parent several children and a one-to-one permits none, so
-`FanOut(Zipf())` on a unique column does not merely usually fail -- measured at
-fifty rows over a hundred parents, it loaded **zero times in twenty**.
-`childless=` still asks for parents with no row at all.
+Without the cap, anything skewed is refused here, and the refusal is not
+conservative. A skew exists to give some parent several children and a
+one-to-one permits none, so `FanOut(Zipf())` on a unique column does not merely
+usually fail -- measured at fifty rows over a hundred parents, it loaded **zero
+times in twenty**. `childless=` asks for parents with no row at all, under the
+cap; beside `Constant(1)` it is refused too, because a childless parent's rows
+go to the others.
 
 ## Nullable keys
 
@@ -403,6 +468,12 @@ filled first is decided by the declarations and needs no connection to answer.
   would emit keys drawn from nothing, pointing at rows that may not exist.
 - A `FanOut` on a column that is **not** a relation, which has nothing to fan out
   over.
+- A `FanOut` whose `max_children=` cannot hold its rows: more rows than the cap
+  times the parents with a weight. A childless parent holds none, so it does
+  not count toward the ceiling.
+- A `FanOut` whose sizes draw a **negative or non-finite** number, or finite
+  numbers whose sum is too large for a float. A size weighs a parent's share of
+  the rows; `childless=` is how a parent with none is asked for.
 - A **self-referential** `FanOut`. It would read keys from a table still empty at
   load time; self-referential trees are their own feature.
 - A required relation **left undeclared**, which would fail the load on a

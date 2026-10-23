@@ -82,7 +82,9 @@ def test_the_seed_survives_scaling() -> None:
 
 
 def test_the_declared_distributions_survive_scaling() -> None:
-    fan_out = FanOut(Zipf(), childless=0.3, placement="grouped")
+    # The cap is part of the fan-out and does not scale: it is a ceiling from
+    # the business, not a count, so a scaled shape can outgrow it.
+    fan_out = FanOut(Zipf(), childless=0.3, placement="grouped", max_children=40)
     shape = Shape(
         Table(Company, rows=5, name=Constant("acme")),
         Table(Session, rows=50, label=Constant("x"), company=fan_out),
@@ -93,6 +95,7 @@ def test_the_declared_distributions_survive_scaling() -> None:
     # The same object, not merely an equal one: a scaled shape that rebuilt its
     # distributions would be a second declaration that happens to agree today.
     assert scaled.tables[1].fields["company"] is fan_out
+    assert fan_out.max_children == 40
 
 
 def test_the_key_strategy_survives_scaling() -> None:

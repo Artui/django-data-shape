@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime
+from collections import Counter
 from pathlib import Path
 
 import pytest
@@ -10,6 +11,7 @@ from django.db import DatabaseError, connection
 
 from django_data_shape import (
     Constant,
+    FanOut,
     KeyFunction,
     Sequential,
     Shape,
@@ -18,9 +20,19 @@ from django_data_shape import (
     Table,
     Uniform,
     UnsupportedBackend,
+    Zipf,
 )
 from django_data_shape import build as build_shape
-from tests.testapp.models import Company, Order, Prepared, Tenant
+from tests.testapp.models import (
+    Company,
+    Membership,
+    OptionalChild,
+    Order,
+    Person,
+    Prepared,
+    Tenant,
+    Ticketed,
+)
 
 _ROOT = Path(__file__).resolve().parents[2]
 
@@ -299,3 +311,68 @@ def test_a_key_function_is_read_as_able_to_collide() -> None:
                 seed=1,
             )
         )
+
+
+def test_a_skewed_one_to_one_loads_under_a_cap_of_one() -> None:
+    # The acceptance the cap-of-one proof grants is only worth having if COPY
+    # agrees: a Zipf with a childless share, which the unique index refuses
+    # uncapped, loads once no parent can hold two rows.
+    build_shape(
+        Shape(
+            Table(Company, rows=100, name=Constant("acme")),
+            Table(
+                Ticketed,
+                rows=60,
+                prefix=Constant("p"),
+                reference=Sequential("r", "x"),
+                company=FanOut(Zipf(), childless=0.3, max_children=1),
+            ),
+        )
+    )
+
+    companies = list(Ticketed.objects.values_list("company_id", flat=True))
+    assert len(companies) == 60
+    assert len(set(companies)) == 60
+
+
+def test_a_pair_kept_unique_by_a_cap_of_one_loads() -> None:
+    # The composite unique index agrees with the acceptance: the capped side
+    # puts each company on one row at most, so no pair can repeat.
+    build_shape(
+        Shape(
+            Table(Company, rows=100, name=Constant("acme")),
+            Table(Person, rows=10, name=Constant("p")),
+            Table(
+                Membership,
+                rows=60,
+                company=FanOut(Zipf(), childless=0.3, max_children=1),
+                person=FanOut(Zipf(2.0)),
+                role=Constant("member"),
+            ),
+        )
+    )
+
+    assert Membership.objects.count() == 60
+
+
+def test_the_cap_counts_the_rows_null_leaves_without_a_parent() -> None:
+    # null= is drawn after the partition, so a NULL row has already taken its
+    # place under the cap: no company exceeds it, and the rows that keep a
+    # parent are fewer than the cap times the companies.
+    build_shape(
+        Shape(
+            Table(Company, rows=10, name=Constant("acme")),
+            Table(
+                OptionalChild,
+                rows=50,
+                company=FanOut(Zipf(1.2), null=0.4, max_children=5),
+                label=Constant("x"),
+            ),
+        )
+    )
+
+    per_company = Counter(
+        OptionalChild.objects.exclude(company=None).values_list("company_id", flat=True)
+    )
+    assert max(per_company.values()) <= 5
+    assert OptionalChild.objects.filter(company=None).exists()
