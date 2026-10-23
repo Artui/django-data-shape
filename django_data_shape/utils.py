@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 from typing import Any
 
+from django.core.exceptions import ValidationError
 from django.core.management.color import no_style
 from django.db.models import (
     DateField,
@@ -47,6 +48,50 @@ def primary_key_field(model: type[Model]) -> Field[Any, Any]:
             "so keys= cannot help either: this is arity, not type."
         )
     return field
+
+
+def named_keys(
+    named: tuple[object, ...] | None, model: type[Model], table: str, field: str
+) -> tuple[object, ...] | None:
+    """The keys ``parents=`` named, each read as ``model``'s primary key reads it.
+
+    **A key has more than one spelling, and the comparison has to see past
+    them.** Ids loaded from JSON or handed between processes are strings, while
+    the keys read back from the table are the primary key's own type -- a
+    ``uuid.UUID``, an ``int`` -- so a string naming a row that exists compared
+    unequal to it and was refused as a row that does not, which sent the reader
+    looking for a rollback. ``to_python`` is the field's own reading, the one a
+    form or a URL converter applies to the same value.
+
+    The constructor's repeated-key refusal runs again here because it compared
+    what it was given: a string and the UUID it spells are not equal there, and
+    once both are read as the key they are, that parent would weigh twice.
+
+    Shared because ``FanOut`` and ``Paired`` both take ``parents=``, and a
+    refusal worded two ways is a refusal that will drift.
+    """
+    if named is None:
+        return None
+    key_field = primary_key_field(model)
+    keys: dict[object, object] = {}
+    for spelling in named:
+        try:
+            key = key_field.to_python(spelling)
+        except ValidationError:
+            raise InvalidShape(
+                f"{table}.{field} names {spelling!r} in parents=, which cannot be a key of "
+                f"{model.__name__}: its primary key {key_field.name} is a "
+                f"{type(key_field).__name__}. Name the row by its primary key."
+            ) from None
+        if key in keys:
+            raise InvalidShape(
+                f"{table}.{field} names {model.__name__} {key!r} more than once in parents=, as "
+                f"{keys[key]!r} and as {spelling!r}. Both spell the same row, and a repeated key "
+                "weighs that row twice, which is a different partition from the one this "
+                "declaration reads as."
+            )
+        keys[key] = spelling
+    return tuple(keys)
 
 
 def has_db_default(field: Field[Any, Any]) -> bool:

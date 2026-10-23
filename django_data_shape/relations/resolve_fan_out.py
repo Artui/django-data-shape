@@ -11,7 +11,7 @@ from django.db.models import Model
 from django_data_shape.declaration.invalid_shape import InvalidShape
 from django_data_shape.relations.fan_out import FanOut
 from django_data_shape.relations.fan_out_plan import FanOutPlan
-from django_data_shape.utils import draw, field_stream
+from django_data_shape.utils import draw, field_stream, named_keys
 
 
 def resolve_fan_out(
@@ -43,9 +43,10 @@ def resolve_fan_out(
     out of the parent table rather than recomputed from the parent's
     declaration, so a parent this package never built works identically.
     """
-    keys, parent_values = _read_parents(parent, parent_fields, connection, fan_out.parents)
-    _require_every_named_parent(fan_out.parents, keys, parent, table, field)
-    keys, parent_values = _in_declared_order(fan_out.parents, keys, parent_values)
+    named = named_keys(fan_out.parents, parent, table, field)
+    keys, parent_values = _read_parents(parent, parent_fields, connection, named)
+    _require_every_named_parent(named, keys, parent, table, field)
+    keys, parent_values = _in_declared_order(named, keys, parent_values, parent)
 
     if not keys and rows:
         raise InvalidShape(
@@ -76,6 +77,7 @@ def _in_declared_order(
     named: tuple[object, ...] | None,
     keys: list[int],
     parent_values: dict[str, list[object]],
+    parent: type[Model],
 ) -> tuple[list[int], dict[str, list[object]]]:
     """Put named parents back in the order the declaration named them.
 
@@ -100,7 +102,10 @@ def _in_declared_order(
     different declaration, which is what a reader writing one would expect.
 
     Parent values move with their keys, or a derivation would read the right
-    column off the wrong row.
+    column off the wrong row. A key read back is matched to the one named
+    through the primary key's ``to_python``, because the raw route hands back
+    the database's spelling -- SQLite stores a UUID as hex -- while ``named``
+    holds the field's own reading of each key.
     """
     if named is None:
         return keys, parent_values
@@ -109,7 +114,8 @@ def _in_declared_order(
     # the model declares, and the UUID case is exactly the one this function
     # exists for. Widening it everywhere is a change of its own; narrowing here
     # would be a lie that type-checks.
-    position: dict[object, int] = {key: index for index, key in enumerate(keys)}
+    to_python = parent._meta.pk.to_python
+    position: dict[object, int] = {to_python(key): index for index, key in enumerate(keys)}
     order = [position[key] for key in named]
     return (
         [keys[index] for index in order],
@@ -150,7 +156,8 @@ def _require_every_named_parent(
     """
     if named is None:
         return
-    missing = [key for key in named if key not in set(keys)]
+    present = {parent._meta.pk.to_python(key) for key in keys}
+    missing = [key for key in named if key not in present]
     if not missing:
         return
     raise InvalidShape(
@@ -210,7 +217,14 @@ def _read_parents(
             if named is None
             else f" WHERE {quote(pk_column)} IN ({', '.join(['%s'] * len(named))})"
         )
-        params = None if named is None else list(named)
+        # Prepared by the key's own field, as the ORM would: a raw parameter
+        # skips that, and SQLite has no binding for a UUID at all, so a UUID
+        # key named here could not be narrowed on that backend.
+        params = (
+            None
+            if named is None
+            else [parent._meta.pk.get_db_prep_value(key, connection) for key in named]
+        )
         with connection.cursor() as cursor:
             cursor.execute(
                 f"SELECT {quote(pk_column)} FROM {quote(parent._meta.db_table)}"

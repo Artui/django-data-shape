@@ -177,6 +177,30 @@ class EveryNth:
         return (self._step,)
 ```
 
+### Writing to a world after it is built
+
+The cache holds what `build()` made, and the statistics in it describe exactly
+those rows. **Anything that writes afterwards leaves them stale**: a replay
+through your own services that fills running totals, a renumbering, a backfill.
+The planner then plans against the world before the write, which is the failure
+this package exists to remove, and nothing reports it -- a check for whether
+`ANALYZE` ever ran passes, because it did. Run it again once the writes are done,
+over the whole database, since the step may have written to tables the shape
+never declared:
+
+```python
+from django.db import connection
+
+with connection.cursor() as cursor:
+    cursor.execute("ANALYZE")
+```
+
+A column such a step owns still has to be loadable before the step runs. Declare
+a `NOT NULL` column with no default as a placeholder the step overwrites,
+`counter=Constant(0)` for instance. A placeholder under a unique constraint
+cannot be a `Constant`, which would put one value on every row and fail at
+`COPY`; give it a `Sequential` instead.
+
 ### From pytest
 
 `template_database` and `clone_database` are the two halves; `django_db_setup` is
