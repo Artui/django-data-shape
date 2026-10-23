@@ -31,14 +31,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now goes through the primary key field's `to_python` before it is compared,
   for `FanOut(parents=)` and `Paired(parents=)` alike. A value the field cannot
   read as a key is refused naming the table, the field and the value, where it
-  used to reach the driver.
+  used to reach the driver, including from a field whose `to_python` raises
+  `ValueError` or `TypeError` rather than Django's `ValidationError`. The
+  reading is not taken on trust: on an integer key only the integer or its
+  string is taken, so `1.5`, `Decimal("1.9")` or a `uuid.UUID`, which `int()`
+  would turn into a row nobody named, is refused, as is a `bool` on any key;
+  and one row named in two spellings is refused as a repeat.
 - **`parents=` narrows a UUID-keyed parent on SQLite.** The keys went to the
   database as raw parameters, and SQLite has no binding for a UUID, so naming a
   UUID-keyed parent failed there in every spelling. They are now prepared by
   the primary key field, as the ORM prepares them.
-- **One row named twice in two spellings is refused as a repeat.** The
-  constructor's check compared what it was given, so a string and the UUID it
-  spells both passed it and that parent would have been weighed twice.
+- **`Paired(parents=)` refuses a repeated key.** It had no repeat check at all,
+  so a partner named twice was weighed twice without a word.
 
 ## [0.22.0] — 2026-10-07
 

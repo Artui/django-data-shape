@@ -74,11 +74,14 @@ Table(Session, rows=50, company=FanOut(Constant(1), parents=[tenant.pk]), label=
 Real keys, read out of the parent table like any other fan-out — a key that
 matches no row is refused by name rather than quietly taking a smaller share.
 
-A key may be named in any spelling its primary key reads: a UUID as the string
-it was loaded from JSON as is the same parent as the `uuid.UUID`, because each
-named key goes through the field's own `to_python` before it is sent or
-compared. Two spellings of one row in the same list are refused as a repeat,
-and a value the field cannot read as a key at all is refused naming it.
+A UUID, integer or character key may be named in any spelling its primary key
+reads: a UUID as the string it was loaded from JSON as is the same parent as the
+`uuid.UUID`, because each named key goes through the field's own `to_python`
+before it is sent or compared. Two spellings of one row in the same list are
+refused as a repeat, a value the field cannot read as a key at all is refused
+naming it, and so is anything an integer key would read as a row nobody named --
+`1.5` would otherwise be truncated to row 1 and a `uuid.UUID` read as a 128-bit
+number. On an integer key, name a row by the integer or its string.
 
 **The order you name them in is part of the declaration.** Keys come back from
 the database sorted by primary key, and the weights are assigned by position, so

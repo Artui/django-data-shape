@@ -198,8 +198,8 @@ with connection.cursor() as cursor:
 A column such a step owns still has to be loadable before the step runs. Declare
 a `NOT NULL` column with no default as a placeholder the step overwrites,
 `counter=Constant(0)` for instance. A placeholder under a unique constraint
-cannot be a `Constant`, which would put one value on every row and fail at
-`COPY`; give it a `Sequential` instead.
+cannot be a `Constant`, which can only produce one value and is refused when the
+shape is declared; give it a `Sequential` instead.
 
 ### From pytest
 
