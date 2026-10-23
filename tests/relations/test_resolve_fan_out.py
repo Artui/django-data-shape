@@ -10,7 +10,7 @@ from typing import Any
 
 import pytest
 
-from django_data_shape import Constant, FanOut, InvalidShape, Uniform, Zipf
+from django_data_shape import Constant, FanOut, InvalidShape, Skew, Uniform, Zipf
 from django_data_shape.relations.resolve_fan_out import resolve_fan_out
 from tests.testapp.models import Company
 
@@ -441,6 +441,25 @@ def test_rows_beyond_what_the_cap_allows_are_refused_with_the_arithmetic() -> No
     assert "51" in message
 
 
+def test_the_refusal_offers_childless_only_to_a_declaration_that_has_one() -> None:
+    # Lowering a childless share of zero frees nothing, so a declaration
+    # without one is not told to.
+    with pytest.raises(InvalidShape) as plain:
+        _resolve(list(range(1, 11)), rows=51, fan_out=FanOut(Zipf(1.2), max_children=5))
+    with pytest.raises(InvalidShape) as with_childless:
+        _resolve(
+            list(range(1, 101)),
+            rows=1001,
+            fan_out=FanOut(Zipf(1.2), childless=0.3, max_children=10),
+        )
+
+    assert "childless" not in str(plain.value)
+    assert str(plain.value).endswith("Raise max_children or declare fewer rows.")
+    assert str(with_childless.value).endswith(
+        "Raise max_children, lower childless, or declare fewer rows."
+    )
+
+
 def test_the_refusal_counts_only_parents_with_a_weight() -> None:
     # A childless parent can hold none of the rows, so the ceiling is the cap
     # times the parents that can, not times the parent table.
@@ -455,6 +474,29 @@ def test_the_refusal_counts_only_parents_with_a_weight() -> None:
     _resolve(keys, rows=with_weight * 10, fan_out=declared)
     with pytest.raises(InvalidShape, match=f"at most {with_weight * 10}"):
         _resolve(keys, rows=with_weight * 10 + 1, fan_out=declared)
+
+
+@pytest.mark.parametrize(
+    ("weights", "rows"),
+    [
+        ({1.3: 0.5, 9.1e13: 0.5}, 18299),
+        ({1: 0.5, 10**17: 0.5}, 18946),
+    ],
+)
+def test_weights_far_apart_still_partition_within_the_cap(
+    weights: dict[float, float], rows: int
+) -> None:
+    # The weight left after the heavy parents are capped has to keep the light
+    # ones. Kept by subtracting each capped weight from the total, it cancelled
+    # them away: the first gave a parent -4 rows and another 1001 under a cap
+    # of 1000, and the second a division by zero.
+    sizes = _resolve(
+        list(range(1, 31)), rows=rows, fan_out=FanOut(Skew(weights), max_children=1000)
+    ).sizes()
+
+    assert sum(sizes) == rows
+    assert min(sizes) >= 0
+    assert max(sizes) <= 1000
 
 
 def test_a_cap_that_never_binds_leaves_the_partition_as_it_was() -> None:

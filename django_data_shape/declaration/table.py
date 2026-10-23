@@ -692,8 +692,8 @@ class Table:
                 f"{because} A relation is declared as "
                 f"a fan-out over the parent's real keys -- {required_relations[0]}=FanOut(Zipf()) "
                 "for the realistic heavy tail, FanOut(Uniform(1, 10)) for something flatter, and "
-                "FanOut(Constant(1)) over at least as many parents as this table has rows for a "
-                "one-to-one. childless= is the share of parents nobody references. The parent's "
+                "FanOut(Zipf(), max_children=1) for a one-to-one. childless= is the share of "
+                "parents nobody references. The parent's "
                 "own table has to be built in the same shape or already loaded, because that is "
                 "where the keys are read from."
             )

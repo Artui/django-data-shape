@@ -354,3 +354,63 @@ def test_a_capped_fan_out_reports_the_capped_sizes() -> None:
 
     assert counts.ranked()[0][1] == 25
     assert {key: size for key, size in counts.ranked() if size} == _loaded()
+
+
+def _capped(companies: int = 10, sessions: int = 50) -> Shape:
+    return Shape(
+        Table(Company, rows=companies, name=Constant("acme")),
+        Table(
+            Session,
+            rows=sessions,
+            company=FanOut(Zipf(1.2), max_children=5),
+            label=Constant("s"),
+        ),
+        seed=5,
+    )
+
+
+@pytest.mark.django_db(transaction=True)
+@_POSTGRES_ONLY
+def test_a_cap_the_shrunk_parents_cannot_hold_is_the_world_changing() -> None:
+    # Ten parents capped at five hold the fifty rows exactly; nine cannot. The
+    # partition refuses that, and the refusal is about the world rather than
+    # the declaration, which built.
+    shape = _capped()
+    build_shape(shape, require_statistics=False)
+    Company.objects.filter(pk=Company.objects.order_by("pk").values("pk")[:1]).delete()
+
+    with pytest.raises(WorldChanged) as raised:
+        fan_out_sizes(shape, Session, "company")
+
+    assert "holds 9 rows" in str(raised.value)
+    assert isinstance(raised.value.__cause__, InvalidShape)
+
+
+@pytest.mark.django_db(transaction=True)
+@_POSTGRES_ONLY
+def test_a_cap_refused_over_the_parents_the_shape_declares_is_still_the_shape() -> None:
+    # The parent table holds what the shape says, so the refusal is the
+    # declaration's own and is not dressed up as a world that moved.
+    build_shape(Shape(Table(Company, rows=10, name=Constant("acme"))), require_statistics=False)
+
+    with pytest.raises(InvalidShape, match="at most 50 rows fit"):
+        fan_out_sizes(_capped(sessions=51), Session, "company")
+
+
+@pytest.mark.django_db(transaction=True)
+@_POSTGRES_ONLY
+def test_a_cap_refused_over_parents_built_elsewhere_is_the_shape() -> None:
+    # With the parents outside the shape there is no declared count to have
+    # moved from, so the refusal is passed on as it is.
+    Company.objects.bulk_create([Company(name="acme") for _ in range(10)])
+    shape = Shape(
+        Table(
+            Session,
+            rows=51,
+            company=FanOut(Zipf(1.2), max_children=5),
+            label=Constant("s"),
+        ),
+    )
+
+    with pytest.raises(InvalidShape, match="at most 50 rows fit"):
+        fan_out_sizes(shape, Session, "company")

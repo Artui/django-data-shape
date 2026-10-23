@@ -383,6 +383,40 @@ def test_a_childless_share_takes_the_proof_away() -> None:
         )
 
 
+def test_a_cap_of_one_is_a_proof_whatever_the_sizes() -> None:
+    # max_children=1 bounds the partition itself, so none of the other four
+    # conditions is needed: skewed sizes, a childless share, and a parent this
+    # shape does not build would each take the flat-sizes proof away.
+    capped = FanOut(Zipf(), childless=0.3, max_children=1)
+
+    Shape(Table(Seat, rows=50, company=capped, label=Constant("x")))
+    Shape(
+        _companies(100),
+        Table(
+            Ticketed,
+            rows=50,
+            prefix=Constant("p"),
+            reference=Sequential("r", "x"),
+            company=capped,
+        ),
+    )
+
+
+def test_a_cap_of_two_is_not() -> None:
+    # The proof is a cap of exactly one; two rows on one parent is all a
+    # collision needs.
+    with pytest.raises(InvalidShape, match="one_seat_label_per_company"):
+        Shape(
+            _companies(100),
+            Table(
+                Seat,
+                rows=50,
+                company=FanOut(Zipf(), max_children=2),
+                label=Constant("x"),
+            ),
+        )
+
+
 def test_a_parent_this_shape_does_not_build_takes_the_proof_away_too() -> None:
     # The bound is rows against parents, and a parent loaded by the caller has
     # however many rows it has. A bound resting on a number this package cannot

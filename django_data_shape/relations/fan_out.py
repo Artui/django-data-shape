@@ -60,6 +60,11 @@ class FanOut:
     fan-out is a different world from the uncapped one rather than a free
     improvement on it -- and choosing a ``Zipf`` exponent that already gives
     production's maximum is often the better fix.
+
+    The cap counts every row the partition places, the ones ``null`` then
+    leaves without a parent included, so a parent at the cap can end with fewer
+    non-null children but never more. A cap of one is a one-to-one, whatever
+    the sizes weigh.
     """
 
     def __init__(

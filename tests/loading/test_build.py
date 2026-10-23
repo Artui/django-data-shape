@@ -10,6 +10,7 @@ from django.db import DatabaseError, connection
 
 from django_data_shape import (
     Constant,
+    FanOut,
     KeyFunction,
     Sequential,
     Shape,
@@ -18,9 +19,10 @@ from django_data_shape import (
     Table,
     Uniform,
     UnsupportedBackend,
+    Zipf,
 )
 from django_data_shape import build as build_shape
-from tests.testapp.models import Company, Order, Prepared, Tenant
+from tests.testapp.models import Company, Order, Prepared, Tenant, Ticketed
 
 _ROOT = Path(__file__).resolve().parents[2]
 
@@ -299,3 +301,25 @@ def test_a_key_function_is_read_as_able_to_collide() -> None:
                 seed=1,
             )
         )
+
+
+def test_a_skewed_one_to_one_loads_under_a_cap_of_one() -> None:
+    # The acceptance the cap-of-one proof grants is only worth having if COPY
+    # agrees: a Zipf with a childless share, which the unique index refuses
+    # uncapped, loads once no parent can hold two rows.
+    build_shape(
+        Shape(
+            Table(Company, rows=100, name=Constant("acme")),
+            Table(
+                Ticketed,
+                rows=60,
+                prefix=Constant("p"),
+                reference=Sequential("r", "x"),
+                company=FanOut(Zipf(), childless=0.3, max_children=1),
+            ),
+        )
+    )
+
+    companies = list(Ticketed.objects.values_list("company_id", flat=True))
+    assert len(companies) == 60
+    assert len(set(companies)) == 60

@@ -70,8 +70,8 @@ def resolve_paired(
             "are. Every row of one group needs a different partner, so what has to fit is the "
             "largest group against the partner count, not the row count against the product of "
             "the two. A heavy tail puts a large share of every edge on one group, so declare "
-            f"more {partner.__name__} rows, flatten {paired.relation}'s sizes, or ask for fewer "
-            "rows here."
+            f"more {partner.__name__} rows, flatten {paired.relation}'s sizes, cap them with "
+            f"max_children={len(keys)} on its FanOut, or ask for fewer rows here."
         )
     # Nothing to place means nothing to weigh, the same guard the fan-out's own
     # sizes carry. Reaching the zero-total refusal below with an empty table

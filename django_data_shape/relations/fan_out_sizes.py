@@ -104,34 +104,54 @@ def fan_out_sizes(
     relation = dict(declaration.relations())[field]
     parent = cast("type[Model]", cast("Field[object, object]", relation).related_model)
 
-    plan = resolve_fan_out(
-        fan_out,
-        parent,
-        declaration.rows,
-        shape.seed,
-        declaration.db_table,
-        field,
-        connections[using],
-    )
-    keys = plan.parent_keys()
-
     # A narrowed fan-out covers the keys it named and no others, so the parent
     # table holding more rows than the partition covers is the declaration
     # working rather than the world moving. The failure WorldChanged exists for
     # is still caught, and caught earlier: a named key that is no longer a row is
-    # refused by name when the partition is resolved, above.
+    # refused by name when the partition is resolved, below.
     parent_declaration = (
         None if fan_out.parents is not None else declared.get(parent._meta.db_table)
     )
-    if isinstance(parent_declaration, Table) and len(keys) != parent_declaration.rows:
-        raise WorldChanged(
-            f"{parent.__name__} holds {len(keys)} rows and this shape declares "
-            f"{parent_declaration.rows}, so the fan-out for {model.__name__}.{field} would be "
-            "spread over parents the children were never spread across. The counts are derived "
-            "from the parent keys rather than counted off the child table, so an answer here "
-            "would describe a world that was never built. The usual causes are a test that "
-            "created more parents before asking, and a transactional test that truncated the "
-            "tables a session-scoped fixture built."
+    try:
+        plan = resolve_fan_out(
+            fan_out,
+            parent,
+            declaration.rows,
+            shape.seed,
+            declaration.db_table,
+            field,
+            connections[using],
         )
+    except InvalidShape as refused:
+        # A partition the build drew can still be refused here, over parents
+        # that have since gone: fewer of them can no longer hold the rows under
+        # max_children, or none of them is left. Blaming the declaration then
+        # sends the reader to change a shape that built, so a parent table that
+        # no longer holds what the shape declares is named as the cause.
+        if isinstance(parent_declaration, Table):
+            holds = parent._base_manager.using(using).count()
+            if holds != parent_declaration.rows:
+                raise _world_changed(
+                    parent, holds, parent_declaration.rows, model, field
+                ) from refused
+        raise
+    keys = plan.parent_keys()
+
+    if isinstance(parent_declaration, Table) and len(keys) != parent_declaration.rows:
+        raise _world_changed(parent, len(keys), parent_declaration.rows, model, field)
 
     return ChildrenPerParent(keys, plan.sizes(), fan_out.null)
+
+
+def _world_changed(
+    parent: type[Model], holds: int, declares: int, model: type[Model], field: str
+) -> WorldChanged:
+    return WorldChanged(
+        f"{parent.__name__} holds {holds} rows and this shape declares "
+        f"{declares}, so the fan-out for {model.__name__}.{field} would be "
+        "spread over parents the children were never spread across. The counts are derived "
+        "from the parent keys rather than counted off the child table, so an answer here "
+        "would describe a world that was never built. The usual causes are a test that "
+        "created more parents before asking, and a transactional test that truncated the "
+        "tables a session-scoped fixture built."
+    )

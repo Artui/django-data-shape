@@ -398,7 +398,10 @@ see only part of it. It does not survive contact with what a subset actually is:
 
 Every table scales, parents included. Scaling only the child table would change
 the average fan-out along with the size, so two worlds would differ in a second
-way and the curve would no longer be about size.
+way and the curve would no longer be about size. A `FanOut(max_children=)` cap
+does not scale: it is a ceiling from the business rather than a count, so a
+scaled shape whose rows outgrow it -- most readily under `parents=`, whose named
+keys stay fixed -- is refused at build with the arithmetic.
 
 `scaled_shape` is that transform on its own, and it needs no database:
 

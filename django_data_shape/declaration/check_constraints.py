@@ -243,8 +243,8 @@ def _check_a_fan_out_beside_a_draw(
     :class:`~django_data_shape.distributions.sequential.Sequential` beside a
     fan-out keeps the constraint in every row with nothing arranged around it. A
     partition that gives no parent two rows is the second -- there is then no
-    group for two draws to collide inside -- and :func:`_cannot_collide` is the
-    four conditions that establish it. Neither exemption is "this usually works":
+    group for two draws to collide inside -- and :func:`_cannot_collide` is what
+    establishes it, by a cap of one or by four conditions together. Neither exemption is "this usually works":
     a shape that merely usually works is the case this refusal is for, and the
     measured ones sit at ten and eleven times out of twenty.
 
@@ -330,9 +330,10 @@ def _check_a_fan_out_on_a_unique_column(table: Table, rows_of: dict[type[Model],
             "table's rows over the parent's keys by weight, so a skew putting two rows on one "
             "parent is what it was asked for -- and the unique index then refuses the second, "
             "inside COPY, at a row number that moves when the seed does. A one-to-one is filled "
-            "by a fan-out whose sizes give every parent the same weight and whose rows do not "
-            "outnumber the parents: FanOut(Constant(1)) over at least as many parents as this "
-            "table has rows. childless= is how a parent with no row at all is asked for."
+            "by max_children=1, which caps every parent at one row whatever the sizes weigh and "
+            "leaves childless= free to ask for parents with no row at all; or by "
+            "FanOut(Constant(1)) with no childless share over at least as many parents as this "
+            "table has rows."
         )
 
 
@@ -409,7 +410,13 @@ def _cannot_collide(table: Table, column: str, rows_of: dict[type[Model], int]) 
     partition in which no group holds two rows cannot produce one, whatever the
     other column draws and whatever the seed.
 
-    Four conditions, and all four are needed. The sizes have to be provably flat
+    The first way is a cap of one. ``max_children=1`` bounds the partition
+    itself, so no parent holds two rows whatever the sizes weigh, whatever the
+    childless share, and wherever the parents come from; a declaration whose
+    rows outnumber the parents that can hold them is refused when the partition
+    is drawn, naming the arithmetic, before a row reaches ``COPY``.
+
+    Without it, four conditions, and all four are needed. The sizes have to be provably flat
     -- ``Bounded`` with exactly one distinct value, so every parent is weighed
     the same -- because ``_sizes`` divides ``rows`` by a total and hands the
     remainder to the parents with the largest fractional part: flat weights make
@@ -439,7 +446,7 @@ def _cannot_collide(table: Table, column: str, rows_of: dict[type[Model], int]) 
 
     .. warning::
 
-       **The coverage gate cannot see these four conditions, and the tests are
+       **The coverage gate cannot see these five conditions, and the tests are
        what hold them.** They are one boolean expression, so they are one branch
        arc: drop any single conjunct and the suite still reports 100% line and
        branch, because the surviving expression is still taken both ways. The
@@ -447,6 +454,9 @@ def _cannot_collide(table: Table, column: str, rows_of: dict[type[Model], int]) 
        against a tree with that condition removed. If you edit this expression,
        edit those with it -- they are, in order:
 
+       - ``max_children == 1`` --
+         ``test_a_cap_of_one_is_a_proof_whatever_the_sizes``, beside the
+         ``test_a_cap_of_two_is_not`` that keeps the comparison from widening.
        - ``Bounded`` with one value -- ``test_sizes_that_are_not_provably_flat_are_not_exempt``,
          which uses ``Uniform(1, 10)`` sizes because they give a largest group of
          two where ``Constant(1)`` gives one, at identical numbers.
@@ -460,7 +470,7 @@ def _cannot_collide(table: Table, column: str, rows_of: dict[type[Model], int]) 
     """
     fan_out = cast("FanOut", table.fields[column])
     parent_rows = _parents_available(table, column, fan_out, rows_of)
-    return (
+    return fan_out.max_children == 1 or (
         isinstance(fan_out.sizes, Bounded)
         and fan_out.sizes.distinct_values() == 1
         and not fan_out.childless
