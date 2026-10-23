@@ -559,6 +559,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#writing-to-a-world-after-it-is-built" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Writing to a world after it is built
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#from-pytest" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -751,6 +762,17 @@
     <span class="md-ellipsis">
       
         What it refuses to hash
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#writing-to-a-world-after-it-is-built" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Writing to a world after it is built
       
     </span>
   </a>
@@ -984,54 +1006,73 @@ is data:</p>
 </span><span id="__span-4-10"><a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">canonical</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">object</span><span class="p">:</span>
 </span><span id="__span-4-11"><a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a>        <span class="k">return</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_step</span><span class="p">,)</span>
 </span></code></pre></div>
+<h3 id="writing-to-a-world-after-it-is-built">Writing to a world after it is built<a class="headerlink" href="#writing-to-a-world-after-it-is-built" title="Permanent link">&para;</a></h3>
+<p>The cache holds what <code>build()</code> made, and the statistics in it describe exactly
+those rows. <strong>Anything that writes afterwards leaves them stale</strong>: a replay
+through your own services that fills running totals, a renumbering, a backfill.
+The planner then plans against the world before the write, which is the failure
+this package exists to remove, and nothing reports it -- a check for whether
+<code>ANALYZE</code> ever ran passes, because it did. Run it again once the writes are done,
+over the whole database, since the step may have written to tables the shape
+never declared:</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">django.db</span><span class="w"> </span><span class="kn">import</span> <span class="n">connection</span>
+</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>
+</span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="k">with</span> <span class="n">connection</span><span class="o">.</span><span class="n">cursor</span><span class="p">()</span> <span class="k">as</span> <span class="n">cursor</span><span class="p">:</span>
+</span><span id="__span-5-4"><a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>    <span class="n">cursor</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span><span class="s2">"ANALYZE"</span><span class="p">)</span>
+</span></code></pre></div>
+<p>A column such a step owns still has to be loadable before the step runs. Declare
+a <code>NOT NULL</code> column with no default as a placeholder the step overwrites,
+<code>counter=Constant(0)</code> for instance. A placeholder under a unique constraint
+cannot be a <code>Constant</code>, which can only produce one value and is refused when the
+shape is declared; give it a <code>Sequential</code> instead.</p>
 <h3 id="from-pytest">From pytest<a class="headerlink" href="#from-pytest" title="Permanent link">&para;</a></h3>
 <p><code>template_database</code> and <code>clone_database</code> are the two halves; <code>django_db_setup</code> is
 where pytest-django documents putting them. This replaces pytest-django's own
 test-database creation:</p>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="c1"># conftest.py</span>
-</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="kn">import</span><span class="w"> </span><span class="nn">pytest</span>
-</span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="kn">from</span><span class="w"> </span><span class="nn">django.db</span><span class="w"> </span><span class="kn">import</span> <span class="n">connections</span>
-</span><span id="__span-5-4"><a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>
-</span><span id="__span-5-5"><a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="kn">from</span><span class="w"> </span><span class="nn">django_data_shape</span><span class="w"> </span><span class="kn">import</span> <span class="n">Shape</span><span class="p">,</span> <span class="n">Skew</span><span class="p">,</span> <span class="n">Table</span><span class="p">,</span> <span class="n">clone_database</span><span class="p">,</span> <span class="n">drop_database</span>
-</span><span id="__span-5-6"><a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="kn">from</span><span class="w"> </span><span class="nn">django_data_shape</span><span class="w"> </span><span class="kn">import</span> <span class="n">template_database</span>
-</span><span id="__span-5-7"><a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a>
-</span><span id="__span-5-8"><a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="kn">from</span><span class="w"> </span><span class="nn">myapp.models</span><span class="w"> </span><span class="kn">import</span> <span class="n">Order</span>
-</span><span id="__span-5-9"><a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a>
-</span><span id="__span-5-10"><a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a><span class="n">SHAPE</span> <span class="o">=</span> <span class="n">Shape</span><span class="p">(</span><span class="n">Table</span><span class="p">(</span><span class="n">Order</span><span class="p">,</span> <span class="n">rows</span><span class="o">=</span><span class="mi">2_000_000</span><span class="p">,</span> <span class="n">status</span><span class="o">=</span><span class="n">Skew</span><span class="p">({</span><span class="s2">"complete"</span><span class="p">:</span> <span class="mi">98</span><span class="p">,</span> <span class="s2">"pending"</span><span class="p">:</span> <span class="mi">2</span><span class="p">})))</span>
-</span><span id="__span-5-11"><a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a>
-</span><span id="__span-5-12"><a id="__codelineno-5-12" name="__codelineno-5-12" href="#__codelineno-5-12"></a>
-</span><span id="__span-5-13"><a id="__codelineno-5-13" name="__codelineno-5-13" href="#__codelineno-5-13"></a><span class="nd">@pytest</span><span class="o">.</span><span class="n">fixture</span><span class="p">(</span><span class="n">scope</span><span class="o">=</span><span class="s2">"session"</span><span class="p">)</span>
-</span><span id="__span-5-14"><a id="__codelineno-5-14" name="__codelineno-5-14" href="#__codelineno-5-14"></a><span class="k">def</span><span class="w"> </span><span class="nf">django_db_setup</span><span class="p">(</span><span class="n">django_test_environment</span><span class="p">,</span> <span class="n">django_db_modify_db_settings</span><span class="p">,</span> <span class="n">django_db_blocker</span><span class="p">):</span>
-</span><span id="__span-5-15"><a id="__codelineno-5-15" name="__codelineno-5-15" href="#__codelineno-5-15"></a>    <span class="n">connection</span> <span class="o">=</span> <span class="n">connections</span><span class="p">[</span><span class="s2">"default"</span><span class="p">]</span>
-</span><span id="__span-5-16"><a id="__codelineno-5-16" name="__codelineno-5-16" href="#__codelineno-5-16"></a>    <span class="n">settings</span> <span class="o">=</span> <span class="n">connection</span><span class="o">.</span><span class="n">settings_dict</span>
-</span><span id="__span-5-17"><a id="__codelineno-5-17" name="__codelineno-5-17" href="#__codelineno-5-17"></a>    <span class="c1"># pytest-django has already appended its xdist worker suffix to TEST["NAME"]</span>
-</span><span id="__span-5-18"><a id="__codelineno-5-18" name="__codelineno-5-18" href="#__codelineno-5-18"></a>    <span class="c1"># by the time this runs, so the name below is this worker's own database.</span>
-</span><span id="__span-5-19"><a id="__codelineno-5-19" name="__codelineno-5-19" href="#__codelineno-5-19"></a>    <span class="n">target</span> <span class="o">=</span> <span class="n">settings</span><span class="p">[</span><span class="s2">"TEST"</span><span class="p">][</span><span class="s2">"NAME"</span><span class="p">]</span> <span class="ow">or</span> <span class="sa">f</span><span class="s2">"test_</span><span class="si">{</span><span class="n">settings</span><span class="p">[</span><span class="s1">'NAME'</span><span class="p">]</span><span class="si">}</span><span class="s2">"</span>
-</span><span id="__span-5-20"><a id="__codelineno-5-20" name="__codelineno-5-20" href="#__codelineno-5-20"></a>
-</span><span id="__span-5-21"><a id="__codelineno-5-21" name="__codelineno-5-21" href="#__codelineno-5-21"></a>    <span class="k">with</span> <span class="n">django_db_blocker</span><span class="o">.</span><span class="n">unblock</span><span class="p">():</span>
-</span><span id="__span-5-22"><a id="__codelineno-5-22" name="__codelineno-5-22" href="#__codelineno-5-22"></a>        <span class="n">clone_database</span><span class="p">(</span><span class="n">template_database</span><span class="p">(</span><span class="n">SHAPE</span><span class="p">),</span> <span class="n">target</span><span class="p">,</span> <span class="n">replace</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
-</span><span id="__span-5-23"><a id="__codelineno-5-23" name="__codelineno-5-23" href="#__codelineno-5-23"></a>        <span class="n">connection</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
-</span><span id="__span-5-24"><a id="__codelineno-5-24" name="__codelineno-5-24" href="#__codelineno-5-24"></a>        <span class="n">settings</span><span class="p">[</span><span class="s2">"NAME"</span><span class="p">]</span> <span class="o">=</span> <span class="n">target</span>
-</span><span id="__span-5-25"><a id="__codelineno-5-25" name="__codelineno-5-25" href="#__codelineno-5-25"></a>        <span class="k">yield</span>
-</span><span id="__span-5-26"><a id="__codelineno-5-26" name="__codelineno-5-26" href="#__codelineno-5-26"></a>        <span class="n">connection</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
-</span><span id="__span-5-27"><a id="__codelineno-5-27" name="__codelineno-5-27" href="#__codelineno-5-27"></a>        <span class="n">drop_database</span><span class="p">(</span><span class="n">target</span><span class="p">)</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="c1"># conftest.py</span>
+</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="kn">import</span><span class="w"> </span><span class="nn">pytest</span>
+</span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="kn">from</span><span class="w"> </span><span class="nn">django.db</span><span class="w"> </span><span class="kn">import</span> <span class="n">connections</span>
+</span><span id="__span-6-4"><a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>
+</span><span id="__span-6-5"><a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="kn">from</span><span class="w"> </span><span class="nn">django_data_shape</span><span class="w"> </span><span class="kn">import</span> <span class="n">Shape</span><span class="p">,</span> <span class="n">Skew</span><span class="p">,</span> <span class="n">Table</span><span class="p">,</span> <span class="n">clone_database</span><span class="p">,</span> <span class="n">drop_database</span>
+</span><span id="__span-6-6"><a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="kn">from</span><span class="w"> </span><span class="nn">django_data_shape</span><span class="w"> </span><span class="kn">import</span> <span class="n">template_database</span>
+</span><span id="__span-6-7"><a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a>
+</span><span id="__span-6-8"><a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a><span class="kn">from</span><span class="w"> </span><span class="nn">myapp.models</span><span class="w"> </span><span class="kn">import</span> <span class="n">Order</span>
+</span><span id="__span-6-9"><a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a>
+</span><span id="__span-6-10"><a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a><span class="n">SHAPE</span> <span class="o">=</span> <span class="n">Shape</span><span class="p">(</span><span class="n">Table</span><span class="p">(</span><span class="n">Order</span><span class="p">,</span> <span class="n">rows</span><span class="o">=</span><span class="mi">2_000_000</span><span class="p">,</span> <span class="n">status</span><span class="o">=</span><span class="n">Skew</span><span class="p">({</span><span class="s2">"complete"</span><span class="p">:</span> <span class="mi">98</span><span class="p">,</span> <span class="s2">"pending"</span><span class="p">:</span> <span class="mi">2</span><span class="p">})))</span>
+</span><span id="__span-6-11"><a id="__codelineno-6-11" name="__codelineno-6-11" href="#__codelineno-6-11"></a>
+</span><span id="__span-6-12"><a id="__codelineno-6-12" name="__codelineno-6-12" href="#__codelineno-6-12"></a>
+</span><span id="__span-6-13"><a id="__codelineno-6-13" name="__codelineno-6-13" href="#__codelineno-6-13"></a><span class="nd">@pytest</span><span class="o">.</span><span class="n">fixture</span><span class="p">(</span><span class="n">scope</span><span class="o">=</span><span class="s2">"session"</span><span class="p">)</span>
+</span><span id="__span-6-14"><a id="__codelineno-6-14" name="__codelineno-6-14" href="#__codelineno-6-14"></a><span class="k">def</span><span class="w"> </span><span class="nf">django_db_setup</span><span class="p">(</span><span class="n">django_test_environment</span><span class="p">,</span> <span class="n">django_db_modify_db_settings</span><span class="p">,</span> <span class="n">django_db_blocker</span><span class="p">):</span>
+</span><span id="__span-6-15"><a id="__codelineno-6-15" name="__codelineno-6-15" href="#__codelineno-6-15"></a>    <span class="n">connection</span> <span class="o">=</span> <span class="n">connections</span><span class="p">[</span><span class="s2">"default"</span><span class="p">]</span>
+</span><span id="__span-6-16"><a id="__codelineno-6-16" name="__codelineno-6-16" href="#__codelineno-6-16"></a>    <span class="n">settings</span> <span class="o">=</span> <span class="n">connection</span><span class="o">.</span><span class="n">settings_dict</span>
+</span><span id="__span-6-17"><a id="__codelineno-6-17" name="__codelineno-6-17" href="#__codelineno-6-17"></a>    <span class="c1"># pytest-django has already appended its xdist worker suffix to TEST["NAME"]</span>
+</span><span id="__span-6-18"><a id="__codelineno-6-18" name="__codelineno-6-18" href="#__codelineno-6-18"></a>    <span class="c1"># by the time this runs, so the name below is this worker's own database.</span>
+</span><span id="__span-6-19"><a id="__codelineno-6-19" name="__codelineno-6-19" href="#__codelineno-6-19"></a>    <span class="n">target</span> <span class="o">=</span> <span class="n">settings</span><span class="p">[</span><span class="s2">"TEST"</span><span class="p">][</span><span class="s2">"NAME"</span><span class="p">]</span> <span class="ow">or</span> <span class="sa">f</span><span class="s2">"test_</span><span class="si">{</span><span class="n">settings</span><span class="p">[</span><span class="s1">'NAME'</span><span class="p">]</span><span class="si">}</span><span class="s2">"</span>
+</span><span id="__span-6-20"><a id="__codelineno-6-20" name="__codelineno-6-20" href="#__codelineno-6-20"></a>
+</span><span id="__span-6-21"><a id="__codelineno-6-21" name="__codelineno-6-21" href="#__codelineno-6-21"></a>    <span class="k">with</span> <span class="n">django_db_blocker</span><span class="o">.</span><span class="n">unblock</span><span class="p">():</span>
+</span><span id="__span-6-22"><a id="__codelineno-6-22" name="__codelineno-6-22" href="#__codelineno-6-22"></a>        <span class="n">clone_database</span><span class="p">(</span><span class="n">template_database</span><span class="p">(</span><span class="n">SHAPE</span><span class="p">),</span> <span class="n">target</span><span class="p">,</span> <span class="n">replace</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+</span><span id="__span-6-23"><a id="__codelineno-6-23" name="__codelineno-6-23" href="#__codelineno-6-23"></a>        <span class="n">connection</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+</span><span id="__span-6-24"><a id="__codelineno-6-24" name="__codelineno-6-24" href="#__codelineno-6-24"></a>        <span class="n">settings</span><span class="p">[</span><span class="s2">"NAME"</span><span class="p">]</span> <span class="o">=</span> <span class="n">target</span>
+</span><span id="__span-6-25"><a id="__codelineno-6-25" name="__codelineno-6-25" href="#__codelineno-6-25"></a>        <span class="k">yield</span>
+</span><span id="__span-6-26"><a id="__codelineno-6-26" name="__codelineno-6-26" href="#__codelineno-6-26"></a>        <span class="n">connection</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+</span><span id="__span-6-27"><a id="__codelineno-6-27" name="__codelineno-6-27" href="#__codelineno-6-27"></a>        <span class="n">drop_database</span><span class="p">(</span><span class="n">target</span><span class="p">)</span>
 </span></code></pre></div>
 <p>There is a shorter version that stays entirely inside pytest-django's own
 lifecycle, using Django's documented <code>TEST["TEMPLATE"]</code> setting. Django then
 creates the test database itself, with its own <code>WITH TEMPLATE</code> clause and
 therefore the server's default strategy -- about three and a half times slower
 per session, and it re-runs <code>migrate</code> over the clone:</p>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="c1"># conftest.py</span>
-</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="kn">import</span><span class="w"> </span><span class="nn">pytest</span>
-</span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="kn">from</span><span class="w"> </span><span class="nn">django.db</span><span class="w"> </span><span class="kn">import</span> <span class="n">connections</span>
-</span><span id="__span-6-4"><a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>
-</span><span id="__span-6-5"><a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="kn">from</span><span class="w"> </span><span class="nn">django_data_shape</span><span class="w"> </span><span class="kn">import</span> <span class="n">template_database</span>
-</span><span id="__span-6-6"><a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a>
-</span><span id="__span-6-7"><a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a>
-</span><span id="__span-6-8"><a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a><span class="nd">@pytest</span><span class="o">.</span><span class="n">fixture</span><span class="p">(</span><span class="n">scope</span><span class="o">=</span><span class="s2">"session"</span><span class="p">)</span>
-</span><span id="__span-6-9"><a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a><span class="k">def</span><span class="w"> </span><span class="nf">django_db_modify_db_settings</span><span class="p">(</span><span class="n">django_db_modify_db_settings_parallel_suffix</span><span class="p">,</span> <span class="n">django_db_blocker</span><span class="p">):</span>
-</span><span id="__span-6-10"><a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a>    <span class="k">with</span> <span class="n">django_db_blocker</span><span class="o">.</span><span class="n">unblock</span><span class="p">():</span>
-</span><span id="__span-6-11"><a id="__codelineno-6-11" name="__codelineno-6-11" href="#__codelineno-6-11"></a>        <span class="n">connections</span><span class="p">[</span><span class="s2">"default"</span><span class="p">]</span><span class="o">.</span><span class="n">settings_dict</span><span class="p">[</span><span class="s2">"TEST"</span><span class="p">][</span><span class="s2">"TEMPLATE"</span><span class="p">]</span> <span class="o">=</span> <span class="n">template_database</span><span class="p">(</span><span class="n">SHAPE</span><span class="p">)</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="c1"># conftest.py</span>
+</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="kn">import</span><span class="w"> </span><span class="nn">pytest</span>
+</span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="kn">from</span><span class="w"> </span><span class="nn">django.db</span><span class="w"> </span><span class="kn">import</span> <span class="n">connections</span>
+</span><span id="__span-7-4"><a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>
+</span><span id="__span-7-5"><a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="kn">from</span><span class="w"> </span><span class="nn">django_data_shape</span><span class="w"> </span><span class="kn">import</span> <span class="n">template_database</span>
+</span><span id="__span-7-6"><a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a>
+</span><span id="__span-7-7"><a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a>
+</span><span id="__span-7-8"><a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a><span class="nd">@pytest</span><span class="o">.</span><span class="n">fixture</span><span class="p">(</span><span class="n">scope</span><span class="o">=</span><span class="s2">"session"</span><span class="p">)</span>
+</span><span id="__span-7-9"><a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a><span class="k">def</span><span class="w"> </span><span class="nf">django_db_modify_db_settings</span><span class="p">(</span><span class="n">django_db_modify_db_settings_parallel_suffix</span><span class="p">,</span> <span class="n">django_db_blocker</span><span class="p">):</span>
+</span><span id="__span-7-10"><a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a>    <span class="k">with</span> <span class="n">django_db_blocker</span><span class="o">.</span><span class="n">unblock</span><span class="p">():</span>
+</span><span id="__span-7-11"><a id="__codelineno-7-11" name="__codelineno-7-11" href="#__codelineno-7-11"></a>        <span class="n">connections</span><span class="p">[</span><span class="s2">"default"</span><span class="p">]</span><span class="o">.</span><span class="n">settings_dict</span><span class="p">[</span><span class="s2">"TEST"</span><span class="p">][</span><span class="s2">"TEMPLATE"</span><span class="p">]</span> <span class="o">=</span> <span class="n">template_database</span><span class="p">(</span><span class="n">SHAPE</span><span class="p">)</span>
 </span></code></pre></div>
 <p><code>--reuse-db</code> is not worth reaching for with either: a clone is cheaper than
 deciding whether the database you have is the one you want, and the template
@@ -1044,28 +1085,28 @@ about one minute to build a four-million-row shape -- paid again by every
 template a change to the declaration makes. Such a project usually keeps a
 migrated database already, and clones its test databases from it. Name it as
 the base and the template starts as a copy of it instead:</p>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="c1"># conftest.py</span>
-</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="kn">import</span><span class="w"> </span><span class="nn">pytest</span>
-</span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="kn">from</span><span class="w"> </span><span class="nn">django.db</span><span class="w"> </span><span class="kn">import</span> <span class="n">connections</span>
-</span><span id="__span-7-4"><a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>
-</span><span id="__span-7-5"><a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="kn">from</span><span class="w"> </span><span class="nn">django_data_shape</span><span class="w"> </span><span class="kn">import</span> <span class="n">clone_database</span><span class="p">,</span> <span class="n">drop_database</span><span class="p">,</span> <span class="n">template_database</span>
-</span><span id="__span-7-6"><a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a>
-</span><span id="__span-7-7"><a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="n">BASE</span> <span class="o">=</span> <span class="s2">"myproject_base"</span>  <span class="c1"># a database you keep migrated</span>
-</span><span id="__span-7-8"><a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a>
-</span><span id="__span-7-9"><a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a>
-</span><span id="__span-7-10"><a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a><span class="nd">@pytest</span><span class="o">.</span><span class="n">fixture</span><span class="p">(</span><span class="n">scope</span><span class="o">=</span><span class="s2">"session"</span><span class="p">)</span>
-</span><span id="__span-7-11"><a id="__codelineno-7-11" name="__codelineno-7-11" href="#__codelineno-7-11"></a><span class="k">def</span><span class="w"> </span><span class="nf">django_db_setup</span><span class="p">(</span><span class="n">django_test_environment</span><span class="p">,</span> <span class="n">django_db_modify_db_settings</span><span class="p">,</span> <span class="n">django_db_blocker</span><span class="p">):</span>
-</span><span id="__span-7-12"><a id="__codelineno-7-12" name="__codelineno-7-12" href="#__codelineno-7-12"></a>    <span class="n">connection</span> <span class="o">=</span> <span class="n">connections</span><span class="p">[</span><span class="s2">"default"</span><span class="p">]</span>
-</span><span id="__span-7-13"><a id="__codelineno-7-13" name="__codelineno-7-13" href="#__codelineno-7-13"></a>    <span class="n">settings</span> <span class="o">=</span> <span class="n">connection</span><span class="o">.</span><span class="n">settings_dict</span>
-</span><span id="__span-7-14"><a id="__codelineno-7-14" name="__codelineno-7-14" href="#__codelineno-7-14"></a>    <span class="n">target</span> <span class="o">=</span> <span class="n">settings</span><span class="p">[</span><span class="s2">"TEST"</span><span class="p">][</span><span class="s2">"NAME"</span><span class="p">]</span> <span class="ow">or</span> <span class="sa">f</span><span class="s2">"test_</span><span class="si">{</span><span class="n">settings</span><span class="p">[</span><span class="s1">'NAME'</span><span class="p">]</span><span class="si">}</span><span class="s2">"</span>
-</span><span id="__span-7-15"><a id="__codelineno-7-15" name="__codelineno-7-15" href="#__codelineno-7-15"></a>
-</span><span id="__span-7-16"><a id="__codelineno-7-16" name="__codelineno-7-16" href="#__codelineno-7-16"></a>    <span class="k">with</span> <span class="n">django_db_blocker</span><span class="o">.</span><span class="n">unblock</span><span class="p">():</span>
-</span><span id="__span-7-17"><a id="__codelineno-7-17" name="__codelineno-7-17" href="#__codelineno-7-17"></a>        <span class="n">clone_database</span><span class="p">(</span><span class="n">template_database</span><span class="p">(</span><span class="n">SHAPE</span><span class="p">,</span> <span class="n">base</span><span class="o">=</span><span class="n">BASE</span><span class="p">),</span> <span class="n">target</span><span class="p">,</span> <span class="n">replace</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
-</span><span id="__span-7-18"><a id="__codelineno-7-18" name="__codelineno-7-18" href="#__codelineno-7-18"></a>        <span class="n">connection</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
-</span><span id="__span-7-19"><a id="__codelineno-7-19" name="__codelineno-7-19" href="#__codelineno-7-19"></a>        <span class="n">settings</span><span class="p">[</span><span class="s2">"NAME"</span><span class="p">]</span> <span class="o">=</span> <span class="n">target</span>
-</span><span id="__span-7-20"><a id="__codelineno-7-20" name="__codelineno-7-20" href="#__codelineno-7-20"></a>        <span class="k">yield</span>
-</span><span id="__span-7-21"><a id="__codelineno-7-21" name="__codelineno-7-21" href="#__codelineno-7-21"></a>        <span class="n">connection</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
-</span><span id="__span-7-22"><a id="__codelineno-7-22" name="__codelineno-7-22" href="#__codelineno-7-22"></a>        <span class="n">drop_database</span><span class="p">(</span><span class="n">target</span><span class="p">)</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="c1"># conftest.py</span>
+</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="kn">import</span><span class="w"> </span><span class="nn">pytest</span>
+</span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="kn">from</span><span class="w"> </span><span class="nn">django.db</span><span class="w"> </span><span class="kn">import</span> <span class="n">connections</span>
+</span><span id="__span-8-4"><a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>
+</span><span id="__span-8-5"><a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="kn">from</span><span class="w"> </span><span class="nn">django_data_shape</span><span class="w"> </span><span class="kn">import</span> <span class="n">clone_database</span><span class="p">,</span> <span class="n">drop_database</span><span class="p">,</span> <span class="n">template_database</span>
+</span><span id="__span-8-6"><a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>
+</span><span id="__span-8-7"><a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a><span class="n">BASE</span> <span class="o">=</span> <span class="s2">"myproject_base"</span>  <span class="c1"># a database you keep migrated</span>
+</span><span id="__span-8-8"><a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a>
+</span><span id="__span-8-9"><a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a>
+</span><span id="__span-8-10"><a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a><span class="nd">@pytest</span><span class="o">.</span><span class="n">fixture</span><span class="p">(</span><span class="n">scope</span><span class="o">=</span><span class="s2">"session"</span><span class="p">)</span>
+</span><span id="__span-8-11"><a id="__codelineno-8-11" name="__codelineno-8-11" href="#__codelineno-8-11"></a><span class="k">def</span><span class="w"> </span><span class="nf">django_db_setup</span><span class="p">(</span><span class="n">django_test_environment</span><span class="p">,</span> <span class="n">django_db_modify_db_settings</span><span class="p">,</span> <span class="n">django_db_blocker</span><span class="p">):</span>
+</span><span id="__span-8-12"><a id="__codelineno-8-12" name="__codelineno-8-12" href="#__codelineno-8-12"></a>    <span class="n">connection</span> <span class="o">=</span> <span class="n">connections</span><span class="p">[</span><span class="s2">"default"</span><span class="p">]</span>
+</span><span id="__span-8-13"><a id="__codelineno-8-13" name="__codelineno-8-13" href="#__codelineno-8-13"></a>    <span class="n">settings</span> <span class="o">=</span> <span class="n">connection</span><span class="o">.</span><span class="n">settings_dict</span>
+</span><span id="__span-8-14"><a id="__codelineno-8-14" name="__codelineno-8-14" href="#__codelineno-8-14"></a>    <span class="n">target</span> <span class="o">=</span> <span class="n">settings</span><span class="p">[</span><span class="s2">"TEST"</span><span class="p">][</span><span class="s2">"NAME"</span><span class="p">]</span> <span class="ow">or</span> <span class="sa">f</span><span class="s2">"test_</span><span class="si">{</span><span class="n">settings</span><span class="p">[</span><span class="s1">'NAME'</span><span class="p">]</span><span class="si">}</span><span class="s2">"</span>
+</span><span id="__span-8-15"><a id="__codelineno-8-15" name="__codelineno-8-15" href="#__codelineno-8-15"></a>
+</span><span id="__span-8-16"><a id="__codelineno-8-16" name="__codelineno-8-16" href="#__codelineno-8-16"></a>    <span class="k">with</span> <span class="n">django_db_blocker</span><span class="o">.</span><span class="n">unblock</span><span class="p">():</span>
+</span><span id="__span-8-17"><a id="__codelineno-8-17" name="__codelineno-8-17" href="#__codelineno-8-17"></a>        <span class="n">clone_database</span><span class="p">(</span><span class="n">template_database</span><span class="p">(</span><span class="n">SHAPE</span><span class="p">,</span> <span class="n">base</span><span class="o">=</span><span class="n">BASE</span><span class="p">),</span> <span class="n">target</span><span class="p">,</span> <span class="n">replace</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+</span><span id="__span-8-18"><a id="__codelineno-8-18" name="__codelineno-8-18" href="#__codelineno-8-18"></a>        <span class="n">connection</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+</span><span id="__span-8-19"><a id="__codelineno-8-19" name="__codelineno-8-19" href="#__codelineno-8-19"></a>        <span class="n">settings</span><span class="p">[</span><span class="s2">"NAME"</span><span class="p">]</span> <span class="o">=</span> <span class="n">target</span>
+</span><span id="__span-8-20"><a id="__codelineno-8-20" name="__codelineno-8-20" href="#__codelineno-8-20"></a>        <span class="k">yield</span>
+</span><span id="__span-8-21"><a id="__codelineno-8-21" name="__codelineno-8-21" href="#__codelineno-8-21"></a>        <span class="n">connection</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+</span><span id="__span-8-22"><a id="__codelineno-8-22" name="__codelineno-8-22" href="#__codelineno-8-22"></a>        <span class="n">drop_database</span><span class="p">(</span><span class="n">target</span><span class="p">)</span>
 </span></code></pre></div>
 <p>The tables <code>migrate</code> builds for apps without migrations are rebuilt from the
 models, and everything else the base holds is carried as it is. An app with
@@ -1288,7 +1329,7 @@ package at all -- PostgreSQL handles concurrent copies of one source itself.</p>
 <p>Connections to a finished template are turned off (<code>ALLOW_CONNECTIONS false</code>),
 because the one failure mode of the whole mechanism is PostgreSQL refusing to
 copy a database something is attached to. To look inside one:</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>ALTER DATABASE data_shape_abc123 ALLOW_CONNECTIONS true
+<div class="language-text highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>ALTER DATABASE data_shape_abc123 ALLOW_CONNECTIONS true
 </span></code></pre></div>
 
 

@@ -4173,6 +4173,21 @@ declared distribution mean something subtly different from what it says.</p>
 cosmetic. Emitting them parent by parent gives a perfectly clustered table
 that no production system has and that flatters every index scan; the
 default interleaves them the way rows really arrive.</p>
+<p><code>max_children</code> is a ceiling on any one parent's share. <strong>It lives here and
+not on the size distribution</strong> because the weights are normalised: capping
+a <code>Zipf</code> weight caps nothing, since the realised count is a share of
+<code>rows</code> that the other weights decide. The cap applies to the integer
+partition, and the rows a capped parent gives up are re-spread over the
+others by their weights; a childless parent still gets none. It exists for
+calibrating against production, whose tails the business bounds. <strong>A cap
+flattens the head into the body</strong>, which the planner sees, so a capped
+fan-out is a different world from the uncapped one rather than a free
+improvement on it -- and choosing a <code>Zipf</code> exponent that already gives
+production's maximum is often the better fix.</p>
+<p>The cap counts every row the partition places, the ones <code>null</code> then
+leaves without a parent included, so a parent at the cap can end with fewer
+non-null children but never more. A cap of one is a one-to-one, whatever
+the sizes weigh.</p>
 
 
 
@@ -4213,7 +4228,8 @@ default interleaves them the way rows really arrive.</p>
 afterwards: two shapes differing only in which parents they cover are
 two different worlds, and the template-database cache keys on this. A
 clone built for one tenant handed to a test asking for another would be
-the cache serving a world nobody declared.</p>
+the cache serving a world nobody declared. <code>max_children</code> is here for
+the same reason.</p>
 
 
     </div>
@@ -6550,7 +6566,7 @@ not installed this package, which is the opposite of what a seam is for.</p>
 already. The five-line callable the paragraph above offers is the one a
 consumer writes first::</p>
 <div class="language-text highlight"><pre><span></span><code>@contextmanager
-def world(n: int) -&gt; Iterator[None]:
+def world(n: int) -&gt; Generator[None]:
     build_my_fixtures(100 * n)
     yield
 </code></pre></div>
@@ -6613,7 +6629,7 @@ shape than import it -- it is exactly::</p>
 <a href="#django_data_shape.scaling.scaled_world.scaled_world" class="headerlink" title="Permanent link">&para;</a></h2>
 <div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">scaled_world</span><span class="p">(</span>
 </span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>    <span class="n">shape</span><span class="p">:</span> <span class="n">Shape</span><span class="p">,</span> <span class="n">factor</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">using</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="n">DEFAULT_DB_ALIAS</span>
-</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Iterator</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Generator</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span>
 </span></code></pre></div>
 
     <div class="doc doc-contents first">
