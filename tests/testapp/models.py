@@ -1194,6 +1194,18 @@ class StrictCode(models.Model):
     name = models.CharField(max_length=50)
 
 
+class Tariff(models.Model):
+    """A primary key on a ``DecimalField``, whose reading of a float is not the float.
+
+    ``to_python`` rounds a float through the field's own context, so ``1.1``
+    reads as ``Decimal("1.100000000")``, which compares unequal to the float it
+    came from and still names the same row. Here so that the refusal of a number
+    read as another row stays confined to integer keys.
+    """
+
+    rate = models.DecimalField(max_digits=10, decimal_places=2, primary_key=True)
+
+
 class Remark(models.Model):
     """A row that references one of the three tables above, and none of them is declared.
 

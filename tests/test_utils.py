@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import uuid
 from decimal import Decimal
 from typing import Any, cast
 
@@ -19,7 +20,14 @@ from django_data_shape.utils import (
     offsettable_kind,
     primary_key_field,
 )
-from tests.testapp.models import Company, SlugPk, StrictCode
+from tests.testapp.models import (
+    Company,
+    DeliveryDocument,
+    SlugPk,
+    StrictCode,
+    StrictCodeField,
+    Tariff,
+)
 
 
 def test_a_draw_is_uniform_in_the_unit_interval() -> None:
@@ -188,12 +196,35 @@ def test_a_column_with_no_opinion_declines_to_judge(field: models.Field) -> None
 def test_a_number_the_key_would_read_as_another_row_is_refused(spelling: object) -> None:
     # An integer key's to_python is int(), which truncates: 1.5 and
     # Decimal("1.9") would both be read as row 1, and True is an int that equals
-    # 1. Each would build a world pointed at a row nobody named, where before
-    # the reading they were refused as not a row.
+    # 1. Each would build a world pointed at a row nobody named.
     with pytest.raises(InvalidShape, match="reads as 1") as raised:
         named_keys((spelling,), Company, "t", "f")
 
     assert repr(spelling) in str(raised.value)
+
+
+def test_a_uuid_naming_an_integer_key_is_refused() -> None:
+    # int() takes anything with an __int__, so a UUID handed to an integer key
+    # reads as a 128-bit row number, a row nobody named. Holds the branch that
+    # takes only a string or a number on an integer key.
+    spelling = uuid.UUID(int=7)
+
+    with pytest.raises(InvalidShape, match="reads as 7"):
+        named_keys((spelling,), Company, "t", "f")
+
+
+def test_a_bool_naming_a_character_key_is_refused() -> None:
+    # Holds the bool refusal outside the integer-key gate: a character key reads
+    # True as "True", and nobody naming a row by a bool meant that one.
+    with pytest.raises(InvalidShape, match="True"):
+        named_keys((True,), SlugPk, "t", "f")
+
+
+def test_a_float_naming_a_decimal_key_is_that_key() -> None:
+    # Holds the integer-key gate: a decimal key reads 1.1 through its own
+    # context as Decimal("1.100000000"), which compares unequal to the float and
+    # is still the row it names.
+    assert named_keys((1.1,), Tariff, "t", "f") == (Decimal("1.100000000"),)
 
 
 def test_a_number_the_key_reads_unchanged_is_that_key() -> None:
@@ -209,13 +240,26 @@ def test_a_number_naming_a_character_key_is_that_key() -> None:
     assert named_keys((5,), SlugPk, "t", "f") == ("5",)
 
 
-def test_a_field_refusing_with_a_plain_exception_is_refused_by_name() -> None:
+@pytest.mark.parametrize("refusal", [ValueError, TypeError])
+def test_a_field_refusing_with_a_plain_exception_is_refused_by_name(
+    refusal: type[Exception], monkeypatch: pytest.MonkeyPatch
+) -> None:
     # Django's contract for to_python is a ValidationError, and a third-party
     # field does not always keep it; scaled_world catches the same three.
+    monkeypatch.setattr(StrictCodeField, "refusal", refusal)
+
     with pytest.raises(InvalidShape, match="'bad'") as raised:
         named_keys(("bad",), StrictCode, "testapp_remark", "code")
 
     assert "testapp_remark.code" in str(raised.value)
+
+
+def test_an_inherited_key_is_refused_by_the_field_the_query_reads() -> None:
+    # Under multi-table inheritance the child's pk is the parent link, while the
+    # first concrete primary key is the parent's own id; the refusal names the
+    # one the narrowing reads the key through.
+    with pytest.raises(InvalidShape, match="its primary key document_ptr is a OneToOneField"):
+        named_keys(("not-a-row",), DeliveryDocument, "t", "f")
 
 
 def test_the_same_spelling_twice_is_named_as_a_repeat() -> None:

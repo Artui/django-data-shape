@@ -79,10 +79,9 @@ reads: a UUID as the string it was loaded from JSON as is the same parent as the
 `uuid.UUID`, because each named key goes through the field's own `to_python`
 before it is sent or compared. Two spellings of one row in the same list are
 refused as a repeat, a value the field cannot read as a key at all is refused
-naming it, and so is a number the key would read as a different row -- `1.5` on
-an integer key would otherwise be truncated to row 1. A `DateTimeField` primary
-key on SQLite is not covered: the raw read hands back a naive string, which
-matches no spelling of the datetime, so such a parent is refused as not a row.
+naming it, and so is anything an integer key would read as a row nobody named --
+`1.5` would otherwise be truncated to row 1 and a `uuid.UUID` read as a 128-bit
+number. On an integer key, name a row by the integer or its string.
 
 **The order you name them in is part of the declaration.** Keys come back from
 the database sorted by primary key, and the weights are assigned by position, so

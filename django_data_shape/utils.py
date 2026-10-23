@@ -65,13 +65,17 @@ def named_keys(
     form or a URL converter applies to the same value.
 
     **A reading that names a different row is refused rather than taken.** An
-    integer key reads with ``int()``, which truncates, so ``1.5`` and
-    ``Decimal("1.9")`` would both become row 1, and ``True`` is an ``int`` equal
-    to 1. Each would build a world pointed at a row nobody named, so a number
-    read as a *different* number is refused, and a ``bool`` always is. Both
-    halves of that test are held: ``3.0`` reads as 3 and is accepted, and a
-    character key reads ``5`` as ``"5"``, a different value but not a different
-    row (``test_a_number_naming_a_character_key_is_that_key``).
+    integer key reads with ``int()``, which truncates and accepts anything with
+    an ``__int__``, so ``1.5`` and ``Decimal("1.9")`` would both become row 1, a
+    ``uuid.UUID`` would become a 128-bit number, and ``True`` is an ``int``
+    equal to 1. Each would build a world pointed at a row nobody named. So on an
+    integer key only a string or a number equal to its reading is taken, and a
+    ``bool`` is refused on any key, since a UUID key reads it as ``int=1`` too.
+    The gate is the key being integral, not the spelling being a number: a
+    decimal key reads ``1.1`` as ``Decimal("1.100000000")``, which compares
+    unequal to the float and is still the row it names
+    (``test_a_float_naming_a_decimal_key_is_that_key``). ``3.0`` on an integer
+    key reads as 3 and is accepted, and a character key reads ``5`` as ``"5"``.
 
     **A repeated key is refused here for both relations.** ``FanOut``'s
     constructor already refuses a key named twice in one spelling, but it
@@ -104,14 +108,14 @@ def named_keys(
                 f"{type(key_field).__name__}. Name the row by its primary key."
             ) from None
         if isinstance(spelling, bool) or (
-            isinstance(spelling, numbers.Number)
-            and isinstance(key, numbers.Number)
-            and key != spelling
+            isinstance(key, numbers.Integral)
+            and not isinstance(spelling, str)
+            and not (isinstance(spelling, numbers.Number) and key == spelling)
         ):
             raise InvalidShape(
                 f"{table}.{field} names {spelling!r} in parents=, which {model.__name__}'s "
-                f"primary key reads as {key!r}: a different row from the one written. Name the "
-                "row by its primary key."
+                f"primary key reads as {key!r}: a row the declaration does not name. Name the "
+                "row by its primary key, as an integer or its string."
             )
         if key in keys:
             if keys[key] == spelling:
