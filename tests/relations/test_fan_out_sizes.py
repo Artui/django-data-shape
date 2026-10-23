@@ -332,3 +332,25 @@ def test_a_narrowed_fan_out_is_not_a_world_that_changed() -> None:
 
     assert len(counts) == 10
     assert sum(counts.values()) == 100
+
+
+@pytest.mark.django_db
+def test_a_capped_fan_out_reports_the_capped_sizes() -> None:
+    # fan_out_sizes reads the partition the build wrote, so the cap has to show
+    # in its answer and agree with the child table.
+    shape = Shape(
+        Table(Company, rows=40, name=Constant("acme")),
+        Table(
+            Session,
+            rows=600,
+            company=FanOut(Zipf(1.2), max_children=25),
+            label=Constant("s"),
+        ),
+        seed=5,
+    )
+    build_shape(shape, require_statistics=False)
+
+    counts = fan_out_sizes(shape, Session, "company")
+
+    assert counts.ranked()[0][1] == 25
+    assert {key: size for key, size in counts.ranked() if size} == _loaded()

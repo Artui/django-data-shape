@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`FanOut(max_children=)` caps how many children any one parent gets.** A
+  power-law fan-out gives its busiest parent a share that the seed moves by a
+  factor of five or more, and production's tails are bounded by the business,
+  so calibrating a world against production needs a ceiling. The cap applies
+  to the integer partition: the rows a capped parent gives up are re-spread
+  over the uncapped ones by their weights, a childless parent still gets none,
+  and a declaration whose parents cannot hold every row under the cap is
+  refused with the arithmetic. It is part of the declaration's digest, so a
+  cached uncapped world is never served for a capped one, and `fan_out_sizes`
+  reports the capped sizes.
+- **Documentation:** the relations page has a table of the busiest parent's
+  share of the rows for each `Zipf` exponent at 100, 1,000 and 10,000 parents,
+  measured over twenty seeds. A test re-measures it, so it cannot drift from
+  what the partition draws.
 - **Documentation:** the statistics page says that anything writing to a built world leaves its
   statistics stale and shows the `ANALYZE` to run, and how to declare a
   placeholder for a column a later step fills.

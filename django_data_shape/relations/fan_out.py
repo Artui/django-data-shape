@@ -48,6 +48,18 @@ class FanOut:
     cosmetic. Emitting them parent by parent gives a perfectly clustered table
     that no production system has and that flatters every index scan; the
     default interleaves them the way rows really arrive.
+
+    ``max_children`` is a ceiling on any one parent's share. **It lives here and
+    not on the size distribution** because the weights are normalised: capping
+    a ``Zipf`` weight caps nothing, since the realised count is a share of
+    ``rows`` that the other weights decide. The cap applies to the integer
+    partition, and the rows a capped parent gives up are re-spread over the
+    others by their weights; a childless parent still gets none. It exists for
+    calibrating against production, whose tails the business bounds. **A cap
+    flattens the head into the body**, which the planner sees, so a capped
+    fan-out is a different world from the uncapped one rather than a free
+    improvement on it -- and choosing a ``Zipf`` exponent that already gives
+    production's maximum is often the better fix.
     """
 
     def __init__(
@@ -58,6 +70,7 @@ class FanOut:
         childless: float = 0.0,
         null: float = 0.0,
         placement: str = "arrival",
+        max_children: int | None = None,
     ) -> None:
         for name, share in (("childless", childless), ("null", null)):
             if not 0.0 <= share < 1.0:
@@ -67,6 +80,15 @@ class FanOut:
         if placement not in PLACEMENTS:
             raise InvalidShape(
                 f"FanOut placement must be one of {', '.join(PLACEMENTS)}, got {placement!r}."
+            )
+        # bool is an int, and a cap of one spelled True has almost certainly
+        # been written for a different argument.
+        if max_children is not None and (
+            isinstance(max_children, bool) or not isinstance(max_children, int) or max_children < 1
+        ):
+            raise InvalidShape(
+                f"FanOut max_children is the most children any one parent may have, so it must "
+                f"be a whole number of at least 1, got {max_children!r}."
             )
         narrowed = None if parents is None else tuple(parents)
         if narrowed is not None:
@@ -97,6 +119,7 @@ class FanOut:
         self._childless = childless
         self._null = null
         self._placement = placement
+        self._max_children = max_children
 
     @property
     def sizes(self) -> Distribution:
@@ -118,6 +141,10 @@ class FanOut:
     def placement(self) -> str:
         return self._placement
 
+    @property
+    def max_children(self) -> int | None:
+        return self._max_children
+
     def canonical(self) -> object:
         """The size distribution, the parents it spreads over, and the shares. See ``Canonical``.
 
@@ -125,13 +152,22 @@ class FanOut:
         afterwards: two shapes differing only in which parents they cover are
         two different worlds, and the template-database cache keys on this. A
         clone built for one tenant handed to a test asking for another would be
-        the cache serving a world nobody declared.
+        the cache serving a world nobody declared. ``max_children`` is here for
+        the same reason.
         """
-        return (self._sizes, self._parents, self._childless, self._null, self._placement)
+        return (
+            self._sizes,
+            self._parents,
+            self._childless,
+            self._null,
+            self._placement,
+            self._max_children,
+        )
 
     def __repr__(self) -> str:
         narrowed = "" if self._parents is None else f"parents={self._parents!r}, "
+        capped = "" if self._max_children is None else f", max_children={self._max_children!r}"
         return (
             f"FanOut({self._sizes!r}, {narrowed}childless={self._childless!r}, "
-            f"null={self._null!r}, placement={self._placement!r})"
+            f"null={self._null!r}, placement={self._placement!r}{capped})"
         )

@@ -319,12 +319,63 @@ def _sizes(
             f"is nowhere to put {rows} rows. Lower childless, or widen the size distribution."
         )
 
-    exact = [weight / total * rows for weight in weights]
+    exact = (
+        [weight / total * rows for weight in weights]
+        if fan_out.max_children is None
+        else _water_filled(weights, rows, fan_out.max_children, table, field)
+    )
     sizes = [int(value) for value in exact]
     remainder = rows - sum(sizes)
     # Hand the leftover rows to the parents with the largest fractional parts:
     # the ones that were closest to earning another row.
+    #
+    # Under a cap this never lifts a parent past it, and never gives a row to a
+    # childless one, with no filter needed. A capped parent's share is the cap
+    # exactly and a childless one's is 0.0, so both have no fractional part,
+    # while the leftover is the sum of the fractional parts, each below 1 -- so
+    # at least that many parents have one, and they sort first. An uncapped
+    # share is at most the cap, so one with a fractional part is below it.
     order = sorted(range(len(sizes)), key=lambda i: exact[i] - sizes[i], reverse=True)
     for index in order[:remainder]:
         sizes[index] += 1
     return sizes
+
+
+def _water_filled(weights: list[float], rows: int, cap: int, table: str, field: str) -> list[float]:
+    """Each parent's exact share of ``rows`` when no parent may exceed ``cap``.
+
+    Water-filling: the heaviest parent whose proportional share exceeds the cap
+    is fixed at it, the rows left are re-spread over the parents left by their
+    weights, and that repeats. Taking them heaviest first is what makes one pass
+    enough -- shares only grow as parents above them are fixed, and a parent
+    whose share fits does so with every lighter one fitting too, since a share
+    is proportional to its weight.
+
+    Refused rather than approximated when the parents that can hold rows cannot
+    hold them all. A childless parent has a weight of zero and holds nothing, so
+    the ceiling is the cap times the parents with a weight, not times the
+    parent table.
+    """
+    holding = [index for index, weight in enumerate(weights) if weight > 0]
+    if rows > cap * len(holding):
+        raise InvalidShape(
+            f"{table}.{field} declares max_children={cap}, and {len(holding)} of its "
+            f"{len(weights)} parents have a non-zero weight, so at most {cap * len(holding)} rows "
+            f"fit; it declares {rows}. Raise max_children, lower childless, or declare fewer rows."
+        )
+
+    exact = [0.0] * len(weights)
+    free_weight = sum(weights[index] for index in holding)
+    free_rows = rows
+    # Stable on ties, so equal weights are fixed in position order and the
+    # partition stays a function of the declaration.
+    heaviest_first = sorted(holding, key=lambda index: weights[index], reverse=True)
+    for count, index in enumerate(heaviest_first):
+        if weights[index] / free_weight * free_rows <= cap:
+            for rest in heaviest_first[count:]:
+                exact[rest] = weights[rest] / free_weight * free_rows
+            break
+        exact[index] = float(cap)
+        free_weight -= weights[index]
+        free_rows -= cap
+    return exact

@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections import Counter
 from contextlib import contextmanager
 from fractions import Fraction
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -371,3 +372,126 @@ def resolve_paired_keys(named: list[int], returned: list[int]) -> list[object]:
         connection=_Connection(returned),
     )
     return list(plan.parent_keys())
+
+
+def test_a_cap_bounds_every_parent_and_the_partition_still_covers_the_rows() -> None:
+    keys = list(range(1, 201))
+    uncapped = _resolve(keys, rows=2000).sizes()
+    capped = _resolve(keys, rows=2000, fan_out=FanOut(Zipf(1.2), max_children=20)).sizes()
+
+    # Sized so the cap binds: without it the head is far past twenty, so a cap
+    # that did nothing would fail the first assertion rather than pass it.
+    assert max(uncapped) > 40
+    assert max(capped) <= 20
+    assert sum(capped) == 2000
+
+
+def test_the_excess_goes_to_the_uncapped_parents_in_proportion() -> None:
+    # Water-filling rather than clipping: the rows a whale cannot take are
+    # re-spread over the rest by their weights, so the order of the tail is the
+    # order the distribution gave it, with the head flattened onto the cap.
+    keys = list(range(1, 101))
+    uncapped = _resolve(keys, rows=1000).sizes()
+    capped = _resolve(keys, rows=1000, fan_out=FanOut(Zipf(1.2), max_children=30)).sizes()
+
+    below = [index for index, size in enumerate(capped) if size < 30]
+    assert below
+    assert all(capped[index] >= uncapped[index] for index in below)
+
+
+def test_a_childless_parent_takes_none_of_the_excess() -> None:
+    # Or childless= would stop meaning what it says: the rows a capped head
+    # gives up go to parents with a weight, never to the ones declared empty.
+    keys = list(range(1, 101))
+    declared = FanOut(Zipf(1.2), childless=0.3)
+    childless = {
+        index
+        for index, size in enumerate(_resolve(keys, rows=100_000, fan_out=declared).sizes())
+        if size == 0
+    }
+    # Near the ceiling of what the cap allows, so the excess has to go far down
+    # the tail to fit.
+    parents_with_weight = len(keys) - len(childless)
+    rows = parents_with_weight * 10 - 3
+    capped = _resolve(
+        keys, rows=rows, fan_out=FanOut(Zipf(1.2), childless=0.3, max_children=10)
+    ).sizes()
+
+    assert childless
+    assert {index for index, size in enumerate(capped) if size == 0} == childless
+    assert max(capped) <= 10
+    assert sum(capped) == rows
+
+
+def test_a_world_that_fills_every_parent_to_the_cap_is_built() -> None:
+    # The boundary of the refusal below, held from this side: exactly as many
+    # rows as the cap allows is a world, and every parent is full.
+    capped = _resolve(list(range(1, 11)), rows=50, fan_out=FanOut(Zipf(1.2), max_children=5))
+
+    assert capped.sizes() == [5] * 10
+
+
+def test_rows_beyond_what_the_cap_allows_are_refused_with_the_arithmetic() -> None:
+    with pytest.raises(InvalidShape) as raised:
+        _resolve(list(range(1, 11)), rows=51, fan_out=FanOut(Zipf(1.2), max_children=5))
+
+    message = str(raised.value)
+    assert "max_children=5" in message
+    assert "at most 50" in message
+    assert "51" in message
+
+
+def test_the_refusal_counts_only_parents_with_a_weight() -> None:
+    # A childless parent can hold none of the rows, so the ceiling is the cap
+    # times the parents that can, not times the parent table.
+    keys = list(range(1, 101))
+    declared = FanOut(Zipf(1.2), childless=0.3, max_children=10)
+    with_weight = sum(
+        1
+        for size in _resolve(keys, rows=100_000, fan_out=FanOut(Zipf(1.2), childless=0.3)).sizes()
+        if size
+    )
+
+    _resolve(keys, rows=with_weight * 10, fan_out=declared)
+    with pytest.raises(InvalidShape, match=f"at most {with_weight * 10}"):
+        _resolve(keys, rows=with_weight * 10 + 1, fan_out=declared)
+
+
+def test_a_cap_that_never_binds_leaves_the_partition_as_it_was() -> None:
+    # The uncapped arithmetic is the capped arithmetic with nothing capped, so
+    # a cap above the largest share must not move a single row.
+    keys = list(range(100, 300))
+    uncapped = _resolve(keys, rows=5000).sizes()
+
+    assert _resolve(keys, rows=5000, fan_out=FanOut(Zipf(1.2), max_children=5000)).sizes() == (
+        uncapped
+    )
+
+
+def _busiest_share_cell(s: float, parents: int) -> str:
+    rows = 1_000_000
+    connection = _Connection(list(range(1, parents + 1)))
+    shares = sorted(
+        max(resolve_fan_out(FanOut(Zipf(s)), Company, rows, seed, "t", "f", connection).sizes())
+        / rows
+        for seed in range(20)
+    )
+    median = (shares[9] + shares[10]) / 2
+    return f"{median:.1%} ({shares[1]:.1%}-{shares[-2]:.1%})".replace("%-", "-")
+
+
+def test_the_relations_page_table_is_what_the_partition_draws() -> None:
+    # The table of s against the busiest parent's share is measured, not
+    # derived, so it is re-measured here: a change to the partition or to Zipf
+    # that moved it would otherwise leave readers choosing an exponent from
+    # numbers the code no longer produces.
+    page = (Path(__file__).resolve().parents[2] / "docs" / "relations.md").read_text()
+    rows = [line for line in page.splitlines() if line.startswith(("| 1.", "| 2.", "| 3."))]
+    assert len(rows) == 6
+
+    for line in rows:
+        cells = [cell.strip() for cell in line.strip("|").split("|")]
+        s = float(cells[0])
+        assert cells[1:] == [_busiest_share_cell(s, parents) for parents in (100, 1_000, 10_000)], (
+            line
+        )
