@@ -388,6 +388,21 @@ def test_a_cap_the_shrunk_parents_cannot_hold_is_the_world_changing() -> None:
 
 @pytest.mark.django_db(transaction=True)
 @_POSTGRES_ONLY
+def test_an_emptied_parent_table_is_the_world_changing_too() -> None:
+    # A transactional test truncating the tables a session world built is a
+    # cause the docstring names. The partition refuses an empty parent before
+    # the count comparison below it runs, so that refusal is the one turned
+    # into the world having moved.
+    shape = _capped()
+    build_shape(shape, require_statistics=False)
+    Company.objects.all().delete()
+
+    with pytest.raises(WorldChanged, match="holds 0 rows"):
+        fan_out_sizes(shape, Session, "company")
+
+
+@pytest.mark.django_db(transaction=True)
+@_POSTGRES_ONLY
 def test_a_cap_refused_over_the_parents_the_shape_declares_is_still_the_shape() -> None:
     # The parent table holds what the shape says, so the refusal is the
     # declaration's own and is not dressed up as a world that moved.

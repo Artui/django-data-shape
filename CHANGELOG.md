@@ -59,6 +59,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the primary key field, as the ORM prepares them.
 - **`Paired(parents=)` refuses a repeated key.** It had no repeat check at all,
   so a partner named twice was weighed twice without a word.
+- **`fan_out_sizes` raises `WorldChanged` for a parent table that was emptied
+  since the build.** A declared parent with no rows left was refused as
+  `InvalidShape` saying the parent has no rows, before the check that names a
+  moved world could run, so a transactional test truncating a session world --
+  a cause the docstring names -- was told its declaration was wrong. Any
+  refusal of the partition over a declared parent that no longer holds the
+  declared rows is now `WorldChanged`, with the refusal chained as its cause.
+  `WorldChanged` is not an `InvalidShape`, so a caller catching `InvalidShape`
+  for that case no longer catches it.
 
 ## [0.22.0] — 2026-10-07
 

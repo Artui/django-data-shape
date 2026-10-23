@@ -197,6 +197,7 @@ A `OneToOneField` is a fan-out whose partition never gives a parent two rows.
 The direct spelling is a cap of one, which holds whatever the sizes weigh:
 
 ```python
+# over a Table(User, rows=100): childless=0.3 leaves about seventy that can hold one
 Table(Profile, rows=50, user=FanOut(Zipf(), childless=0.3, max_children=1), headline=Constant("hi"))
 ```
 
