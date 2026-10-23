@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Documentation:** the statistics page says that anything writing to a built world leaves its
+  statistics stale and shows the `ANALYZE` to run, and how to declare a
+  placeholder for a column a later step fills.
+
 ### Changed
 
 - **`scaled_world` is annotated `-> Generator[int]` instead of
@@ -14,6 +20,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   annotated with `Iterator` is deprecated. Nothing changes at runtime, and a
   caller's annotation of the context manager it returns is unaffected. The
   protocol's docstring example and the type-level fixtures follow.
+
+### Fixed
+
+- **A key named in `parents=` as a string is the parent it spells.** The keys
+  read back from the parent table are the primary key's own type, so on
+  PostgreSQL a UUID named as the string it was loaded from JSON as found its
+  row and was then compared unequal to it, and the refusal said the row did not
+  exist -- pointing at a rollback rather than at the spelling. Each named key
+  now goes through the primary key field's `to_python` before it is compared,
+  for `FanOut(parents=)` and `Paired(parents=)` alike. A value the field cannot
+  read as a key is refused naming the table, the field and the value, where it
+  used to reach the driver.
+- **`parents=` narrows a UUID-keyed parent on SQLite.** The keys went to the
+  database as raw parameters, and SQLite has no binding for a UUID, so naming a
+  UUID-keyed parent failed there in every spelling. They are now prepared by
+  the primary key field, as the ORM prepares them.
+- **One row named twice in two spellings is refused as a repeat.** The
+  constructor's check compared what it was given, so a string and the UUID it
+  spells both passed it and that parent would have been weighed twice.
 
 ## [0.22.0] — 2026-10-07
 

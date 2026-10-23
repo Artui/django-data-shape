@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 import numbers
 from decimal import Decimal
-from typing import Any, cast
+from typing import Any
 
 from django.db.models import Model
 
@@ -13,7 +13,7 @@ from django_data_shape.declaration.invalid_shape import InvalidShape
 from django_data_shape.relations.fan_out_plan import FanOutPlan
 from django_data_shape.relations.paired import Paired
 from django_data_shape.relations.paired_plan import PairedPlan
-from django_data_shape.utils import draw, field_stream
+from django_data_shape.utils import draw, field_stream, named_keys
 
 # A band holds partners within this much of each other's weight, which is what
 # makes the band count derived from the declaration rather than chosen. The
@@ -52,9 +52,10 @@ def resolve_paired(
     is resolved, so this is the one structural refusal that has to wait for the
     build.
     """
-    keys = _read_partner_keys(partner, connection, paired.parents)
-    _require_every_named_partner(paired.parents, keys, partner, table, field)
-    keys = _in_declared_order(paired.parents, keys)
+    named = named_keys(paired.parents, partner, table, field)
+    keys = _read_partner_keys(partner, connection, named)
+    _require_every_named_partner(named, keys, partner, table, field)
+    keys = _in_declared_order(named, keys, partner)
     sizes = plan.sizes()
     if not keys and rows:
         raise InvalidShape(
@@ -114,7 +115,9 @@ def _read_partner_keys(
             f"SELECT {quote(pk_column)} FROM {quote(partner._meta.db_table)} "
             f"WHERE {quote(pk_column)} IN ({placeholders}) ORDER BY {quote(pk_column)}"
         )
-        params = tuple(named)
+        # Prepared by the key's own field, as the fan-out's narrowing is: SQLite
+        # has no binding for a UUID, so a raw one could not be narrowed there.
+        params = tuple(partner._meta.pk.get_db_prep_value(key, connection) for key in named)
     with connection.cursor() as cursor:
         cursor.execute(statement, params)
         return [row[0] for row in cursor.fetchall()]
@@ -141,7 +144,8 @@ def _require_every_named_partner(
     """
     if named is None:
         return
-    missing = [key for key in named if key not in set(keys)]
+    present = {partner._meta.pk.to_python(key) for key in keys}
+    missing = [key for key in named if key not in present]
     if not missing:
         return
     raise InvalidShape(
@@ -153,7 +157,9 @@ def _require_every_named_partner(
     )
 
 
-def _in_declared_order(named: tuple[object, ...] | None, keys: list[int]) -> list[int]:
+def _in_declared_order(
+    named: tuple[object, ...] | None, keys: list[int], partner: type[Model]
+) -> list[int]:
     """Put named partners back in the order the declaration named them.
 
     Weights below are assigned by *position*, and keys arrive ordered by primary
@@ -165,11 +171,13 @@ def _in_declared_order(named: tuple[object, ...] | None, keys: list[int]) -> lis
     """
     if named is None:
         return keys
-    present = set(keys)
-    # cast rather than a narrowing check: `named` holds whatever key type the
-    # partner's primary key is, and membership in `present` is what proves each
-    # one is a key this table actually read back.
-    return [cast("int", key) for key in named if key in present]
+    # Keyed by the field's own reading of each key read back, because the raw
+    # route hands back the database's spelling -- SQLite stores a UUID as hex
+    # -- while `named` holds the field's reading. The keys returned are the ones
+    # read back, which are what the loader writes.
+    to_python = partner._meta.pk.to_python
+    present = {to_python(key): key for key in keys}
+    return [present[key] for key in named if key in present]
 
 
 def _weights(paired: Paired, keys: list[int], seed: int, table: str, field: str) -> list[float]:

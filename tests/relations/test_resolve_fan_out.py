@@ -39,7 +39,17 @@ class _Connection:
         self._keys = keys
         self.last_sql = ""
         self.last_params: Any = None
-        self.ops = type("Ops", (), {"quote_name": staticmethod(lambda name: f'"{name}"')})()
+        self.ops = type(
+            "Ops",
+            (),
+            {
+                "quote_name": staticmethod(lambda name: f'"{name}"'),
+                # Both reached through the key field's get_db_prep_value, which
+                # is how a named key is sent; an integer key goes out unchanged.
+                "adapt_integerfield_value": staticmethod(lambda value, internal_type: value),
+                "validate_autopk_value": staticmethod(lambda value: value),
+            },
+        )()
 
     @contextmanager
     def cursor(self) -> Any:
@@ -222,6 +232,26 @@ def test_the_statement_asks_for_only_the_named_parents() -> None:
 
     assert "IN (%s, %s)" in connection.last_sql
     assert connection.last_params == [20, 40]
+
+
+def test_a_parent_named_in_another_spelling_of_its_key_is_that_parent() -> None:
+    # The keys come back as the primary key's own type, so a key named as a
+    # string -- read from JSON, passed between processes -- has to be read as
+    # that type too before it is compared, and before it is sent.
+    connection = _Connection([20, 40])
+
+    plan = resolve_fan_out(
+        FanOut(Constant(1), parents=["40", "20"]),
+        Company,
+        2,
+        seed=7,
+        table="t",
+        field="company",
+        connection=connection,
+    )
+
+    assert plan.parent_keys() == (40, 20)
+    assert connection.last_params == [40, 20]
 
 
 def test_a_named_parent_that_is_not_there_is_refused_by_key() -> None:

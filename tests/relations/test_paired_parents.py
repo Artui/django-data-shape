@@ -103,6 +103,44 @@ def test_a_named_partner_that_matches_no_row_is_refused_by_key(a_world: None) ->
         build(shape, require_statistics=False)
 
 
+def test_a_partner_named_by_its_string_is_that_partner(a_world: None) -> None:
+    # The same coercion a fan-out's parents= takes: the keys come back as the
+    # primary key's own type, so a string naming one is read as that type.
+    real = list(Person.objects.order_by("id").values_list("id", flat=True))[:4]
+
+    build(
+        Shape(
+            Table(
+                Membership,
+                rows=6,
+                company=FanOut(Uniform(1, 2, places=0)),
+                person=Paired("company", Zipf(), parents=[str(key) for key in real]),
+                role=Constant("member"),
+            )
+        ),
+        require_statistics=False,
+    )
+
+    assert set(Membership.objects.values_list("person_id", flat=True)) <= set(real)
+
+
+def test_one_partner_named_in_two_spellings_is_refused_as_a_repeat(a_world: None) -> None:
+    real = list(Person.objects.order_by("id").values_list("id", flat=True))[:2]
+
+    shape = Shape(
+        Table(
+            Membership,
+            rows=2,
+            company=FanOut(Constant(1)),
+            person=Paired("company", Zipf(), parents=[*real, str(real[0])]),
+            role=Constant("member"),
+        )
+    )
+
+    with pytest.raises(InvalidShape, match="more than once"):
+        build(shape, require_statistics=False)
+
+
 def test_a_subset_too_small_for_the_busiest_group_is_refused(a_world: None) -> None:
     """The constraint `Paired` already enforces, now over the narrowed set.
 
