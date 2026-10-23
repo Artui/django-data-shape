@@ -11,8 +11,19 @@ from __future__ import annotations
 
 import pytest
 
-from django_data_shape import Constant, FanOut, InvalidShape, Shape, Table, build
-from tests.testapp.models import Tenant, TenantRecord
+from django_data_shape import (
+    Constant,
+    Derived,
+    FanOut,
+    InvalidShape,
+    Paired,
+    Shape,
+    Table,
+    Uniform,
+    Zipf,
+    build,
+)
+from tests.testapp.models import Company, Tenant, TenantGrant, TenantRecord
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
@@ -105,3 +116,62 @@ def test_a_value_that_cannot_be_the_parents_key_is_refused_by_name() -> None:
     message = str(raised.value)
     assert "testapp_tenantrecord.tenant" in message
     assert "not a row" not in message
+
+
+def test_a_parent_named_by_its_string_carries_its_values_to_a_derivation() -> None:
+    # A parent-scoped derivation takes the other route to the parent table,
+    # through the ORM, and the narrowing has to reach it too: the named keys go
+    # to the queryset and the values come back beside the keys they belong to.
+    tenants = [Tenant.objects.create(name=f"t{index}") for index in range(3)]
+    named = [str(tenants[2].pk), str(tenants[0].pk)]
+
+    build(
+        Shape(
+            Table(
+                TenantRecord,
+                rows=20,
+                tenant=FanOut(Uniform(1, 2), parents=named),
+                label=Derived("tenant.name", compute=str, scope="parent"),
+            ),
+            seed=3,
+        ),
+        require_statistics=False,
+    )
+
+    records = list(TenantRecord.objects.select_related("tenant"))
+    assert {record.tenant_id for record in records} == {tenants[2].pk, tenants[0].pk}
+    assert all(record.label == record.tenant.name for record in records)
+
+
+def test_a_uuid_partner_named_by_its_string_is_that_partner() -> None:
+    """``Paired(parents=)`` over a UUID-keyed partner, on both backends.
+
+    The one test holding the edge table's three steps. On SQLite a UUID key is
+    sent as hex and read back as hex, so leaving out the preparation fails to
+    bind, leaving out the reading in the membership check refuses rows that
+    exist, and leaving it out of the reordering drops every partner. PostgreSQL
+    hands the key back as the UUID it was sent as, so there only the coercion
+    of the string is held.
+    """
+    Company.objects.create(name="c0")
+    Company.objects.create(name="c1")
+    tenants = [Tenant.objects.create(name=f"t{index}") for index in range(4)]
+    named = [str(tenant.pk) for tenant in tenants[1:]]
+
+    build(
+        Shape(
+            Table(
+                TenantGrant,
+                rows=4,
+                company=FanOut(Constant(1)),
+                tenant=Paired("company", Zipf(), parents=named),
+                role=Constant("r"),
+            )
+        ),
+        require_statistics=False,
+    )
+
+    assert TenantGrant.objects.count() == 4
+    assert set(TenantGrant.objects.values_list("tenant_id", flat=True)) <= {
+        tenant.pk for tenant in tenants[1:]
+    }

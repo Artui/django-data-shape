@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import numbers
 from typing import Any
 
 from django.core.exceptions import ValidationError
@@ -63,27 +64,62 @@ def named_keys(
     looking for a rollback. ``to_python`` is the field's own reading, the one a
     form or a URL converter applies to the same value.
 
-    The constructor's repeated-key refusal runs again here because it compared
-    what it was given: a string and the UUID it spells are not equal there, and
+    **A reading that names a different row is refused rather than taken.** An
+    integer key reads with ``int()``, which truncates, so ``1.5`` and
+    ``Decimal("1.9")`` would both become row 1, and ``True`` is an ``int`` equal
+    to 1. Each would build a world pointed at a row nobody named, so a number
+    read as a *different* number is refused, and a ``bool`` always is. Both
+    halves of that test are held: ``3.0`` reads as 3 and is accepted, and a
+    character key reads ``5`` as ``"5"``, a different value but not a different
+    row (``test_a_number_naming_a_character_key_is_that_key``).
+
+    **A repeated key is refused here for both relations.** ``FanOut``'s
+    constructor already refuses a key named twice in one spelling, but it
+    compares what it was given, so a string and the UUID it spells pass it and,
     once both are read as the key they are, that parent would weigh twice.
+    ``Paired`` has no constructor check at all, so this is the only one it has.
+
+    ``model._meta.pk`` rather than the concrete key field, because it is the
+    field every other step of the narrowing reads the key through; under
+    multi-table inheritance the two differ, and the refusal should name the one
+    the query uses.
 
     Shared because ``FanOut`` and ``Paired`` both take ``parents=``, and a
     refusal worded two ways is a refusal that will drift.
     """
     if named is None:
         return None
-    key_field = primary_key_field(model)
+    key_field = model._meta.pk
     keys: dict[object, object] = {}
     for spelling in named:
         try:
             key = key_field.to_python(spelling)
-        except ValidationError:
+        # ValidationError is Django's contract for to_python; the other two are
+        # what a field breaking it raises, caught for the reason scaled_world
+        # catches them.
+        except (ValidationError, ValueError, TypeError):
             raise InvalidShape(
                 f"{table}.{field} names {spelling!r} in parents=, which cannot be a key of "
                 f"{model.__name__}: its primary key {key_field.name} is a "
                 f"{type(key_field).__name__}. Name the row by its primary key."
             ) from None
+        if isinstance(spelling, bool) or (
+            isinstance(spelling, numbers.Number)
+            and isinstance(key, numbers.Number)
+            and key != spelling
+        ):
+            raise InvalidShape(
+                f"{table}.{field} names {spelling!r} in parents=, which {model.__name__}'s "
+                f"primary key reads as {key!r}: a different row from the one written. Name the "
+                "row by its primary key."
+            )
         if key in keys:
+            if keys[key] == spelling:
+                raise InvalidShape(
+                    f"{table}.{field} names {model.__name__} {key!r} twice in parents=. A "
+                    "repeated key weighs that row twice, which is a different partition from "
+                    "the one this declaration reads as."
+                )
             raise InvalidShape(
                 f"{table}.{field} names {model.__name__} {key!r} more than once in parents=, as "
                 f"{keys[key]!r} and as {spelling!r}. Both spell the same row, and a repeated key "

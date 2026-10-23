@@ -36,9 +36,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   database as raw parameters, and SQLite has no binding for a UUID, so naming a
   UUID-keyed parent failed there in every spelling. They are now prepared by
   the primary key field, as the ORM prepares them.
-- **One row named twice in two spellings is refused as a repeat.** The
-  constructor's check compared what it was given, so a string and the UUID it
-  spells both passed it and that parent would have been weighed twice.
+- **One row named twice in two spellings is refused as a repeat.** `FanOut`'s
+  constructor compared what it was given, so a string and the UUID it spells
+  both passed it and that parent would have been weighed twice.
+- **`Paired(parents=)` refuses a repeated key in any spelling.** It had no
+  repeat check at all, so a partner named twice was weighed twice without a
+  word.
+- **A number the primary key would read as a different row is refused.** An
+  integer key reads with `int()`, which truncates, so `1.5` or
+  `Decimal("1.9")` in `parents=` would have named row 1, and `True` is equal to
+  1. An integral float such as `3.0` is still the row it spells.
+- **A key field whose `to_python` raises `ValueError` or `TypeError`** rather
+  than Django's `ValidationError` is refused by name like any other unreadable
+  key, instead of escaping as the field's own exception.
 
 ## [0.22.0] — 2026-10-07
 

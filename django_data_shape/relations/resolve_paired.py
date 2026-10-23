@@ -117,6 +117,7 @@ def _read_partner_keys(
         )
         # Prepared by the key's own field, as the fan-out's narrowing is: SQLite
         # has no binding for a UUID, so a raw one could not be narrowed there.
+        # Held on SQLite only, by test_a_uuid_partner_named_by_its_string_is_that_partner.
         params = tuple(partner._meta.pk.get_db_prep_value(key, connection) for key in named)
     with connection.cursor() as cursor:
         cursor.execute(statement, params)
@@ -144,6 +145,8 @@ def _require_every_named_partner(
     """
     if named is None:
         return
+    # Held on SQLite only, by test_a_uuid_partner_named_by_its_string_is_that_partner:
+    # PostgreSQL hands a UUID back as the UUID it was sent as.
     present = {partner._meta.pk.to_python(key) for key in keys}
     missing = [key for key in named if key not in present]
     if not missing:
@@ -175,6 +178,7 @@ def _in_declared_order(
     # route hands back the database's spelling -- SQLite stores a UUID as hex
     # -- while `named` holds the field's reading. The keys returned are the ones
     # read back, which are what the loader writes.
+    # Held on SQLite only, by test_a_uuid_partner_named_by_its_string_is_that_partner.
     to_python = partner._meta.pk.to_python
     present = {to_python(key): key for key in keys}
     return [present[key] for key in named if key in present]

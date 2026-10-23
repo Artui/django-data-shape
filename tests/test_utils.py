@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from decimal import Decimal
 from typing import Any, cast
 
 import pytest
@@ -14,10 +15,11 @@ from django_data_shape.utils import (
     draw,
     field_stream,
     has_db_default,
+    named_keys,
     offsettable_kind,
     primary_key_field,
 )
-from tests.testapp.models import Company
+from tests.testapp.models import Company, SlugPk, StrictCode
 
 
 def test_a_draw_is_uniform_in_the_unit_interval() -> None:
@@ -180,3 +182,42 @@ def test_a_column_with_no_opinion_declines_to_judge(field: models.Field) -> None
     safe direction. A custom field that adds cleanly to an offset is a
     legitimate declaration, and refusing it would cost a working shape."""
     assert offsettable_kind(field) is None
+
+
+@pytest.mark.parametrize("spelling", [1.5, Decimal("1.9"), True])
+def test_a_number_the_key_would_read_as_another_row_is_refused(spelling: object) -> None:
+    # An integer key's to_python is int(), which truncates: 1.5 and
+    # Decimal("1.9") would both be read as row 1, and True is an int that equals
+    # 1. Each would build a world pointed at a row nobody named, where before
+    # the reading they were refused as not a row.
+    with pytest.raises(InvalidShape, match="reads as 1") as raised:
+        named_keys((spelling,), Company, "t", "f")
+
+    assert repr(spelling) in str(raised.value)
+
+
+def test_a_number_the_key_reads_unchanged_is_that_key() -> None:
+    # Holds the comparison in the refusal above: an integral float is the row
+    # it spells, so refusing every float would refuse a key that is right.
+    assert named_keys((3.0,), Company, "t", "f") == (3,)
+
+
+def test_a_number_naming_a_character_key_is_that_key() -> None:
+    # Holds the other conjunct: a character key reads 5 as "5", which is a
+    # different value but no different row, so only a number read as another
+    # number is a truncation.
+    assert named_keys((5,), SlugPk, "t", "f") == ("5",)
+
+
+def test_a_field_refusing_with_a_plain_exception_is_refused_by_name() -> None:
+    # Django's contract for to_python is a ValidationError, and a third-party
+    # field does not always keep it; scaled_world catches the same three.
+    with pytest.raises(InvalidShape, match="'bad'") as raised:
+        named_keys(("bad",), StrictCode, "testapp_remark", "code")
+
+    assert "testapp_remark.code" in str(raised.value)
+
+
+def test_the_same_spelling_twice_is_named_as_a_repeat() -> None:
+    with pytest.raises(InvalidShape, match="names Company 4 twice"):
+        named_keys((4, 4), Company, "t", "f")

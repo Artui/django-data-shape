@@ -114,6 +114,9 @@ def _in_declared_order(
     # the model declares, and the UUID case is exactly the one this function
     # exists for. Widening it everywhere is a change of its own; narrowing here
     # would be a lie that type-checks.
+    # Held only where the raw spelling differs, which is SQLite, by
+    # test_a_uuid_parent_named_as_itself_is_that_parent: PostgreSQL hands a UUID
+    # back as the UUID it was sent as.
     to_python = parent._meta.pk.to_python
     position: dict[object, int] = {to_python(key): index for index, key in enumerate(keys)}
     order = [position[key] for key in named]
@@ -156,6 +159,7 @@ def _require_every_named_parent(
     """
     if named is None:
         return
+    # Held on SQLite only, by the same test as the reordering: see there.
     present = {parent._meta.pk.to_python(key) for key in keys}
     missing = [key for key in named if key not in present]
     if not missing:
@@ -219,7 +223,8 @@ def _read_parents(
         )
         # Prepared by the key's own field, as the ORM would: a raw parameter
         # skips that, and SQLite has no binding for a UUID at all, so a UUID
-        # key named here could not be narrowed on that backend.
+        # key named here could not be narrowed on that backend. Held on SQLite
+        # only, by test_a_uuid_parent_named_as_itself_is_that_parent.
         params = (
             None
             if named is None

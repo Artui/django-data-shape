@@ -742,6 +742,20 @@ class Membership(models.Model):
         ]
 
 
+class TenantGrant(models.Model):
+    """An edge table whose partner is keyed by UUID.
+
+    ``Membership`` pairs over ``Person``, whose integer key reads the same in
+    every spelling and comes back from the database as it went in, so a
+    narrowing that skipped preparing or reading back a key passed over it. A
+    UUID partner is where those two steps decide anything.
+    """
+
+    company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name="+")
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="+")
+    role = models.CharField(max_length=20)
+
+
 class Timestamped(models.Model):
     """An abstract base, whose column belongs to whoever inherits it.
 
