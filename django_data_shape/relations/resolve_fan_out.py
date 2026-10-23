@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import numbers
 from decimal import Decimal
 from typing import Any, cast
@@ -310,9 +311,30 @@ def _sizes(
                 "float, Decimal and Fraction all work, and the weights are normalised so their "
                 "scale does not matter."
             )
-        weights.append(float(weight))
+        # A weight is a share of the rows, so one below zero takes rows away
+        # from the others and an infinite one leaves nothing to divide by. Both
+        # used to reach the arithmetic: a negative size gave partitions whose
+        # sizes did not add up to the rows, or were themselves negative, and
+        # under max_children the water-filling ran past its last parent.
+        value = float(weight)
+        if value < 0 or not math.isfinite(value):
+            raise InvalidShape(
+                f"{table}.{field} needs fan-out sizes of zero or more, finite, but "
+                f"{fan_out.sizes!r} produced {weight!r}. A fan-out size weighs how many "
+                "children a parent gets, so it cannot be negative or infinite; childless= is "
+                "how a parent with none is asked for."
+            )
+        weights.append(value)
 
     total = sum(weights)
+    # Finite weights can still add up past what a float holds, and then every
+    # share is zero and the rows go wherever the rounding puts them.
+    if not math.isfinite(total):
+        raise InvalidShape(
+            f"{table}.{field} draws fan-out sizes from {fan_out.sizes!r} whose sum over "
+            f"{len(keys)} parents is too large to divide by. The sizes are normalised, so "
+            "their scale does not matter: declare the same distribution with smaller numbers."
+        )
     if total <= 0:
         raise InvalidShape(
             f"{table}.{field} gives all {len(keys)} of its parents a weight of zero, so there "

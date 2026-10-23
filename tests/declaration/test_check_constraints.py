@@ -402,6 +402,23 @@ def test_a_cap_of_one_is_a_proof_whatever_the_sizes() -> None:
     )
 
 
+def test_a_cap_of_one_keeps_a_pair_unique_beside_a_second_fan_out() -> None:
+    # The composite-unique call site: two fan-outs on one through table are
+    # refused unless one of them provably gives no parent two rows, and a cap
+    # of one is that proof whatever the other fan-out does.
+    Shape(
+        _companies(100),
+        Table(Person, rows=10, name=Constant("p")),
+        Table(
+            Membership,
+            rows=60,
+            company=FanOut(Zipf(), childless=0.3, max_children=1),
+            person=FanOut(Zipf(2.0)),
+            role=Constant("member"),
+        ),
+    )
+
+
 def test_a_cap_of_two_is_not() -> None:
     # The proof is a cap of exactly one; two rows on one parent is all a
     # collision needs.

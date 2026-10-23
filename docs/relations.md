@@ -471,6 +471,9 @@ filled first is decided by the declarations and needs no connection to answer.
 - A `FanOut` whose `max_children=` cannot hold its rows: more rows than the cap
   times the parents with a weight. A childless parent holds none, so it does
   not count toward the ceiling.
+- A `FanOut` whose sizes draw a **negative or non-finite** number, or finite
+  numbers whose sum is too large for a float. A size weighs a parent's share of
+  the rows; `childless=` is how a parent with none is asked for.
 - A **self-referential** `FanOut`. It would read keys from a table still empty at
   load time; self-referential trees are their own feature.
 - A required relation **left undeclared**, which would fail the load on a

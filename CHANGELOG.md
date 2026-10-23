@@ -59,6 +59,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the primary key field, as the ORM prepares them.
 - **`Paired(parents=)` refuses a repeated key.** It had no repeat check at all,
   so a partner named twice was weighed twice without a word.
+- **A negative or non-finite fan-out size is refused.** Nothing checked the
+  sign, so `Uniform(-2, 10)` or a `Skew` with a negative key built a partition
+  whose sizes were negative or did not add up to the rows, and an infinite size,
+  or finite sizes summing past a float, gave rows to childless parents or
+  failed inside the arithmetic. Each is now refused naming the table and field.
 - **`fan_out_sizes` raises `WorldChanged` for a parent table that was emptied
   since the build.** A declared parent with no rows left was refused as
   `InvalidShape` saying the parent has no rows, before the check that names a

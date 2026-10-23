@@ -309,6 +309,30 @@ def test_a_size_that_is_not_a_number_is_still_refused_and_now_names_the_remedy()
     assert "a count" in message
 
 
+@pytest.mark.parametrize(
+    "sizes",
+    [Skew({-1: 3, 5: 1}), Constant(-1), Constant(float("inf")), Constant(float("nan"))],
+)
+@pytest.mark.parametrize("max_children", [None, 3])
+def test_a_negative_or_infinite_size_is_refused_and_names_the_field(
+    sizes: Any, max_children: int | None
+) -> None:
+    # Uncapped, a negative weight gave sizes that did not add up to the rows;
+    # capped, the water-filling ran past its last parent with an IndexError.
+    with pytest.raises(InvalidShape, match="zero or more, finite") as raised:
+        _resolve(list(range(1, 11)), rows=5, fan_out=FanOut(sizes, max_children=max_children))
+
+    assert "testapp_session.company" in str(raised.value)
+
+
+def test_sizes_whose_sum_overflows_are_refused() -> None:
+    # Each weight is finite and their sum is not, so every share would be zero
+    # and the rows would go wherever the rounding put them, childless parents
+    # included.
+    with pytest.raises(InvalidShape, match="too large to divide by"):
+        _resolve(list(range(1, 31)), rows=100, fan_out=FanOut(Constant(1e308)))
+
+
 def test_a_boolean_size_is_refused_rather_than_counted_as_one() -> None:
     # bool is an int and is numbers.Real, so widening has to keep excluding it:
     # a distribution handing back True has almost certainly been written for a

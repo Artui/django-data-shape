@@ -15,6 +15,7 @@ from django_data_shape import (
     InvalidShape,
     Projection,
     Shape,
+    Skew,
     Table,
     WorldChanged,
     Zipf,
@@ -30,7 +31,9 @@ from tests.testapp.models import (
     EventSession,
     OptionalChild,
     Session,
+    Supply,
     TemplateSession,
+    Vendor,
 )
 
 _POSTGRES_ONLY = pytest.mark.skipif(
@@ -429,3 +432,27 @@ def test_a_cap_refused_over_parents_built_elsewhere_is_the_shape() -> None:
 
     with pytest.raises(InvalidShape, match="at most 50 rows fit"):
         fan_out_sizes(shape, Session, "company")
+
+
+@pytest.mark.django_db(transaction=True)
+@_POSTGRES_ONLY
+def test_the_moved_world_counts_the_parents_a_default_manager_hides() -> None:
+    # The partition reads every parent row, so the count it is compared with
+    # has to as well: Vendor's default manager hides the retired ones, and
+    # counting through it would report a number the partition never saw.
+    shape = Shape(
+        Table(Vendor, rows=10, name=Constant("v"), retired=Skew({True: 1, False: 1})),
+        Table(
+            Supply,
+            rows=50,
+            vendor=FanOut(Zipf(1.2), max_children=5),
+            vendor_name=Constant("v"),
+        ),
+        seed=5,
+    )
+    build_shape(shape, require_statistics=False)
+    assert Vendor.objects.count() < 9
+    Vendor._base_manager.filter(pk=Vendor._base_manager.order_by("pk").values("pk")[:1]).delete()
+
+    with pytest.raises(WorldChanged, match="holds 9 rows"):
+        fan_out_sizes(shape, Supply, "vendor")
