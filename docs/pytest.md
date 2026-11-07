@@ -1,11 +1,11 @@
 # From pytest
 
-Two fixtures and one protocol. They live in `django_data_shape.fixtures` rather
+Three fixtures and one protocol. They live in `django_data_shape.fixtures` rather
 than at the top level, because importing them is what requires pytest and the
 rest of the package does not:
 
 ```python
-from django_data_shape.fixtures import scale_fixture, shape_fixture
+from django_data_shape.fixtures import scale_fixture, shape_fixture, template_fixture
 ```
 
 `pip install 'django-data-shape[pytest]'` pulls pytest and pytest-django in. It
@@ -216,6 +216,75 @@ and the only mechanism that could — intercepting writes to a model some shape
 owns — is a per-row hook, which is the one thing this library refuses to have at
 all. Where a collision *is* an error the message says so, which is the refusal in
 the section above.
+
+## A world the application finished
+
+`shape_fixture` builds into the test database, so it can only hand a test what a
+declaration describes. A world whose columns your own code fills -- a replay
+that computes running totals, say -- is a
+[derived template](statistics.md#a-world-the-application-finishes), and
+`template_fixture` is how a test reaches one: it makes the test database a clone
+of the template, once per session.
+
+```python
+# conftest.py
+import pytest
+
+from django_data_shape import derive_template, template_database
+from django_data_shape.fixtures import template_fixture
+
+from myapp.replay import replay_draws
+from myapp.tests.shapes import SHAPE
+
+
+def finished_world(using: str) -> str:
+    template = template_database(SHAPE, using=using)
+    return derive_template(template, replay_draws, key="replay-draws-3", using=using)
+
+
+world = template_fixture(finished_world)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _finished(world):
+    """The finished world under every test, not only the ones that ask for it."""
+```
+
+It takes a callable rather than a shape, because the template is made by the
+functions that already make templates: a `base=`, a chain of derived templates
+or none at all is written with them, and the fixture only asks for the name. The
+callable is handed the connection alias and called once per session and xdist
+worker; the template is built and the step run the first time on a machine, and
+found every time after, so what a session pays is the clone.
+
+The fixture yields the template's name. Like `shape_fixture` it is
+session-scoped and requests `django_db_setup` rather than replacing it:
+pytest-django makes the test database first, under whatever name it gives it --
+the xdist worker's suffix included -- and the fixture then drops that database
+and clones the template in its place, under the same name. pytest-django's
+teardown drops the clone as it would have dropped its own, and each test's
+transaction wraps the clone as it would any test database.
+
+### What replacing the database means
+
+- **The world appears when the fixture is first made.** A test that ran before
+  saw the empty database pytest-django made, and every test after sees this
+  world. The autouse fixture above makes it the database of every test; without
+  it, which tests see the world depends on the order they run in.
+- **It replaces whatever was there**, a `shape_fixture` world on the same
+  database included. Put that shape into the template instead.
+- **The database pytest-django made is thrown away**, along with the
+  migrations it ran. `--reuse-db` keeps that database between runs so they run
+  once. Where the migrations are what is slow, override `django_db_setup`
+  yourself, as [the statistics page](statistics.md#from-pytest) shows, and clone
+  `finished_world("default")` there instead: nothing is made only to be dropped.
+- **`django_db(transaction=True)` truncates every table** at teardown and takes
+  the world with it, as it does a session world. `serialized_rollback=True` does
+  not help here: pytest-django serializes the database `django_db_setup` made,
+  before the fixture replaces it, so it restores an empty one. Keep
+  transactional tests off the world's tables.
+
+Off PostgreSQL the fixture skips with the reason, as `shape_fixture` does.
 
 ## Growth: the same world at several sizes
 
@@ -470,7 +539,7 @@ since it is one of this package's own types.
 
 ## On SQLite
 
-**Growth works. Plans do not.** Which of the two fixtures you asked for is what
+**Growth works. Plans do not.** Which fixture you asked for is what
 decides, and the split is the package's own line drawn where it belongs:
 generation and cardinality are backend-neutral, planner realism is not.
 
@@ -487,7 +556,8 @@ The cost is not what makes the decision either way. Measured on SQLite, the
 insert is about 1.6 ms per thousand rows against 8 ms to generate them, so at the
 scales a growth assertion runs at the load is not what you are paying for.
 
-`shape_fixture` skips, with the refusal as the stated reason:
+`shape_fixture` skips, with the refusal as the stated reason, and so does
+`template_fixture`, since there is no template to clone:
 
 ```text
 SKIPPED [1] test_orders.py:14: Building a shape for the test session needs
@@ -496,8 +566,8 @@ backend-neutral, but COPY loading and planner statistics are not, and a shaped
 database whose plans mean nothing is worse than no shaped database at all.
 ```
 
-That is the fixture whose job is to be big and to be believed by a planner, and
-that world cannot exist here. A skip is the honest degradation: a test that never
+Those are the fixtures whose job is to be big and to be believed by a planner,
+and that world cannot exist here. A skip is the honest degradation: a test that never
 ran says so, while a test that ran against a database nobody shaped passes and
 means nothing. If you are writing your own fixture over a shaped database --
 anything that asserts on a *plan* -- `skip_unless_postgres` is the same behaviour

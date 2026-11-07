@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import re
 from collections.abc import Iterable, Mapping
 from typing import Any
 
@@ -21,19 +20,16 @@ from django_data_shape.databases.shape_digest import shape_digest
 from django_data_shape.databases.unusable_base import UnusableBase
 from django_data_shape.declaration.shape import Shape
 from django_data_shape.loading.build import build
+from django_data_shape.utils import (
+    PARTIAL_SUFFIX,
+    TEMPLATE_KEY_BYTES,
+    TEMPLATE_PREFIX,
+    absorb,
+    is_generated_template,
+    pointed_at,
+    template_lock_id,
+)
 from django_data_shape.version import __version__
-
-# Every template this package makes starts with this, so a machine's caches can
-# be listed and dropped as a group. The rest of the name is a digest and nothing
-# else -- a readable name would have to come from somewhere, and the only
-# candidate is the declaration, which is exactly what the digest already is.
-PREFIX = "data_shape_"
-
-# The name a template is built under, and renamed away from once it is complete.
-# Existence of the final name is therefore the same claim as "this is finished",
-# which is what lets the check below be one row from ``pg_database`` rather than
-# a marker inside a database nothing is allowed to connect to.
-_PARTIAL = "__partial"
 
 _FORMAT = "django-data-shape template 1"
 
@@ -41,19 +37,6 @@ _FORMAT = "django-data-shape template 1"
 # which app and roughly how far, without pasting a whole history into a
 # traceback when a base is dozens of migrations out.
 _EXAMPLES = 3
-
-# 8 bytes: sixteen hexadecimal characters, so the longest name this produces --
-# prefix, digest and the partial suffix -- is 36 of PostgreSQL's 63.
-_KEY_BYTES = 8
-
-# A name this package generated, built from the three parts every such name is
-# built from -- the prefix, the key's hexadecimal digest at its fixed length, and
-# the partial suffix or nothing -- so that refusing a template as a base refuses
-# exactly those. The prefix alone would also refuse a user's own
-# ``data_shape_userdb``, with a message calling it something this package made.
-_GENERATED = re.compile(
-    rf"{re.escape(PREFIX)}[0-9a-f]{{{_KEY_BYTES * 2}}}(?:{re.escape(_PARTIAL)})?"
-)
 
 # Which of the tables a copy rebuilds the current role may not drop, and who
 # owns each. PostgreSQL lets a table be dropped by its owner, by the owner of its
@@ -263,7 +246,7 @@ def template_database(
     # look for until it has been read, and refusing a stale base costs one
     # catalogue row and one migration-table read.
     context = _context() if base is None else (*_context(), *_base_context(connection, base))
-    name = f"{PREFIX}{_key(shape, context)}"
+    name = f"{TEMPLATE_PREFIX}{_key(shape, context)}"
     quote = connection.ops.quote_name
     # A connection that is not attached to any of the databases about to be
     # created, renamed or dropped, and an autocommit one: CREATE DATABASE and
@@ -274,13 +257,13 @@ def template_database(
         # only way the check means anything: two workers that both read "not
         # there" would both build, and the second would fail on a name the first
         # had just taken.
-        cursor.execute("SELECT pg_advisory_lock(%s)", [_lock_id(name)])
+        cursor.execute("SELECT pg_advisory_lock(%s)", [template_lock_id(name)])
         try:
             cursor.execute("SELECT 1 FROM pg_database WHERE datname = %s", [name])
             if cursor.fetchone() is None:
                 _create(shape, connection, cursor, name, using, quote, base)
         finally:
-            cursor.execute("SELECT pg_advisory_unlock(%s)", [_lock_id(name)])
+            cursor.execute("SELECT pg_advisory_unlock(%s)", [template_lock_id(name)])
     return name
 
 
@@ -313,7 +296,7 @@ def _create(
     test database -- is :func:`~django_data_shape.databases.clone_database.clone_database`'s,
     which already defaults to ``file_copy``.
     """
-    partial = f"{name}{_PARTIAL}"
+    partial = f"{name}{PARTIAL_SUFFIX}"
     # A partial can survive a process killed between the two statements below,
     # and it is never a finished template, so it is always safe to replace.
     cursor.execute(f"DROP DATABASE IF EXISTS {quote(partial)}")
@@ -341,34 +324,19 @@ def _fill(shape: Shape, connection: Any, database: str, using: str, base: str | 
     not carry over. ``migrate`` is run either way, because it is also what
     fires ``post_migrate``.
 
-    Pointing an existing connection at another database by rewriting
-    ``settings_dict["NAME"]`` is what Django's own test runner does to create a
-    test database, and it is used here for the same reason: ``migrate`` and this
-    package's loader both work through a connection alias, and inventing a
-    second alias would mean editing ``settings.DATABASES`` -- which is the same
-    mutation with more moving parts. Django hands the wrapper the very dictionary
-    from ``settings.DATABASES``, so one assignment moves both views of it.
+    The connection is pointed at ``database`` by
+    :func:`~django_data_shape.utils.pointed_at`, which says why that is a
+    rewrite of ``settings_dict["NAME"]`` rather than a second alias, and closes
+    it again before the template is renamed.
 
     ``run_syncdb`` because an app with no migrations has no other way in, and
     those are exactly the apps a project is most likely to have forgotten about.
-
-    The restore is in a ``finally`` because the alternative is a process left
-    pointing at a database that is about to be dropped.
     """
-    original = connection.settings_dict["NAME"]
-    connection.close()
-    connection.settings_dict["NAME"] = database
-    try:
+    with pointed_at(connection, database):
         if base is not None:
             _drop_unmigrated_tables(connection, base)
         call_command("migrate", database=using, run_syncdb=True, interactive=False, verbosity=0)
         build(shape, using=using)
-    finally:
-        # Closed before the name goes back, so the connection to the template is
-        # gone: PostgreSQL refuses to rename or copy a database anything is
-        # attached to, and this is the process most likely to be attached.
-        connection.close()
-        connection.settings_dict["NAME"] = original
 
 
 def _drop_unmigrated_tables(connection: Any, base: str) -> None:
@@ -502,7 +470,7 @@ def _base_context(connection: Any, base: str) -> tuple[str, str]:
             "Create and migrate it, or pass base=None to build the template from an empty "
             "database."
         )
-    if _GENERATED.fullmatch(base):
+    if is_generated_template(base):
         raise UnusableBase(
             f"The base database {base!r} is a template this package made, and a template is "
             "never a base: it holds a shape's rows under a name keyed for that shape. Pass the "
@@ -577,16 +545,14 @@ def _refuse_history(connection: Any, base: str) -> None:
     squashes.
 
     The connection is pointed at the base the way :func:`_fill` points it at a
-    partial, and closed before the name goes back, which is also what lets the
+    partial, by :func:`~django_data_shape.utils.pointed_at`, and closed before
+    the name goes back, which is also what lets the
     base be copied straight afterwards: PostgreSQL refuses to copy a database
     anything is attached to, and nothing between here and the copy opens this
     connection again. Safe to close because ``template_database`` has already
     refused to run inside an atomic block.
     """
-    original = connection.settings_dict["NAME"]
-    connection.close()
-    connection.settings_dict["NAME"] = base
-    try:
+    with pointed_at(connection, base):
         loader = MigrationLoader(connection)
         recorded = {app_label for app_label, _name in loader.applied_migrations}
         # An empty migrations package makes an app migrated, which takes it out
@@ -628,9 +594,6 @@ def _refuse_history(connection: Any, base: str) -> None:
             graph=loader.graph.nodes,
             replacements={key: squash.replaces for key, squash in loader.replacements.items()},
         )
-    finally:
-        connection.close()
-        connection.settings_dict["NAME"] = original
     if unrecorded:
         tables = sorted(table for app_tables in unrecorded.values() for table in app_tables)
         raise UnusableBase(
@@ -920,11 +883,11 @@ def _key(shape: Shape, context: tuple[str, ...]) -> str:
     depending on the schema, the settings or the package version would still
     look exactly like this one from the outside.
     """
-    hasher = hashlib.blake2b(digest_size=_KEY_BYTES)
-    _absorb(hasher, _FORMAT)
-    _absorb(hasher, shape_digest(shape))
+    hasher = hashlib.blake2b(digest_size=TEMPLATE_KEY_BYTES)
+    absorb(hasher, _FORMAT)
+    absorb(hasher, shape_digest(shape))
     for part in context:
-        _absorb(hasher, part)
+        absorb(hasher, part)
     return hasher.hexdigest()
 
 
@@ -962,32 +925,11 @@ def _schema_digest(models: tuple[Any, ...], migrations: tuple[tuple[str, str], .
     only be checked against the world, and this one has to be checked against
     two worlds that differ.
     """
-    hasher = hashlib.blake2b(digest_size=_KEY_BYTES)
+    hasher = hashlib.blake2b(digest_size=TEMPLATE_KEY_BYTES)
     for app_label, migration in sorted(migrations):
-        _absorb(hasher, f"{app_label}.{migration}")
+        absorb(hasher, f"{app_label}.{migration}")
     for model in sorted(models, key=lambda model: str(model._meta.label)):
-        _absorb(hasher, f"{model._meta.label}.{model._meta.db_table}")
+        absorb(hasher, f"{model._meta.label}.{model._meta.db_table}")
         for field in model._meta.concrete_fields:
-            _absorb(hasher, f"{field.name}|{field.column}|{field.get_internal_type()}|{field.null}")
+            absorb(hasher, f"{field.name}|{field.column}|{field.get_internal_type()}|{field.null}")
     return hasher.hexdigest()
-
-
-def _absorb(hasher: hashlib.blake2b, part: str) -> None:
-    """One string, length-prefixed so two parts cannot run together into a third."""
-    encoded = part.encode()
-    hasher.update(len(encoded).to_bytes(8, "big"))
-    hasher.update(encoded)
-
-
-def _lock_id(name: str) -> int:
-    """A signed 64-bit advisory lock id, which is the only shape PostgreSQL takes.
-
-    Derived from the template's name rather than from a constant, so two shapes
-    being cached at the same moment do not wait on each other. Advisory locks
-    share one namespace across the whole cluster, which is why the name rather
-    than the digest alone goes in: another package's lock on the same number
-    would block this one for reasons nobody could trace.
-    """
-    return int.from_bytes(
-        hashlib.blake2b(name.encode(), digest_size=8).digest(), "big", signed=True
-    )

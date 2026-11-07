@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import hashlib
 import numbers
+import re
+from collections.abc import Generator
+from contextlib import contextmanager
 from typing import Any
 
 from django.core.exceptions import ValidationError
@@ -25,6 +28,27 @@ from django_data_shape.declaration.invalid_shape import InvalidShape
 
 _MASK64 = (1 << 64) - 1
 _GOLDEN = 0x9E3779B97F4A7C15
+
+# Every template this package makes starts with this, so a machine's caches can
+# be listed and dropped as a group. The rest of the name is a digest and nothing
+# else -- a readable name would have to come from somewhere, and the only
+# candidate is the declaration, which is exactly what the digest already is.
+TEMPLATE_PREFIX = "data_shape_"
+
+# The name a template is built under, and renamed away from once it is complete.
+# Existence of the final name is therefore the same claim as "this is finished",
+# which is what lets a cache check be one row from ``pg_database`` rather than a
+# marker inside a database nothing is allowed to connect to.
+PARTIAL_SUFFIX = "__partial"
+
+# 8 bytes: sixteen hexadecimal characters, so the longest name a template gets --
+# prefix, digest and the partial suffix -- is 36 of PostgreSQL's 63.
+TEMPLATE_KEY_BYTES = 8
+
+# A finished template this package made, built and derived alike: the prefix and
+# the key's hexadecimal digest at its fixed length. The prefix alone would also
+# match a user's own ``data_shape_userdb``.
+FINISHED_TEMPLATE = re.compile(rf"{re.escape(TEMPLATE_PREFIX)}[0-9a-f]{{{TEMPLATE_KEY_BYTES * 2}}}")
 
 
 def primary_key_field(model: type[Model]) -> Field[Any, Any]:
@@ -342,3 +366,59 @@ def reset_sequence(connection: Any, model: type[Model]) -> None:
     with connection.cursor() as cursor:
         for statement in connection.ops.sequence_reset_sql(no_style(), [model]):
             cursor.execute(statement)
+
+
+def is_generated_template(name: str) -> bool:
+    """Whether ``name`` is one this package generates for a template, finished or partial."""
+    return FINISHED_TEMPLATE.fullmatch(name.removesuffix(PARTIAL_SUFFIX)) is not None
+
+
+def absorb(hasher: hashlib.blake2b, part: str) -> None:
+    """One string, length-prefixed so two parts cannot run together into a third."""
+    encoded = part.encode()
+    hasher.update(len(encoded).to_bytes(8, "big"))
+    hasher.update(encoded)
+
+
+def template_lock_id(name: str) -> int:
+    """A signed 64-bit advisory lock id, which is the only shape PostgreSQL takes.
+
+    Derived from the template's name rather than from a constant, so two
+    templates being cached at the same moment do not wait on each other.
+    Advisory locks share one namespace across the whole cluster, which is why
+    the name rather than the digest alone goes in: another package's lock on the
+    same number would block this one for reasons nobody could trace.
+    """
+    return int.from_bytes(
+        hashlib.blake2b(name.encode(), digest_size=8).digest(), "big", signed=True
+    )
+
+
+@contextmanager
+def pointed_at(connection: Any, database: str) -> Generator[None]:
+    """Point an existing connection at another database for the length of the block.
+
+    Rewriting ``settings_dict["NAME"]`` is what Django's own test runner does to
+    create a test database, and it is used here for the same reason: ``migrate``,
+    this package's loader and a caller's own code all work through a connection
+    alias, and inventing a second alias would mean editing
+    ``settings.DATABASES`` -- the same mutation with more moving parts. Django
+    hands the wrapper the very dictionary from ``settings.DATABASES``, so one
+    assignment moves both views of it.
+
+    Closed on the way in, so nothing opened against the old name is reused, and
+    closed again before the name goes back, so nothing stays attached to the
+    database the block used: PostgreSQL refuses to rename, copy or drop a
+    database anything is attached to, and this process is the one most likely to
+    be. The restore is in a ``finally`` because the alternative is a process left
+    pointing at a database that is about to be dropped. Safe to close only
+    outside an atomic block, which every caller refuses first.
+    """
+    original = connection.settings_dict["NAME"]
+    connection.close()
+    connection.settings_dict["NAME"] = database
+    try:
+        yield
+    finally:
+        connection.close()
+        connection.settings_dict["NAME"] = original

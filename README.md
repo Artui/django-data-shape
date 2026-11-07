@@ -236,7 +236,12 @@ history no forward migration can fix, such as a base ahead of the migrations on
 disk, is refused.
 A shape holding a `Derived` or a `KeyFunction` is refused rather than hashed --
 there is no honest digest of a callable, and every way of guessing one agrees
-while the data has changed. See
+while the data has changed. A world your own code finishes after the build -- a
+replay that fills running totals -- is cached too:
+`derive_template(template, step, key="replay-3")` runs the step once over a copy
+of the template, analyzes the whole database afterwards and keeps the result as
+a template of its own, under a name keyed on the parent and the key you change
+when the step does. See
 [Statistics and reuse](https://artui.github.io/django-data-shape/statistics/).
 
 ## From pytest
@@ -251,7 +256,9 @@ world = scale_fixture(Shape(Table(Order, rows=100, status=Constant("complete")))
 ```
 
 `orders` is one world built once for the whole session, composed with
-pytest-django rather than replacing it. `world` is the **scale protocol**: make
+pytest-django rather than replacing it. `template_fixture` is the other way in:
+it makes the test database a clone of a template, a derived one included, for
+the whole session. `world` is the **scale protocol**: make
 the world be at factor F, then let the caller run its block, which is what a
 query count asserted to be `O(1)` rather than `O(N)` needs.
 

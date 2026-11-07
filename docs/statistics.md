@@ -201,6 +201,56 @@ a `NOT NULL` column with no default as a placeholder the step overwrites,
 cannot be a `Constant`, which can only produce one value and is refused when the
 shape is declared; give it a `Sequential` instead.
 
+### A world the application finishes
+
+Some columns are the application's own arithmetic, and no declaration can
+describe them: running totals that only a replay through its services computes.
+Running that replay over every test database pays for it every session --
+measured on one consumer's world, the template took 2.5 seconds to build, the
+replay 93 seconds and a clone of the finished world half a second.
+[`derive_template`][django_data_shape.databases.derive_template.derive_template]
+puts the replay inside the cache: it copies a template, runs your step over the
+copy once, analyzes the whole database afterwards, and keeps the result as a
+template of its own.
+
+```python
+from django_data_shape import clone_database, derive_template, template_database
+
+
+def replay_draws(using: str) -> None:
+    # Your own code. The alias it is handed points at the copy while this runs,
+    # so the ORM writes there.
+    for project in Project.objects.using(using).order_by("pk"):
+        project.recompute_totals()
+
+
+template = template_database(SHAPE)
+finished = derive_template(template, replay_draws, key="replay-draws-3")
+clone_database(finished, "test_myapp", replace=True)
+```
+
+**The key is the step's identity, and you change it when the step changes.** A
+function cannot be hashed, for the reason `Derived` is refused above, so the
+cache cannot see an edit to `replay_draws`; it sees the key. The derived name is
+a digest of the parent's name and the key, and the parent's name already moves
+with the shape, the schema, the settings, the base and this package's version,
+so none of those needs to be in the key. Changing the key re-runs only the step:
+the build under it is a template of its own, and is found. Steps chain, because
+a derived template is a template -- derive from one to run a second step, and
+changing the second key leaves the first replay where it is.
+
+The cache trusts the step to be a function of the world it is given. A step that
+reads the clock, draws unseeded randomness or reads anything outside the
+database produces whatever its first run produced, under a key that claims
+more. That is stated rather than detected.
+
+A step that raises leaves nothing behind: the copy is dropped, and the error is
+raised again as [`StepFailed`][django_data_shape.databases.step_failed.StepFailed],
+naming the key, with your exception as its cause. Only a template this package
+finished can be derived from -- a name `template_database` or `derive_template`
+returned -- because a database of your own keeps its name while its rows change,
+and a template keyed on its name would be served stale.
+
 ### From pytest
 
 `template_database` and `clone_database` are the two halves; `django_db_setup` is
@@ -260,6 +310,10 @@ def django_db_modify_db_settings(django_db_modify_db_settings_parallel_suffix, d
 `--reuse-db` is not worth reaching for with either: a clone is cheaper than
 deciding whether the database you have is the one you want, and the template
 *is* the reuse.
+
+A derived template is reached the same way, by cloning its name in place of
+`template_database(SHAPE)`'s. `template_fixture` packages that without replacing
+`django_db_setup`; see [From pytest](pytest.md#a-world-the-application-finished).
 
 ### Starting from a migrated base
 
