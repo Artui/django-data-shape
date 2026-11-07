@@ -135,3 +135,29 @@ def test_the_children_are_not_gathered_under_the_lowest_keys() -> None:
     last_half = sum(count for key, count in families.items() if key > 2_500)
     assert first_tenth / children < 0.25
     assert last_half / children > 0.33
+
+
+class _Words:
+    def value(self, row: int, draw: float) -> object:
+        return "many"
+
+    def canonical(self) -> object:
+        return ("words",)
+
+
+def test_sizes_refused_inside_the_load_leave_the_connection_usable() -> None:
+    # A tree is resolved inside generation, so a bad size is refused from
+    # inside COPY rather than before it, as a fan-out's is. It still arrives as
+    # the refusal, with the load rolled back and the connection still usable.
+    with pytest.raises(django_data_shape.InvalidShape, match="needs numeric tree sizes"):
+        build_shape(
+            Shape(
+                Table(
+                    Referred,
+                    rows=20,
+                    label=Constant("c"),
+                    referrer=_tree(roots=0.1, sizes=_Words()),
+                )
+            )
+        )
+    assert Referred.objects.count() == 0
