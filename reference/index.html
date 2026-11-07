@@ -1208,6 +1208,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#django_data_shape.databases.derive_template.derive_template" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        derive_template
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#django_data_shape.databases.clone_database.clone_database" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1256,6 +1267,17 @@
     <span class="md-ellipsis">
       
         shape_fixture
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#django_data_shape.fixtures.template_fixture.template_fixture" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        template_fixture
       
     </span>
   </a>
@@ -2065,6 +2087,17 @@
     <span class="md-ellipsis">
       
         UnusableBase
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#django_data_shape.databases.step_failed.StepFailed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        StepFailed
       
     </span>
   </a>
@@ -2798,6 +2831,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#django_data_shape.databases.derive_template.derive_template" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        derive_template
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#django_data_shape.databases.clone_database.clone_database" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2846,6 +2890,17 @@
     <span class="md-ellipsis">
       
         shape_fixture
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#django_data_shape.fixtures.template_fixture.template_fixture" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        template_fixture
       
     </span>
   </a>
@@ -3655,6 +3710,17 @@
     <span class="md-ellipsis">
       
         UnusableBase
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#django_data_shape.databases.step_failed.StepFailed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        StepFailed
       
     </span>
   </a>
@@ -6186,6 +6252,112 @@ To look inside one: <code>ALTER DATABASE &lt;name&gt; ALLOW_CONNECTIONS true</co
 <div class="doc doc-object doc-function">
 
 
+<h2 id="django_data_shape.databases.derive_template.derive_template" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">derive_template</span>
+
+
+<a href="#django_data_shape.databases.derive_template.derive_template" class="headerlink" title="Permanent link">&para;</a></h2>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">derive_template</span><span class="p">(</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>    <span class="n">template</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>    <span class="n">step</span><span class="p">:</span> <span class="n">Callable</span><span class="p">[[</span><span class="nb">str</span><span class="p">],</span> <span class="nb">object</span><span class="p">],</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>    <span class="o">*</span><span class="p">,</span>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>    <span class="n">key</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>    <span class="n">using</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="n">DEFAULT_DB_ALIAS</span><span class="p">,</span>
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>    <span class="n">strategy</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="s2">"file_copy"</span><span class="p">,</span>
+</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span>
+</span></code></pre></div>
+
+    <div class="doc doc-contents first">
+
+        <p>Make sure a template holding <code>template</code> with <code>step</code> run over it exists, and return its name.</p>
+<p>For the world an application finishes itself. A shape describes what can be
+declared; some columns are the application's own arithmetic -- running
+totals a replay through its services fills in -- and no declaration can
+describe them. Run that code over a fresh test database every session and
+the cache pays for the cheap half only: measured on a consumer's world, the
+template took 2.5 s to build and the replay over it 93 s. This puts the
+replay inside the cache. The step runs once per machine, over a copy of
+<code>template</code>, and the result is a template like any other, cloned with
+:func:<code>~django_data_shape.databases.clone_database.clone_database</code> in a
+fraction of a second::</p>
+<div class="language-text highlight"><pre><span></span><code>template = template_database(shape)
+finished = derive_template(template, replay_draws, key="replay-draws-3")
+clone_database(finished, "test_myapp", replace=True)
+</code></pre></div>
+<p><strong>What the step is handed.</strong> <code>step(using)</code> is called with the connection
+alias pointed at the copy, under its working name, the way the build itself
+reaches a template: the ORM, <code>connections[using]</code> and anything else going
+through that alias write into the copy. Its return value is ignored. It runs
+outside any transaction this function opens, so what it commits is what the
+template holds; a step that leaves another connection attached to the copy
+stops the copy being renamed, as anything attached to a database does.</p>
+<p><strong><code>key</code> is required, and it is the step's identity.</strong> A callable cannot be
+hashed, for the reason a shape holding a
+:class:<code>~django_data_shape.derivations.derived.Derived</code> is refused: two
+closures agree while the data differs, which is the one direction a cache key
+must never be wrong. So the caller names the step, and <strong>changes the key when
+the step changes</strong>. The template's name is a digest of <code>template</code>'s name
+and <code>key</code>, and <code>template</code>'s name is itself a digest of the shape, the
+schema, the settings, the base and this package's version, so a change to any
+of those makes a new template here as well, without the key having to say so.</p>
+<p><strong>The cache trusts the step to be a function of the world it is given.</strong> A
+step reading the clock, drawing unseeded randomness or reading anything
+outside the database produces whatever its first run produced, under a key
+that claims more. That is stated rather than detected, as the rows a base
+holds are for <code>template_database</code>.</p>
+<p><strong>The whole database is analyzed after the step</strong>, not the tables the shape
+declared: the step may have written to tables the shape never named, and a
+table with no statistics is worse than a small one. Anything else that
+writes to a world after it is built leaves its statistics stale, whether or
+not it goes through this function.</p>
+<p><strong>Steps chain</strong>, because a derived template is a template: derive from one
+to run a second step over the first, and changing the second step's key
+re-runs only the second step. Changing <code>key</code> never rebuilds what is under
+it, which is why this derives from a template rather than taking the step as
+an argument to <code>template_database</code>.</p>
+<p><strong>A step that raises leaves nothing behind.</strong> The copy is dropped, so the
+next call starts again from <code>template</code>, and the exception is raised again
+as :class:<code>~django_data_shape.databases.step_failed.StepFailed</code>, naming the
+key, with the step's own exception as its cause. A <code>KeyboardInterrupt</code> or
+any other <code>BaseException</code> drops the copy and goes on unwrapped.</p>
+<p><strong>What it refuses</strong>, each before anything is created:</p>
+<ul>
+<li><strong>A <code>template</code> this package did not finish.</strong> Its name has to be one
+  <code>template_database</code> or this function returned, a prefix and a digest,
+  because the derived name is keyed on it: a database of the caller's own
+  keeps its name while its rows change, and a template derived from it would
+  be served stale. A partial is refused for the same reason, and so is a
+  name holding a double quote, which no generated name does. <code>ValueError</code>,
+  because what is wrong is an argument.</li>
+<li><strong>A <code>template</code> that does not exist</strong>, when the derived one is not there
+  either. <code>ValueError</code> again, naming it. On a hit the parent is not
+  needed and not looked for, so a parent dropped after deriving from it
+  costs nothing until the derived template goes too.</li>
+<li><strong>Anything but PostgreSQL</strong>, and <strong>being called inside a transaction</strong>,
+  for the reasons <code>template_database</code> gives: there is no <code>CREATE
+  DATABASE ... TEMPLATE</code> elsewhere, and pointing the connection at the copy
+  closes it, which leaves an atomic block unusable.</li>
+<li><strong>A <code>strategy</code> the server cannot take.</strong> It means what it means for
+  :func:<code>~django_data_shape.databases.clone_database.clone_database</code>, which
+  makes the copy: <code>file_copy</code> by default, because a world worth deriving
+  is a world worth copying cheaply, and <code>None</code> for a PostgreSQL older than</li>
+<li>It is not part of the key, because it decides what the copy costs and
+  not what it holds.</li>
+</ul>
+<p>Parallel workers asking for the same derived template wait on one advisory
+lock, taken on its name, while one of them runs the step. The finished
+template refuses connections, as every template this package makes does;
+nothing removes it, and :func:<code>~django_data_shape.databases.drop_database.drop_database</code>
+is how a stale one goes.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
 <h2 id="django_data_shape.databases.clone_database.clone_database" class="doc doc-heading">
             <span class="doc doc-object-name doc-function-name">clone_database</span>
 
@@ -6387,6 +6559,111 @@ second <em>build</em> over rows that stay: another session-scoped
 <p>On a connection that cannot carry a shaped database the fixture skips with
 the reason rather than raising, so a suite that also runs on SQLite reports
 what it did not check instead of erroring or, worse, passing.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h2 id="django_data_shape.fixtures.template_fixture.template_fixture" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">template_fixture</span>
+
+
+<a href="#django_data_shape.fixtures.template_fixture.template_fixture" class="headerlink" title="Permanent link">&para;</a></h2>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">template_fixture</span><span class="p">(</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>    <span class="n">template</span><span class="p">:</span> <span class="n">Callable</span><span class="p">[[</span><span class="nb">str</span><span class="p">],</span> <span class="nb">str</span><span class="p">],</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>    <span class="o">*</span><span class="p">,</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>    <span class="n">using</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="n">DEFAULT_DB_ALIAS</span><span class="p">,</span>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>    <span class="n">strategy</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="s2">"file_copy"</span><span class="p">,</span>
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">object</span>
+</span></code></pre></div>
+
+    <div class="doc doc-contents first">
+
+        <p>A session-scoped pytest fixture that makes the test database a clone of a template.</p>
+<p>The pytest face of
+:func:<code>~django_data_shape.databases.derive_template.derive_template</code>, and of
+:func:<code>~django_data_shape.databases.template_database.template_database</code>
+alone: the way a test reaches a world the application finished, which
+:func:<code>~django_data_shape.fixtures.shape_fixture.shape_fixture</code> cannot, since
+it builds straight into the test database and a step needs a template to
+run over. <code>template</code> is a callable taking the connection alias and
+returning a template's name, so a plain template, one started from a base
+and a chain of derived ones are all written with the functions that make
+them, and nothing here repeats their arguments. Bind it in <code>conftest.py</code>::</p>
+<div class="language-text highlight"><pre><span></span><code>from django_data_shape import derive_template, template_database
+from django_data_shape.fixtures import template_fixture
+
+def finished_world(using: str) -&gt; str:
+    template = template_database(SHAPE, using=using, base="myproject_base")
+    return derive_template(template, replay_draws, key="replay-draws-3", using=using)
+
+world = template_fixture(finished_world)
+</code></pre></div>
+<p>and request the name from a test, or from an autouse session fixture so the
+world is there before the first test that touches the database::</p>
+<div class="language-text highlight"><pre><span></span><code>@pytest.fixture(scope="session", autouse=True)
+def _finished(world): ...
+</code></pre></div>
+<p>It <strong>composes with pytest-django rather than replacing it</strong>, as
+<code>shape_fixture</code> does. It requests <code>django_db_setup</code>, so the test database
+has been made -- under whatever name pytest-django gave it, the xdist
+worker's suffix included -- before the template is asked for, and then
+replaces that database with a clone of the template under the same name:
+the connection is closed and the clone made with <code>replace=True</code>. Every
+test after that reads the template's rows and statistics, and
+pytest-django's teardown drops the clone as it would have dropped its own.
+<code>template</code> is called inside <code>django_db_blocker.unblock()</code>, once per
+session and worker; the template is built or derived on the first call on a
+machine and found on every one after, so what a session pays is the clone.</p>
+<p><strong>Session scope is load-bearing</strong>, for the reason it is for
+<code>shape_fixture</code>: pytest makes higher-scoped fixtures first, so the clone
+is in place before the function-scoped <code>db</code> fixture opens the transaction
+that wraps a test, and everything a test writes is rolled back over it.</p>
+<p>Hands back the template's name, which is what a test asserting on the world it
+was handed, or on its key, can use.</p>
+<p><strong>Only a test database is replaced.</strong> pytest-django makes one only for the
+aliases a collected test asks for (from 4.11; before that, for every alias), so in a run whose tests touch no
+database the alias still names the configured one -- a developer's own --
+and the fixture hands back the template's name and leaves it alone. The
+same goes for a <code>django_db_setup</code> that makes no test database, as
+pytest-django's recipe for an existing one does: the template is not
+cloned into a database the settings do not call a test database, which is
+<code>TEST["NAME"]</code> when that is set and the configured name with Django's
+<code>test_</code> prefix otherwise -- so a database of your own whose configured
+name already starts with <code>test_</code> is not told apart from one.</p>
+<p><strong>What is worth knowing</strong>, because each is a consequence of replacing the
+database rather than filling it:</p>
+<ul>
+<li><strong>The world appears when the fixture is first made.</strong> A test that ran
+  earlier in the session saw the empty database pytest-django made, and a
+  test that runs later sees this world whether it asked for it or not.
+  Requesting it from an autouse session fixture makes it the database of
+  every test.</li>
+<li><strong>It replaces whatever was there.</strong> A <code>shape_fixture</code> world already
+  built on the same alias goes with the database it was built into. Put
+  that shape into the template instead.</li>
+<li><strong>The database pytest-django made first is thrown away</strong>, migrations and
+  all. <code>--reuse-db</code> keeps it between runs, so the migrations run once;
+  a project whose migrations are what is slow can instead override
+  <code>django_db_setup</code> itself, as the statistics page shows, and never make
+  the database it would replace.</li>
+<li><strong>A test marked <code>django_db(transaction=True)</code> truncates every table</strong>
+  at teardown and takes the world with it, as it does a <code>shape_fixture</code>
+  one. <code>serialized_rollback=True</code> is not a way out here: pytest-django
+  serializes the test database as <code>django_db_setup</code> makes it, before
+  this replaces it, so what it restores is the empty database.</li>
+</ul>
+<p><code>strategy</code> is the clone's, as for
+:func:<code>~django_data_shape.databases.clone_database.clone_database</code>:
+<code>file_copy</code> by default, <code>None</code> on a PostgreSQL older than 15. It is not
+passed to <code>template</code>, which takes its own.</p>
+<p>On a connection that cannot carry a shaped database the fixture skips with
+the reason rather than raising, as <code>shape_fixture</code> does, so a suite that
+also runs on SQLite reports what it did not check.</p>
 
 
     </div>
@@ -9686,6 +9963,50 @@ history the base holds; the tables of the apps without them are rebuilt
 from the models. One ahead of it cannot be repaired from this checkout at
 all -- the migrations that would undo it are not here -- and accepting it
 would build a template whose schema the cache key does not describe.</p>
+
+
+
+
+
+
+
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h2 id="django_data_shape.databases.step_failed.StepFailed" class="doc doc-heading">
+            <span class="doc doc-object-name doc-class-name">StepFailed</span>
+
+
+<a href="#django_data_shape.databases.step_failed.StepFailed" class="headerlink" title="Permanent link">&para;</a></h2>
+
+
+    <div class="doc doc-contents first">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="Exception">Exception</span></code></p>
+
+
+
+        <p>The step given to <code>derive_template</code> raised, and nothing was kept.</p>
+<p>Raised from the step's own exception, which is its <code>__cause__</code>, so the
+traceback shows both: what went wrong inside the step, and which template and
+key it was deriving. The key is the part worth naming, because it is the only
+thing that tells one step from another -- a callable has no name a cache can
+trust, which is why <code>derive_template</code> asks for a key at all.</p>
+<p>Its own type rather than the step's exception passed through, because the
+step's exception says what failed and not where: a <code>KeyError</code> from a
+replay deep inside a session fixture reads the same as one from the test.
+Only an <code>Exception</code> is wrapped. A <code>KeyboardInterrupt</code> or <code>SystemExit</code>
+is not a failure of the step, and goes on as it came.</p>
+<p>Nothing is left behind either way: the partial copy the step ran in is
+dropped, so the next call starts again from the parent template and runs the
+step again.</p>
 
 
 
