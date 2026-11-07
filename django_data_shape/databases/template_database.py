@@ -21,11 +21,11 @@ from django_data_shape.databases.unusable_base import UnusableBase
 from django_data_shape.declaration.shape import Shape
 from django_data_shape.loading.build import build
 from django_data_shape.utils import (
+    FINISHED_TEMPLATE,
     PARTIAL_SUFFIX,
     TEMPLATE_KEY_BYTES,
     TEMPLATE_PREFIX,
     absorb,
-    is_generated_template,
     pointed_at,
     template_lock_id,
 )
@@ -470,7 +470,7 @@ def _base_context(connection: Any, base: str) -> tuple[str, str]:
             "Create and migrate it, or pass base=None to build the template from an empty "
             "database."
         )
-    if is_generated_template(base):
+    if _is_generated_template(base):
         raise UnusableBase(
             f"The base database {base!r} is a template this package made, and a template is "
             "never a base: it holds a shape's rows under a name keyed for that shape. Pass the "
@@ -933,3 +933,8 @@ def _schema_digest(models: tuple[Any, ...], migrations: tuple[tuple[str, str], .
         for field in model._meta.concrete_fields:
             absorb(hasher, f"{field.name}|{field.column}|{field.get_internal_type()}|{field.null}")
     return hasher.hexdigest()
+
+
+def _is_generated_template(name: str) -> bool:
+    """Whether ``name`` is one this package generates for a template, finished or partial."""
+    return FINISHED_TEMPLATE.fullmatch(name.removesuffix(PARTIAL_SUFFIX)) is not None

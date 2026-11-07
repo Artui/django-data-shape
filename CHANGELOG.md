@@ -30,8 +30,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   one. `template` is a callable taking the connection alias and returning a
   template's name. It requests `django_db_setup` and then replaces the test
   database pytest-django made, under the same name, so xdist suffixes and
-  pytest-django's teardown work as before. The pytest page lists what replacing
-  the database means for tests that ran earlier and for transactional tests.
+  pytest-django's teardown work as before. Only a test database is replaced: in a
+  run whose tests touch no database the alias still names your configured one,
+  and the fixture leaves it alone. The pytest page lists what replacing the
+  database means for tests that ran earlier and for transactional tests.
 - **`StepFailed`**, raised from the step's own exception.
 - **Documentation:** the statistics page has a section on a world the
   application finishes, and the pytest page one on `template_fixture`.

@@ -75,4 +75,18 @@ DATABASES["templated"] = {
     "TEST": {"DEPENDENCIES": []},
 }
 
+# A fourth alias that no test asks for, so pytest-django never makes a test
+# database for it and its NAME stays the one configured here: the state of a
+# developer's own database in a run whose tests touch none, which a fixture
+# replacing a test database has to leave alone. No test may name it in a
+# django_db mark, or pytest-django sets it up and the premise is gone.
+DATABASES["unrequested"] = {
+    **(
+        {**DATABASES["default"], "NAME": f"{DATABASES['default']['NAME']}_unrequested"}
+        if _BACKEND != "sqlite"
+        else {"ENGINE": "django.db.backends.sqlite3", "NAME": ":memory:"}
+    ),
+    "TEST": {"DEPENDENCIES": []},
+}
+
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"

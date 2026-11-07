@@ -343,9 +343,16 @@ def test_a_parent_that_does_not_exist_is_refused_by_name(made: list[str]) -> Non
     assert _partials() == []
 
 
-def test_a_strategy_it_cannot_take_is_refused_before_anything_is_looked_up() -> None:
+def test_a_strategy_it_cannot_take_is_refused_before_anything_is_looked_up(
+    made: list[str],
+) -> None:
+    parent = _template(made)
+    _derive(made, parent, _replay, key="replay-1")
+
+    # A hit: the derived template is there, so only a check made before the
+    # lookup refuses, and a miss would be refused by the clone in any case.
     with pytest.raises(ValueError, match="clone strategy"):
-        derive_template(f"{TEMPLATE_PREFIX}{'0' * 16}", _replay, key="k", strategy="fast")
+        derive_template(parent, _replay, key="replay-1", strategy="fast")
 
 
 def test_it_refuses_to_run_inside_a_transaction(made: list[str]) -> None:

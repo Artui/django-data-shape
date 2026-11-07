@@ -368,11 +368,6 @@ def reset_sequence(connection: Any, model: type[Model]) -> None:
             cursor.execute(statement)
 
 
-def is_generated_template(name: str) -> bool:
-    """Whether ``name`` is one this package generates for a template, finished or partial."""
-    return FINISHED_TEMPLATE.fullmatch(name.removesuffix(PARTIAL_SUFFIX)) is not None
-
-
 def absorb(hasher: hashlib.blake2b, part: str) -> None:
     """One string, length-prefixed so two parts cannot run together into a third."""
     encoded = part.encode()

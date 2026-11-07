@@ -7,6 +7,7 @@ from typing import Any
 
 import pytest
 from django.db import DEFAULT_DB_ALIAS, connections
+from django.db.backends.base.creation import TEST_DATABASE_PREFIX
 
 from django_data_shape.databases.clone_database import clone_database
 from django_data_shape.fixtures.skip_unless_postgres import skip_unless_postgres
@@ -68,6 +69,16 @@ def template_fixture(
     Hands back the template's name, which is what a test asserting on the world it
     was handed, or on its key, can use.
 
+    **Only a test database is replaced.** pytest-django makes one only for the
+    aliases a collected test asks for, so in a run whose tests touch no
+    database the alias still names the configured one -- a developer's own --
+    and the fixture hands back the template's name and leaves it alone. The
+    same goes for a ``django_db_setup`` that makes no test database, as
+    pytest-django's recipe for an existing one does: the template is not
+    cloned into a database the settings do not call a test database, which is
+    ``TEST["NAME"]`` when that is set and the configured name with Django's
+    ``test_`` prefix otherwise.
+
     **What is worth knowing**, because each is a consequence of replacing the
     database rather than filling it:
 
@@ -109,6 +120,14 @@ def template_fixture(
         with django_db_blocker.unblock():
             name = template(using)
             target = connection.settings_dict["NAME"]
+            # pytest-django makes test databases only for the aliases a
+            # collected test asks for, so in a run whose tests touch no
+            # database, or under a django_db_setup that makes none, the alias
+            # still names the configured database, and replacing it would drop
+            # a developer's own
+            # (test_a_database_pytest_django_did_not_make_is_left_alone).
+            if not _is_test_database(connection.settings_dict):
+                return name
             # Every connection this thread holds to the test database, not only
             # the alias's own: PostgreSQL refuses to drop a database anything is
             # attached to, and a mirror alias names the same one. On a warm
@@ -121,3 +140,17 @@ def template_fixture(
         return name
 
     return templated_database
+
+
+def _is_test_database(settings_dict: dict[str, Any]) -> bool:
+    """Whether a connection names the test database Django's test setup gives it.
+
+    ``TEST["NAME"]`` when that is set, as pytest-django sets it under xdist, and
+    Django's ``test_`` prefix on the configured name otherwise. A configured name
+    that already starts with ``test_`` passes the second check: the settings say
+    nothing more, and Django would call its own test copy ``test_test_...``.
+    """
+    test_name = settings_dict.get("TEST", {}).get("NAME")
+    if test_name:
+        return settings_dict["NAME"] == test_name
+    return str(settings_dict["NAME"]).startswith(TEST_DATABASE_PREFIX)
