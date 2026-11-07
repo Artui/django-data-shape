@@ -125,8 +125,9 @@ active project is the *newest* one, which is realism for the application.
 
 ## The pre-check
 
-The models' own constraints are read from `Model._meta.constraints` when the
-`Shape` is declared, and a contradiction is refused with the arithmetic in it:
+The models' own constraints are read from `Model._meta.constraints` and
+`Model._meta.unique_together` when the `Shape` is declared, and a contradiction
+is refused with the arithmetic in it:
 
 ```
 one_active_project_per_company permits at most 50000 rows with status='ACTIVE',
@@ -152,6 +153,9 @@ how many companies there are.
   million rows needing distinct `(company, label)` pairs cannot be built from
   fifty thousand companies and three labels, whatever the seed. This is the
   multi-column analysis a single `Table` declines to attempt.
+  `Meta.unique_together` builds the same unique index and is checked the same
+  way under every rule below; it has no name of its own, so a refusal names the
+  tuple instead -- `unique_together ('company', 'person') needs ...`.
 - **Enough room is never a way to fill it, and that holds with no fan-out
   anywhere.** Every mechanism this package has for filling a column computes it
   from the row index alone, so nothing enumerates a tuple and nothing keeps a
@@ -168,6 +172,12 @@ how many companies there are.
   `unique=True` writes no entry in `_meta.constraints`, and a single table
   cannot see how many parents there are. The exemption is the same proof the
   others carry: flat sizes, no `childless` share, and rows no more than parents.
+- **A `Tree` beside drawn columns is refused the same way**, as in names
+  unique among siblings: a tree gives a row several children whenever its sizes
+  say so, and a drawn value cannot see its siblings. A tree's families are not
+  ranges of rows, so no derivation is decided per family; the exemption is
+  `Distinct`, and a `Tree` alone under a `UniqueConstraint` is refused as a
+  unique column is.
 - **Enough room is not a way to fill it.** An unconditional constraint over
   **two fan-outs** — the through table of a many-to-many — passes the pigeonhole
   comfortably, because the product of two parent counts dwarfs the row count,

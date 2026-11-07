@@ -36,6 +36,7 @@ from django_data_shape import (
     Shape,
     Skew,
     Table,
+    Tree,
     Uniform,
     Zipf,
 )
@@ -43,12 +44,15 @@ from tests.testapp.models import (
     Approval,
     Assignment,
     Booking,
+    Chain,
     Company,
     Contest,
     Coupon,
+    Engagement,
     Escalation,
     Event,
     EventSession,
+    Folder,
     Invitation,
     Membership,
     Person,
@@ -850,6 +854,135 @@ def test_two_fan_outs_under_one_uniqueness_are_refused_by_name() -> None:
     # And it points at the form that does build one today, rather than leaving a
     # reader to discover that the escape hatch is also the answer.
     assert "Projection(Membership, columns=(...), sql=...)" in message
+
+
+def test_two_fan_outs_under_unique_together_are_refused_naming_the_tuple() -> None:
+    # The same through table spelled the older way. unique_together writes no
+    # entry in _meta.constraints, so a check reading only that list let this
+    # through and the load died inside COPY -- at line 15 of the edge table for
+    # seed 0, measured on PostgreSQL against 0.24.0.
+    with pytest.raises(InvalidShape) as raised:
+        Shape(
+            _companies(20),
+            Table(Person, rows=20, name=Constant("p")),
+            Table(Engagement, rows=200, company=FanOut(Zipf()), person=FanOut(Zipf())),
+        )
+
+    message = str(raised.value)
+    assert message.startswith("unique_together ('company', 'person') needs every")
+    assert "Engagement.company, Engagement.person are fan-outs" in message
+
+
+def test_unique_together_is_counted_by_the_pigeonhole_too() -> None:
+    # Twenty companies and five people leave a hundred pairs for two hundred
+    # rows, and that is the first answer, before the two fan-outs are asked
+    # about. Both columns are fan-outs because a Paired partner has no capacity
+    # this check can count.
+    with pytest.raises(InvalidShape) as raised:
+        Shape(
+            _companies(20),
+            Table(Person, rows=5, name=Constant("p")),
+            Table(Engagement, rows=200, company=FanOut(Zipf()), person=FanOut(Zipf())),
+        )
+
+    assert str(raised.value).startswith(
+        "unique_together ('company', 'person') needs 200 distinct (company, person) "
+        "combinations, one per row of Engagement, and this shape can produce 100."
+    )
+
+
+def test_unique_together_takes_the_remedy_its_refusal_names() -> None:
+    # Paired is what the message points at, and it has to be accepted under
+    # this spelling as it is under a UniqueConstraint, or the refusal would name
+    # a way out that is itself refused.
+    Shape(
+        _companies(20),
+        Table(Person, rows=20, name=Constant("p")),
+        Table(Engagement, rows=200, company=FanOut(Zipf()), person=Paired("company", Zipf())),
+    )
+
+
+def test_a_tree_beside_a_drawn_column_under_one_uniqueness_is_refused() -> None:
+    # A file system's rule: names unique among siblings. The tree gives a row
+    # several children whenever its sizes say so, and a name drawn per row
+    # cannot see which siblings it has, so two of them sharing one is a matter
+    # of the seed. A tree has no capacity this module can count, so the
+    # pigeonhole never answers first and this is the only check that can.
+    with pytest.raises(InvalidShape, match="one_name_per_folder") as raised:
+        Shape(
+            Table(
+                Folder,
+                rows=200,
+                parent=Tree(roots=0.05, sizes=Zipf()),
+                name=Skew({f"n{i}": 1 for i in range(50)}),
+                code=Constant("c"),
+            )
+        )
+
+    message = str(raised.value)
+    assert "Folder.parent is a Tree beside Folder.name=" in message
+    # The remedies it names have to be ones a tree accepts: nothing is derived
+    # per family of a tree, so the group-scoped derivation the fan-out refusal
+    # points at would itself be refused.
+    assert "scope='group'" not in message
+    assert "Distinct" in message
+
+
+def test_a_tree_beside_a_column_distinct_in_every_row_is_accepted() -> None:
+    # A pair is distinct as soon as either half is, so a Sequential name keeps
+    # the constraint on its own, whatever families the tree makes.
+    Shape(
+        Table(
+            Folder,
+            rows=200,
+            parent=Tree(roots=0.05, sizes=Zipf()),
+            name=Sequential(1, 1),
+            code=Constant("c"),
+        )
+    )
+
+
+def test_a_tree_beside_a_column_that_does_not_move_is_refused() -> None:
+    # A zero step writes one value in every row, so the pair is not distinct
+    # through the name: the protocol answers for the parameters and not the
+    # class. Without the is_distinct_per_row() conjunct, this is accepted.
+    with pytest.raises(InvalidShape, match="one_name_per_folder"):
+        Shape(
+            Table(
+                Folder,
+                rows=200,
+                parent=Tree(roots=0.05, sizes=Zipf()),
+                name=Sequential(0, 0),
+                code=Constant("c"),
+            )
+        )
+
+
+def test_a_tree_beside_a_derivation_is_left_to_the_other_two_nets() -> None:
+    # The exemption every arrangement check carries: a derivation reads
+    # something other than its own row index, and whether its compute= keeps
+    # the siblings apart is not readable here.
+    Shape(
+        Table(
+            Folder,
+            rows=200,
+            parent=Tree(roots=0.05, sizes=Zipf()),
+            name=Derived("code", compute=lambda code: f"{code}-x"),
+            code=Skew({"a": 1, "b": 1}),
+        )
+    )
+
+
+def test_a_tree_alone_under_a_uniqueness_is_refused_as_a_unique_column_is() -> None:
+    # unique=True is refused on the field, and a UniqueConstraint over the one
+    # column says the same thing without the field knowing. A tree gives some
+    # parents several children, which one link per row cannot hold.
+    with pytest.raises(
+        InvalidShape, match="one_link_after_each permits one row per Chain"
+    ) as raised:
+        Shape(Table(Chain, rows=50, previous=Tree(roots=0.05, sizes=Zipf())))
+
+    assert "A chain of one-to-one links is not a tree" in str(raised.value)
 
 
 def test_a_single_fan_out_under_a_uniqueness_says_which_columns_it_means() -> None:

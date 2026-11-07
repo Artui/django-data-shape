@@ -218,7 +218,9 @@ def _resolve(
     parent_fields = table.parent_fields()
     plans: dict[str, FanOutPlan] = {}
     for name, field in table.relations():
-        if isinstance(table.fields[name], Paired):
+        # A pairing is resolved below, and a tree needs no parent read at all:
+        # its parents are this table's own rows, so generation resolves it.
+        if not isinstance(table.fields[name], FanOut):
             continue
         plans[name] = resolve_fan_out(
             cast("FanOut", table.fields[name]),

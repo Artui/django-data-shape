@@ -28,7 +28,9 @@ Three things depend on it, and none of them depends on the keys being integers:
 - **A foreign key is satisfied without a lookup**, because a child can compute
   its parent's key from the parent's row index.
 - **A self-referential tree is acyclic by construction**, because
-  `parent_index < child_index` holds on the *index*, not on the value.
+  `parent_index < child_index` holds on the *index*, not on the value. That is
+  what a [`Tree`](relations.md#trees-a-key-to-the-tables-own-rows) builds:
+  each row's parent key is the key this strategy gives an earlier row.
 - **Two builds of one shape agree**, because the same seed produces the same
   keys.
 

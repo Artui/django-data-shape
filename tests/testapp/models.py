@@ -742,6 +742,21 @@ class Membership(models.Model):
         ]
 
 
+class Engagement(models.Model):
+    """``Membership`` spelled the older way, with ``Meta.unique_together``.
+
+    The same pair is unique, but ``unique_together`` writes no entry in
+    ``_meta.constraints`` -- Django keeps it on ``_meta.unique_together`` -- so a
+    check that reads only the constraints list never sees it.
+    """
+
+    company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name="+")
+    person = models.ForeignKey(Person, on_delete=models.CASCADE, related_name="+")
+
+    class Meta:
+        unique_together = [("company", "person")]
+
+
 class TenantGrant(models.Model):
     """An edge table whose partner is keyed by UUID.
 
@@ -1248,3 +1263,61 @@ class DottedTable(models.Model):
 
     class Meta:
         db_table = "testapp.dotted_table"
+
+
+class Category(models.Model):
+    """A tree: a nullable foreign key to its own table, the column ``Tree`` fills."""
+
+    name = models.CharField(max_length=50)
+    parent = models.ForeignKey("self", null=True, on_delete=models.CASCADE, related_name="children")
+
+
+class RootlessNode(models.Model):
+    """A self-reference that cannot be null, which no tree can fill.
+
+    Its first row has no earlier row to point at, so a root -- a NULL -- is the
+    only thing it could hold, and the column refuses one.
+    """
+
+    parent = models.ForeignKey("self", on_delete=models.CASCADE)
+
+
+class Successor(models.Model):
+    """A unique self-reference: at most one row may point at each."""
+
+    previous = models.OneToOneField(
+        "self", null=True, on_delete=models.SET_NULL, related_name="following"
+    )
+
+
+class Folder(models.Model):
+    """A tree whose names are unique among siblings, as a file system's are.
+
+    ``(parent, name)`` is unique, so two children of one parent may not share a
+    name. A ``Tree`` gives a row several children whenever its sizes say so, and
+    a name drawn per row cannot see its siblings.
+    """
+
+    parent = models.ForeignKey("self", null=True, on_delete=models.CASCADE, related_name="+")
+    name = models.CharField(max_length=50)
+    code = models.CharField(max_length=50)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["parent", "name"], name="one_name_per_folder"),
+        ]
+
+
+class Chain(models.Model):
+    """A self-reference unique by constraint rather than by ``unique=True``.
+
+    The column itself is not unique, so the field-level refusal of a unique
+    tree column never sees it; the constraint says the same thing.
+    """
+
+    previous = models.ForeignKey("self", null=True, on_delete=models.CASCADE, related_name="+")
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["previous"], name="one_link_after_each"),
+        ]

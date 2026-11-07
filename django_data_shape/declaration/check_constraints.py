@@ -16,6 +16,7 @@ from django_data_shape.distributions.bounded import Bounded
 from django_data_shape.distributions.categorical import Categorical
 from django_data_shape.distributions.distinct import Distinct
 from django_data_shape.relations.fan_out import FanOut
+from django_data_shape.relations.tree import Tree
 
 
 def check_constraints(tables: tuple[Table | Projection, ...]) -> None:
@@ -25,7 +26,8 @@ def check_constraints(tables: tuple[Table | Projection, ...]) -> None:
     catches it with a terrible message: a unique index failing at row 700,000 of
     a load that has already run for a minute, naming an index rather than a
     declaration. So the arithmetic is done here instead, from
-    ``Model._meta.constraints``, before a single row is generated.
+    ``Model._meta.constraints`` and ``Model._meta.unique_together``, before a
+    single row is generated.
 
     **``_meta.total_unique_constraints`` is the helper that sounds right and
     is the wrong one.** It deliberately excludes conditional constraints -- it
@@ -89,28 +91,54 @@ def check_constraints(tables: tuple[Table | Projection, ...]) -> None:
     for table in tables:
         if isinstance(table, Projection):
             continue
-        for constraint in table.model._meta.constraints:
-            if isinstance(constraint, UniqueConstraint) and constraint.fields:
-                _check_one(table, constraint, rows_of)
+        for name, fields, condition in _uniquenesses(table.model):
+            _check_one(table, name, fields, condition, rows_of)
         _check_a_fan_out_on_a_unique_column(table, rows_of)
 
 
-def _check_one(table: Table, constraint: UniqueConstraint, rows_of: dict[type[Model], int]) -> None:
-    fields = tuple(constraint.fields)
+def _uniquenesses(model: type[Model]) -> Iterable[tuple[str, tuple[str, ...], Q | None]]:
+    """Every multi-column uniqueness the model states, whichever way it states it.
+
+    ``UniqueConstraint(fields=...)`` lands in ``_meta.constraints``.
+    ``Meta.unique_together`` does not: Django keeps it on
+    ``_meta.unique_together`` and builds the same unique index from it, so a loop
+    over the constraints alone accepted a through table spelled the older way
+    and the load died inside ``COPY`` on the index it never read. Both are read
+    here and checked as one thing, because to the database they are one thing.
+
+    A ``unique_together`` entry has no name of its own -- Django names its index
+    with a hash -- so the tuple is what a refusal names instead, written the way
+    the caller wrote it in ``Meta``.
+    """
+    for constraint in model._meta.constraints:
+        if isinstance(constraint, UniqueConstraint) and constraint.fields:
+            yield constraint.name, tuple(constraint.fields), constraint.condition
+    for together in model._meta.unique_together:
+        yield f"unique_together {tuple(together)!r}", tuple(together), None
+
+
+def _check_one(
+    table: Table,
+    name: str,
+    fields: tuple[str, ...],
+    condition: Q | None,
+    rows_of: dict[type[Model], int],
+) -> None:
     capacity = _capacity(table, fields, rows_of)
-    if constraint.condition is None:
+    if condition is None:
         # Order is the whole of what keeps the arithmetic reachable. All three
         # can apply to one declaration, and the pigeonhole is the most useful of
         # them: "this shape does not fit at all" is a different instruction from
         # "it fits and nothing arranges it". Moving either arrangement check
         # above it would answer the wrong question first and, under a 100%
         # branch gate with no pragma, would take the 0.8.0 message down with it.
-        _check_unconditional(table, constraint.name, fields, capacity)
-        _check_independent_fan_outs(table, constraint.name, fields, rows_of)
-        _check_a_fan_out_beside_a_draw(table, constraint.name, fields, capacity, rows_of)
-        _check_drawn_columns_only(table, constraint.name, fields, capacity)
+        _check_unconditional(table, name, fields, capacity)
+        _check_a_tree_beside_a_draw(table, name, fields)
+        _check_independent_fan_outs(table, name, fields, rows_of)
+        _check_a_fan_out_beside_a_draw(table, name, fields, capacity, rows_of)
+        _check_drawn_columns_only(table, name, fields, capacity)
         return
-    decoded = _condition(constraint.condition)
+    decoded = _condition(condition)
     if decoded is None:
         return
     column, values = decoded
@@ -118,7 +146,7 @@ def _check_one(table: Table, constraint: UniqueConstraint, rows_of: dict[type[Mo
     grouped_by_fan_out = any(isinstance(table.fields.get(name), FanOut) for name in fields)
     if declared is None or not grouped_by_fan_out:
         return
-    _check_conditional(table, constraint.name, fields, capacity, column, values, declared)
+    _check_conditional(table, name, fields, capacity, column, values, declared)
 
 
 def _check_unconditional(
@@ -295,6 +323,71 @@ def _check_a_fan_out_beside_a_draw(
         "receives this row's position among its parent's children and how many there are. A "
         "column that is distinct in every row keeps the constraint on its own, and says so with "
         "Distinct -- Sequential does."
+    )
+
+
+def _check_a_tree_beside_a_draw(table: Table, name: str, fields: tuple[str, ...]) -> None:
+    """A tree and drawn columns under one uniqueness: siblings drawing alike.
+
+    ``Folder(parent, name)`` unique on the pair, the rule a file system keeps
+    among siblings, with ``parent=Tree(...)`` and ``name`` drawn from a
+    distribution. A tree gives a row several children whenever its sizes say
+    so, and a drawn name is a pure function of its own row index, so it cannot
+    see which siblings it has. Two of them sharing a name is a matter of the
+    seed, and the load fails inside ``COPY``.
+
+    This is :func:`_check_a_fan_out_beside_a_draw` for a tree, and it is a check
+    of its own because **neither its exemption nor its remedy carries over**.
+    :func:`_cannot_collide` reads a fan-out's cap, childless share and parents,
+    and a tree has none of them: there is no declaration of one that provably
+    gives no row two children, and the roots are no exemption either, since
+    each root's NULL is its own group but the siblings below it still collide.
+    The fan-out's remedy, a ``Derived(..., scope='group')``, is refused over a
+    tree by :class:`~django_data_shape.declaration.table.Table`, because a
+    tree's families are not ranges of rows. So the message names only what a
+    tree accepts: a column distinct in every row, or a statement of your own.
+
+    The exemptions that remain are the ones every arrangement check carries,
+    and :func:`_is_drawn_per_row` is what applies two of them: a derivation and
+    an undeclared column are not drawn per row, so either one leaves the
+    constraint to the other two nets. A tree in the constraint beside a fan-out
+    is not decided here.
+
+    **A tree alone under a constraint is refused here too**, because it is the
+    unique column :class:`~django_data_shape.declaration.table.Table` refuses
+    spelled as a constraint: ``unique=True`` is read off the field there, and a
+    ``UniqueConstraint(fields=["parent"])`` never reaches that check.
+    """
+    trees = [column for column in fields if isinstance(table.fields.get(column), Tree)]
+    others = [column for column in fields if column not in trees]
+    declared = [table.fields.get(column) for column in others]
+    # One question, as in the fan-out check: is every other column a per-row
+    # draw? A tree beside anything that is not a draw is a shape this refusal
+    # is not about. A tree with nothing beside it passes this vacuously, and is
+    # refused below as the unique column it amounts to.
+    if len(trees) != 1 or not all(_is_drawn_per_row(one) for one in declared):
+        return
+    where = table.model.__name__
+    if not others:
+        raise InvalidShape(
+            f"{name} permits one row per {where}.{trees[0]}, so each row may be the parent of "
+            f"one row at most, and {table.fields[trees[0]]!r} spreads children over parents by "
+            "weight, which gives some parents several. A chain of one-to-one links is not a "
+            "tree this package builds; leave the column out and fill it after the build."
+        )
+    if any(isinstance(one, Distinct) and one.is_distinct_per_row() for one in declared):
+        return
+    drawn = ", ".join(f"{where}.{column}={table.fields[column]!r}" for column in others)
+    raise InvalidShape(
+        f"{name} needs every ({', '.join(fields)}) combination distinct, and {where}."
+        f"{trees[0]} is a Tree beside {drawn}. A tree gives a row several children whenever "
+        "its sizes say so, and a distribution is drawn from the row index alone, so no child "
+        "can see what its siblings drew: two of them sharing a value is a matter of the seed, "
+        "and the load then fails inside COPY at a row number that moves when the seed does. "
+        "Nothing is decided per family of a tree, since a family is not a range of rows. A "
+        "column that is distinct in every row keeps the constraint on its own and says so with "
+        "Distinct -- Sequential does. A table whose rows have to be a particular set is filled "
+        "by a Projection with columns= and sql=."
     )
 
 

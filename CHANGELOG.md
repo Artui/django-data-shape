@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.25.0] — 2026-11-07
+
+### Added
+
+- **`Tree(roots=, sizes=)` fills a foreign key to the model's own table.** An org
+  unit's parent, a comment's reply-to and a category's parent were refused as
+  self-referential, which left a tree to an `UPDATE` after `build()` and a manual
+  `ANALYZE`. Each row's parent is now an earlier row, so the tree is acyclic by
+  construction and needs no lookup. `roots` sets the count of rows with a NULL
+  parent exactly, `ceil(rows * roots)`, and the first row is always one of them.
+  `sizes` weighs each row's family by its position, as a fan-out's does, so the
+  largest families are not the lowest keys. A `Tree` is refused on a key to
+  another table, on a column that cannot be null, and on a unique one, whether
+  `unique=True` or a `UniqueConstraint` over the column alone. A uniqueness
+  pairing a `Tree` with columns drawn per row, such as names unique among
+  siblings, is refused at declaration as a `FanOut` there is, unless one of them
+  is `Distinct`. The refusal of a self-referential `FanOut` now names it.
+
+### Fixed
+
+- **A uniqueness declared with `Meta.unique_together` is refused at declaration
+  time, as a `UniqueConstraint(fields=...)` is.** The pre-check read only
+  `_meta.constraints`, and `unique_together` is kept on
+  `_meta.unique_together`, so a through table spelled that way over two
+  `FanOut`s was accepted and the load died inside `COPY` on the unique index.
+  Every unconditional check now reads both, and the refusal names the tuple:
+  `unique_together ('company', 'person') needs every (company, person)
+  combination distinct, ...`.
+- **A many-to-many field's name is refused as what it is.** Naming one in a
+  `Table`, in a `Projection`'s `columns=`, or in either's `statistics=` was
+  answered with "has no field named members" and a list of concrete fields, which
+  sent the reader away from the fix. It now says the field is many-to-many, names
+  its through model, and points at declaring that model as a table of its own with
+  `FanOut` for one end and `Paired` for the other.
+
 ## [0.24.0] — 2026-11-07
 
 ### Added
@@ -1782,7 +1817,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   into `COPY FROM STDIN`, which psycopg 2 cannot do without materialising them
   first.
 
-[Unreleased]: https://github.com/Artui/django-data-shape/compare/v0.24.0...HEAD
+[Unreleased]: https://github.com/Artui/django-data-shape/compare/v0.25.0...HEAD
+[0.25.0]: https://github.com/Artui/django-data-shape/compare/v0.24.0...v0.25.0
 [0.24.0]: https://github.com/Artui/django-data-shape/compare/v0.23.0...v0.24.0
 [0.23.0]: https://github.com/Artui/django-data-shape/compare/v0.22.0...v0.23.0
 [0.22.0]: https://github.com/Artui/django-data-shape/compare/v0.21.0...v0.22.0

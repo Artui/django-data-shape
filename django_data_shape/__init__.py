@@ -54,6 +54,7 @@ from django_data_shape.loading.shape_not_empty import ShapeNotEmpty
 from django_data_shape.relations.fan_out import FanOut
 from django_data_shape.relations.fan_out_sizes import fan_out_sizes
 from django_data_shape.relations.paired import Paired
+from django_data_shape.relations.tree import Tree
 from django_data_shape.relations.world_changed import WorldChanged
 from django_data_shape.scaling.scale_protocol import ScaleProtocol
 from django_data_shape.scaling.scaled_shape import scaled_shape
@@ -108,6 +109,7 @@ __all__ = [
     "StepFailed",
     "Table",
     "TableResult",
+    "Tree",
     "UnhashableShape",
     "Uniform",
     "UnsupportedBackend",
