@@ -8,6 +8,8 @@
 
 ::: django_data_shape.relations.paired.Paired
 
+::: django_data_shape.relations.tree.Tree
+
 ::: django_data_shape.relations.fan_out_sizes.fan_out_sizes
 
 ::: django_data_shape.types.children_per_parent.ChildrenPerParent

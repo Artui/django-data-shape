@@ -81,8 +81,8 @@ def order_tables(tables: tuple[Table | Projection, ...]) -> tuple[Table | Projec
         # ``Table``, a projection reading the table it fills is refused by
         # ``Projection`` -- through ``per``/``copying`` and through ``reads=``
         # alike -- so guarding against one here would be a branch no declaration
-        # can reach. The day self-referential trees arrive, this is the line
-        # that has to learn about them.
+        # can reach. A self-referential key is a ``Tree``, which reads no table
+        # at all, so ``_dependencies`` follows only fan-outs and never sees it.
         for dependency in _dependencies(table, by_model):
             visit(dependency, (*trail, table))
         state[table] = 2

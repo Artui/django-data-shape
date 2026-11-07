@@ -173,8 +173,11 @@ def test_a_self_referential_fan_out_is_refused() -> None:
     # "the parent has no rows", which describes the symptom.
     from tests.testapp.models import Referred
 
-    with pytest.raises(InvalidShape, match="points at its own table"):
+    with pytest.raises(InvalidShape, match="points at its own table") as refused:
         Table(Referred, rows=5, label=Constant("x"), referrer=FanOut(Uniform(1, 2)))
+    # And it names the declaration that does fill one, rather than calling a
+    # tree a feature still to come.
+    assert "Tree(" in str(refused.value)
 
 
 def test_every_row_can_be_pinned_to_one_pre_existing_parent() -> None:

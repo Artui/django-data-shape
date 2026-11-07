@@ -23,6 +23,7 @@ from django_data_shape.keys.infer_key_strategy import infer_key_strategy
 from django_data_shape.keys.key_strategy import KeyStrategy
 from django_data_shape.relations.fan_out import FanOut
 from django_data_shape.relations.paired import Paired
+from django_data_shape.relations.tree import Tree
 from django_data_shape.utils import (
     check_not_inherited,
     check_statistics_target,
@@ -71,15 +72,15 @@ class Table:
         self,
         model: type[Model],
         rows: int,
-        fields: Mapping[str, Distribution | FanOut | Derivation] | None = None,
+        fields: Mapping[str, Distribution | FanOut | Tree | Derivation] | None = None,
         keys: KeyStrategy | None = None,
         statistics: Mapping[str, int] | None = None,
-        **field_distributions: Distribution | FanOut | Derivation,
+        **field_distributions: Distribution | FanOut | Tree | Derivation,
     ) -> None:
         if rows < 0:
             raise InvalidShape(f"{model.__name__} cannot have {rows} rows.")
 
-        declared: dict[str, Distribution | FanOut | Derivation] = dict(fields or {})
+        declared: dict[str, Distribution | FanOut | Tree | Derivation] = dict(fields or {})
         overlap = sorted(set(declared) & set(field_distributions))
         if overlap:
             raise InvalidShape(
@@ -119,7 +120,7 @@ class Table:
         return cast("KeyStrategy", self._keys)
 
     @property
-    def fields(self) -> Mapping[str, Distribution | FanOut | Derivation]:
+    def fields(self) -> Mapping[str, Distribution | FanOut | Tree | Derivation]:
         """The declared distributions, including defaults filled in from the model."""
         return MappingProxyType(self._fields)
 
@@ -228,14 +229,14 @@ class Table:
                 "be satisfied without a lookup, so it is not available to declare."
             )
 
-        # A relation takes a FanOut and nothing else. A value distribution over a
+        # A relation takes a FanOut, or a Tree on its own table, and nothing else. A value distribution over a
         # foreign key column would emit ids drawn from thin air, pointing at rows
         # that may not exist -- the one thing referential integrity by
         # construction exists to make impossible.
         mismatched = sorted(
             name
             for name, declared in self.fields.items()
-            if known[name].is_relation and not isinstance(declared, (FanOut, Paired))
+            if known[name].is_relation and not isinstance(declared, (FanOut, Paired, Tree))
         )
         if mismatched:
             raise InvalidShape(
@@ -243,7 +244,7 @@ class Table:
                 "FanOut rather than a value distribution or a derivation. Either would emit keys "
                 "drawn from nothing, pointing at rows that may not exist. The second key of an "
                 "edge table is a Paired instead, which chooses partners distinct inside the "
-                "fan-out beside it."
+                "fan-out beside it, and a key to the table's own rows is a Tree."
             )
         self_referential = sorted(
             name
@@ -255,19 +256,22 @@ class Table:
         if self_referential:
             raise InvalidShape(
                 f"{self.model.__name__}.{', '.join(self_referential)} points at its own table, "
-                "and a fan-out reads keys from a table that is still empty at load time. "
-                "Self-referential trees are their own feature, not a fan-out."
+                "and a fan-out reads keys from a table that is still empty at load time. A key "
+                f"to the table's own rows is a tree: {self_referential[0]}=Tree(roots=0.05, "
+                "sizes=Zipf()) gives each row a parent at an earlier row, or none for the share "
+                "declared as roots."
             )
         misapplied = sorted(
             name
             for name, declared in self.fields.items()
-            if not known[name].is_relation and isinstance(declared, (FanOut, Paired))
+            if not known[name].is_relation and isinstance(declared, (FanOut, Paired, Tree))
         )
         if misapplied:
             raise InvalidShape(
                 f"{self.model.__name__}.{', '.join(misapplied)} is not a relation, so a FanOut "
                 "has nothing to fan out over."
             )
+        self._check_trees(known)
         self._check_pairings(known)
 
         self._resolve_defaults(known)
@@ -282,6 +286,43 @@ class Table:
         # this point that column is not in ``fields`` to be found.
         self._check_derivations(known)
         self._computation_order = order_derivations(self.model.__name__, self._fields)
+
+    def _check_trees(self, known: dict[str, Field[Any, Any]]) -> None:
+        """A ``Tree`` fills a nullable, non-unique key to this same table, and nothing else.
+
+        Each condition is the arithmetic of the declaration rather than a
+        preference. A tree's parents are this table's own earlier rows, so on a
+        key to another table it would emit keys that table never had. Its roots
+        are NULL, and the first row is always one, so a column that refuses
+        NULL cannot hold any tree at all. And a unique column takes one child
+        per parent, which a tree exists to exceed.
+        """
+        for name, declared in sorted(self.fields.items()):
+            if not isinstance(declared, Tree):
+                continue
+            where = f"{self.model.__name__}.{name}"
+            field = known[name]
+            related = cast("type[Model]", field.related_model)
+            if related is not self.model:
+                raise InvalidShape(
+                    f"{where} points at {related.__name__}, not at {self.model.__name__}, and a "
+                    "Tree's parents are earlier rows of this same table. A key to another table "
+                    f"is a fan-out over that table's real keys: {name}=FanOut(Zipf())."
+                )
+            if not field.null:
+                raise InvalidShape(
+                    f"{where} cannot be null, and a tree's roots are the rows whose parent is "
+                    "NULL. The first row is always one, since there is no earlier row for it to "
+                    "point at, so no tree fits a column that refuses NULL. Make the column "
+                    "null=True, or leave it out and fill it after the build."
+                )
+            if field.unique:
+                raise InvalidShape(
+                    f"{where} is unique, so each row may be the parent of one row at most, and "
+                    f"{declared!r} spreads children over parents by weight, which gives some "
+                    "parents several. A chain of one-to-one links is not a tree this package "
+                    "builds; leave the column out and fill it after the build."
+                )
 
     def _check_statistics(self, known: dict[str, Field[Any, Any]]) -> None:
         """Refuse a statistics target on a column this shape does not fill.
@@ -355,6 +396,13 @@ class Table:
                     "name the relation and the field: 'relation.field'."
                 )
             fan_out = self._fields.get(relation)
+            if isinstance(fan_out, Tree):
+                raise InvalidShape(
+                    f"{self.model.__name__}.{name} reads {source!r} across {relation}, which is "
+                    "a Tree: the parent is a row of this same table, generated in the same pass, "
+                    "and a root has no parent at all. Nothing reads across a tree; fill this "
+                    "column from a distribution of its own."
+                )
             if not isinstance(fan_out, FanOut):
                 raise InvalidShape(
                     f"{self.model.__name__}.{name} reads {source!r} from a parent, but "
@@ -439,6 +487,13 @@ class Table:
         """
         for source in declared.sources:
             fan_out = self._fields.get(source)
+            if isinstance(fan_out, Tree):
+                raise InvalidShape(
+                    f"{self.model.__name__}.{name} is decided per group of {source!r}, which is "
+                    "a Tree. A tree's families are not a partition of the rows into ranges -- "
+                    "each child is placed among the rows after its parent -- so there is no "
+                    "position in a group to decide anything by."
+                )
             if not isinstance(fan_out, FanOut):
                 raise InvalidShape(
                     f"{self.model.__name__}.{name} is decided per group of {source!r}, but "
