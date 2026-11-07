@@ -742,6 +742,21 @@ class Membership(models.Model):
         ]
 
 
+class Engagement(models.Model):
+    """``Membership`` spelled the older way, with ``Meta.unique_together``.
+
+    The same pair is unique, but ``unique_together`` writes no entry in
+    ``_meta.constraints`` -- Django keeps it on ``_meta.unique_together`` -- so a
+    check that reads only the constraints list never sees it.
+    """
+
+    company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name="+")
+    person = models.ForeignKey(Person, on_delete=models.CASCADE, related_name="+")
+
+    class Meta:
+        unique_together = [("company", "person")]
+
+
 class TenantGrant(models.Model):
     """An edge table whose partner is keyed by UUID.
 

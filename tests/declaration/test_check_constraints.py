@@ -46,6 +46,7 @@ from tests.testapp.models import (
     Company,
     Contest,
     Coupon,
+    Engagement,
     Escalation,
     Event,
     EventSession,
@@ -850,6 +851,52 @@ def test_two_fan_outs_under_one_uniqueness_are_refused_by_name() -> None:
     # And it points at the form that does build one today, rather than leaving a
     # reader to discover that the escape hatch is also the answer.
     assert "Projection(Membership, columns=(...), sql=...)" in message
+
+
+def test_two_fan_outs_under_unique_together_are_refused_naming_the_tuple() -> None:
+    # The same through table spelled the older way. unique_together writes no
+    # entry in _meta.constraints, so a check reading only that list let this
+    # through and the load died inside COPY -- at line 15 of the edge table for
+    # seed 0, measured on PostgreSQL against 0.24.0.
+    with pytest.raises(InvalidShape) as raised:
+        Shape(
+            _companies(20),
+            Table(Person, rows=20, name=Constant("p")),
+            Table(Engagement, rows=200, company=FanOut(Zipf()), person=FanOut(Zipf())),
+        )
+
+    message = str(raised.value)
+    assert message.startswith("unique_together ('company', 'person') needs every")
+    assert "Engagement.company, Engagement.person are fan-outs" in message
+
+
+def test_unique_together_is_counted_by_the_pigeonhole_too() -> None:
+    # Twenty companies and five people leave a hundred pairs for two hundred
+    # rows, and that is the first answer, before the two fan-outs are asked
+    # about. Both columns are fan-outs because a Paired partner has no capacity
+    # this check can count.
+    with pytest.raises(InvalidShape) as raised:
+        Shape(
+            _companies(20),
+            Table(Person, rows=5, name=Constant("p")),
+            Table(Engagement, rows=200, company=FanOut(Zipf()), person=FanOut(Zipf())),
+        )
+
+    assert str(raised.value).startswith(
+        "unique_together ('company', 'person') needs 200 distinct (company, person) "
+        "combinations, one per row of Engagement, and this shape can produce 100."
+    )
+
+
+def test_unique_together_takes_the_remedy_its_refusal_names() -> None:
+    # Paired is what the message points at, and it has to be accepted under
+    # this spelling as it is under a UniqueConstraint, or the refusal would name
+    # a way out that is itself refused.
+    Shape(
+        _companies(20),
+        Table(Person, rows=20, name=Constant("p")),
+        Table(Engagement, rows=200, company=FanOut(Zipf()), person=Paired("company", Zipf())),
+    )
 
 
 def test_a_single_fan_out_under_a_uniqueness_says_which_columns_it_means() -> None:

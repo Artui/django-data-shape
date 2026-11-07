@@ -125,8 +125,9 @@ active project is the *newest* one, which is realism for the application.
 
 ## The pre-check
 
-The models' own constraints are read from `Model._meta.constraints` when the
-`Shape` is declared, and a contradiction is refused with the arithmetic in it:
+The models' own constraints are read from `Model._meta.constraints` and
+`Model._meta.unique_together` when the `Shape` is declared, and a contradiction
+is refused with the arithmetic in it:
 
 ```
 one_active_project_per_company permits at most 50000 rows with status='ACTIVE',
@@ -152,6 +153,9 @@ how many companies there are.
   million rows needing distinct `(company, label)` pairs cannot be built from
   fifty thousand companies and three labels, whatever the seed. This is the
   multi-column analysis a single `Table` declines to attempt.
+  `Meta.unique_together` builds the same unique index and is checked the same
+  way under every rule below; it has no name of its own, so a refusal names the
+  tuple instead -- `unique_together ('company', 'person') needs ...`.
 - **Enough room is never a way to fill it, and that holds with no fan-out
   anywhere.** Every mechanism this package has for filling a column computes it
   from the row index alone, so nothing enumerates a tuple and nothing keeps a

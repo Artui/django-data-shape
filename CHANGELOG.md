@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A uniqueness declared with `Meta.unique_together` is refused at declaration
+  time, as a `UniqueConstraint(fields=...)` is.** The pre-check read only
+  `_meta.constraints`, and `unique_together` is kept on
+  `_meta.unique_together`, so a through table spelled that way over two
+  `FanOut`s was accepted and the load died inside `COPY` on the unique index.
+  Every unconditional check now reads both, and the refusal names the tuple:
+  `unique_together ('company', 'person') needs every (company, person)
+  combination distinct, ...`.
+
 ## [0.24.0] — 2026-11-07
 
 ### Added

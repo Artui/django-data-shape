@@ -25,7 +25,8 @@ def check_constraints(tables: tuple[Table | Projection, ...]) -> None:
     catches it with a terrible message: a unique index failing at row 700,000 of
     a load that has already run for a minute, naming an index rather than a
     declaration. So the arithmetic is done here instead, from
-    ``Model._meta.constraints``, before a single row is generated.
+    ``Model._meta.constraints`` and ``Model._meta.unique_together``, before a
+    single row is generated.
 
     **``_meta.total_unique_constraints`` is the helper that sounds right and
     is the wrong one.** It deliberately excludes conditional constraints -- it
@@ -89,28 +90,53 @@ def check_constraints(tables: tuple[Table | Projection, ...]) -> None:
     for table in tables:
         if isinstance(table, Projection):
             continue
-        for constraint in table.model._meta.constraints:
-            if isinstance(constraint, UniqueConstraint) and constraint.fields:
-                _check_one(table, constraint, rows_of)
+        for name, fields, condition in _uniquenesses(table.model):
+            _check_one(table, name, fields, condition, rows_of)
         _check_a_fan_out_on_a_unique_column(table, rows_of)
 
 
-def _check_one(table: Table, constraint: UniqueConstraint, rows_of: dict[type[Model], int]) -> None:
-    fields = tuple(constraint.fields)
+def _uniquenesses(model: type[Model]) -> Iterable[tuple[str, tuple[str, ...], Q | None]]:
+    """Every multi-column uniqueness the model states, whichever way it states it.
+
+    ``UniqueConstraint(fields=...)`` lands in ``_meta.constraints``.
+    ``Meta.unique_together`` does not: Django keeps it on
+    ``_meta.unique_together`` and builds the same unique index from it, so a loop
+    over the constraints alone accepted a through table spelled the older way
+    and the load died inside ``COPY`` on the index it never read. Both are read
+    here and checked as one thing, because to the database they are one thing.
+
+    A ``unique_together`` entry has no name of its own -- Django names its index
+    with a hash -- so the tuple is what a refusal names instead, written the way
+    the caller wrote it in ``Meta``.
+    """
+    for constraint in model._meta.constraints:
+        if isinstance(constraint, UniqueConstraint) and constraint.fields:
+            yield constraint.name, tuple(constraint.fields), constraint.condition
+    for together in model._meta.unique_together:
+        yield f"unique_together {tuple(together)!r}", tuple(together), None
+
+
+def _check_one(
+    table: Table,
+    name: str,
+    fields: tuple[str, ...],
+    condition: Q | None,
+    rows_of: dict[type[Model], int],
+) -> None:
     capacity = _capacity(table, fields, rows_of)
-    if constraint.condition is None:
+    if condition is None:
         # Order is the whole of what keeps the arithmetic reachable. All three
         # can apply to one declaration, and the pigeonhole is the most useful of
         # them: "this shape does not fit at all" is a different instruction from
         # "it fits and nothing arranges it". Moving either arrangement check
         # above it would answer the wrong question first and, under a 100%
         # branch gate with no pragma, would take the 0.8.0 message down with it.
-        _check_unconditional(table, constraint.name, fields, capacity)
-        _check_independent_fan_outs(table, constraint.name, fields, rows_of)
-        _check_a_fan_out_beside_a_draw(table, constraint.name, fields, capacity, rows_of)
-        _check_drawn_columns_only(table, constraint.name, fields, capacity)
+        _check_unconditional(table, name, fields, capacity)
+        _check_independent_fan_outs(table, name, fields, rows_of)
+        _check_a_fan_out_beside_a_draw(table, name, fields, capacity, rows_of)
+        _check_drawn_columns_only(table, name, fields, capacity)
         return
-    decoded = _condition(constraint.condition)
+    decoded = _condition(condition)
     if decoded is None:
         return
     column, values = decoded
@@ -118,7 +144,7 @@ def _check_one(table: Table, constraint: UniqueConstraint, rows_of: dict[type[Mo
     grouped_by_fan_out = any(isinstance(table.fields.get(name), FanOut) for name in fields)
     if declared is None or not grouped_by_fan_out:
         return
-    _check_conditional(table, constraint.name, fields, capacity, column, values, declared)
+    _check_conditional(table, name, fields, capacity, column, values, declared)
 
 
 def _check_unconditional(
