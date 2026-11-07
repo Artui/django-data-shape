@@ -749,6 +749,34 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#django_data_shape.relations.tree.Tree" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tree
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Tree">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#django_data_shape.relations.tree.Tree.canonical" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        canonical
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#django_data_shape.relations.fan_out_sizes.fan_out_sizes" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2357,6 +2385,34 @@
         
           <li class="md-nav__item">
   <a href="#django_data_shape.relations.paired.Paired.canonical" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        canonical
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#django_data_shape.relations.tree.Tree" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tree
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Tree">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#django_data_shape.relations.tree.Tree.canonical" class="md-nav__link">
     <span class="md-ellipsis">
       
         canonical
@@ -4024,7 +4080,7 @@ strategy from the primary key's type or refused the declaration.</p>
   </span>
 
 <a href="#django_data_shape.declaration.table.Table.fields" class="headerlink" title="Permanent link">&para;</a></h3>
-<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="n">fields</span><span class="p">:</span> <span class="n">Mapping</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Distribution</span> <span class="o">|</span> <span class="n">FanOut</span> <span class="o">|</span> <span class="n">Derivation</span><span class="p">]</span>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="n">fields</span><span class="p">:</span> <span class="n">Mapping</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Distribution</span> <span class="o">|</span> <span class="n">FanOut</span> <span class="o">|</span> <span class="n">Tree</span> <span class="o">|</span> <span class="n">Derivation</span><span class="p">]</span>
 </span></code></pre></div>
 
     <div class="doc doc-contents ">
@@ -4447,6 +4503,104 @@ silently dropped -- both for the reasons the fan-out's version gives.</p>
 <p><code>parents</code> is part of the digest because it changes which rows exist:
 two declarations differing only in their subset build different
 databases, and a cache key that agreed would serve one for the other.</p>
+
+
+    </div>
+
+</div>
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h2 id="django_data_shape.relations.tree.Tree" class="doc doc-heading">
+            <span class="doc doc-object-name doc-class-name">Tree</span>
+
+
+<a href="#django_data_shape.relations.tree.Tree" class="headerlink" title="Permanent link">&para;</a></h2>
+
+
+    <div class="doc doc-contents first">
+
+
+
+        <p>Each row's parent is an earlier row of the same table, or nobody.</p>
+<p>The self-referential relation -- an org unit's parent unit, a comment's
+reply-to, a category's parent category -- which a <code>FanOut</code> cannot fill,
+because a fan-out reads its parent's keys out of a table that is still
+empty while this one loads. A tree needs no read at all: this package owns
+the keys, so a row's parent key is the key it assigns to an earlier row
+index.</p>
+<p><strong>Acyclic by construction.</strong> Every non-root row points at a row with a
+<em>lower index</em>, so following parents strictly descends and has to end at a
+root. Nothing is checked after the fact because nothing could go wrong.</p>
+<p><code>roots</code> is the share of rows with no parent, which is why the column has
+to be nullable. The count is exact rather than drawn -- <code>ceil(rows *
+roots)</code> -- and spread evenly through the table, and the first row is always
+one of them, since there is no earlier row for it to point at. That is also
+why a share of zero is refused rather than read as "one root".</p>
+<p><code>sizes</code> weighs how many children each row gets, as it does on a
+<code>FanOut</code>: normalised, so only the spread matters, and <strong>keyed on the
+row's position rather than ordered by it</strong>. The largest families sit
+wherever their weights fell, not at the lowest keys. That is the part a
+naive construction gets wrong -- each child picking an earlier row by
+weight makes the first rows the whales purely because every later row could
+pick them -- and getting it wrong puts a correlation between a key and its
+family size into the table, which the planner can see.</p>
+<p>One correlation is left, and it is the rule's own price rather than the
+construction's: a row near the end has few rows after it to be its
+children, so the last rows are leaves whatever they weigh, and the children
+they could not take go to earlier rows by weight. See <code>docs/relations.md</code>
+for how large that is.</p>
+<p>There is no <code>placement</code>. Every parent is an earlier row, so the parent
+column climbs with the table whatever order a family is written in, which is
+also how a production tree looks. Nor is there a <code>max_children</code>, a
+<code>childless</code> or a depth; the depth is whatever the sizes make it, and flat
+sizes, where every row has about one child, make long chains.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="django_data_shape.relations.tree.Tree.canonical" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">canonical</span>
+
+
+<a href="#django_data_shape.relations.tree.Tree.canonical" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">canonical</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">object</span>
+</span></code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>The root share and the size distribution. See <code>Canonical</code>.</p>
 
 
     </div>
@@ -5789,7 +5943,8 @@ backwards.</p>
 catches it with a terrible message: a unique index failing at row 700,000 of
 a load that has already run for a minute, naming an index rather than a
 declaration. So the arithmetic is done here instead, from
-<code>Model._meta.constraints</code>, before a single row is generated.</p>
+<code>Model._meta.constraints</code> and <code>Model._meta.unique_together</code>, before a
+single row is generated.</p>
 <p><strong><code>_meta.total_unique_constraints</code> is the helper that sounds right and
 is the wrong one.</strong> It deliberately excludes conditional constraints -- it
 exists to answer whether a relation is one-to-one, and a constraint that

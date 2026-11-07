@@ -1000,8 +1000,9 @@ statistic about which row of a group holds which value, so the selectivity, the
 plan and the cost are identical either way. What <code>order_by</code> buys is that the
 active project is the <em>newest</em> one, which is realism for the application.</p>
 <h2 id="the-pre-check">The pre-check<a class="headerlink" href="#the-pre-check" title="Permanent link">&para;</a></h2>
-<p>The models' own constraints are read from <code>Model._meta.constraints</code> when the
-<code>Shape</code> is declared, and a contradiction is refused with the arithmetic in it:</p>
+<p>The models' own constraints are read from <code>Model._meta.constraints</code> and
+<code>Model._meta.unique_together</code> when the <code>Shape</code> is declared, and a contradiction
+is refused with the arithmetic in it:</p>
 <div class="language-text highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>one_active_project_per_company permits at most 50000 rows with status='ACTIVE',
 </span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>one per (company); Project.status is filled by Skew({'ACTIVE': 0.1, ...}), which
 </span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>asks for 200000 of them. A rule about a group cannot be kept by a draw made per
@@ -1022,7 +1023,10 @@ this case. <code>_meta.constraints</code> is read directly.</p>
 <li><strong>An unconditional <code>UniqueConstraint</code> is pigeonhole</strong>, and provable: two
   million rows needing distinct <code>(company, label)</code> pairs cannot be built from
   fifty thousand companies and three labels, whatever the seed. This is the
-  multi-column analysis a single <code>Table</code> declines to attempt.</li>
+  multi-column analysis a single <code>Table</code> declines to attempt.
+  <code>Meta.unique_together</code> builds the same unique index and is checked the same
+  way under every rule below; it has no name of its own, so a refusal names the
+  tuple instead -- <code>unique_together ('company', 'person') needs ...</code>.</li>
 <li><strong>Enough room is never a way to fill it, and that holds with no fan-out
   anywhere.</strong> Every mechanism this package has for filling a column computes it
   from the row index alone, so nothing enumerates a tuple and nothing keeps a
@@ -1039,6 +1043,12 @@ this case. <code>_meta.constraints</code> is read directly.</p>
   <code>unique=True</code> writes no entry in <code>_meta.constraints</code>, and a single table
   cannot see how many parents there are. The exemption is the same proof the
   others carry: flat sizes, no <code>childless</code> share, and rows no more than parents.</li>
+<li><strong>A <code>Tree</code> beside drawn columns is refused the same way</strong>, as in names
+  unique among siblings: a tree gives a row several children whenever its sizes
+  say so, and a drawn value cannot see its siblings. A tree's families are not
+  ranges of rows, so no derivation is decided per family; the exemption is
+  <code>Distinct</code>, and a <code>Tree</code> alone under a <code>UniqueConstraint</code> is refused as a
+  unique column is.</li>
 <li><strong>Enough room is not a way to fill it.</strong> An unconditional constraint over
   <strong>two fan-outs</strong> — the through table of a many-to-many — passes the pigeonhole
   comfortably, because the product of two parent counts dwarfs the row count,

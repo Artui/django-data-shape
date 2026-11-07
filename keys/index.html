@@ -789,7 +789,9 @@ deterministic function from the row index to that row's key.</p>
 <li><strong>A foreign key is satisfied without a lookup</strong>, because a child can compute
   its parent's key from the parent's row index.</li>
 <li><strong>A self-referential tree is acyclic by construction</strong>, because
-  <code>parent_index &lt; child_index</code> holds on the <em>index</em>, not on the value.</li>
+  <code>parent_index &lt; child_index</code> holds on the <em>index</em>, not on the value. That is
+  what a <a href="../relations/#trees-a-key-to-the-tables-own-rows"><code>Tree</code></a> builds:
+  each row's parent key is the key this strategy gives an earlier row.</li>
 <li><strong>Two builds of one shape agree</strong>, because the same seed produces the same
   keys.</li>
 </ul>

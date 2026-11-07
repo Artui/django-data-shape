@@ -545,6 +545,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#trees-a-key-to-the-tables-own-rows" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Trees — a key to the table's own rows
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#placement-where-the-children-physically-sit" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -991,6 +1002,17 @@
         
       </ul>
     </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#trees-a-key-to-the-tables-own-rows" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Trees — a key to the table's own rows
+      
+    </span>
+  </a>
   
 </li>
       
@@ -1446,6 +1468,111 @@ leave out when a group wants more than half — is ten times faster and <em>a
 different sampling rule</em>, so a group one row over the halfway mark would get a
 materially different membership from one row under. A cliff at an arbitrary size
 that no declaration mentions is not something this package will build.</p>
+<h2 id="trees-a-key-to-the-tables-own-rows">Trees — a key to the table's own rows<a class="headerlink" href="#trees-a-key-to-the-tables-own-rows" title="Permanent link">&para;</a></h2>
+<p>An org unit's parent unit, a comment's reply-to, a category's parent category:
+a foreign key to the model's own table. A <code>FanOut</code> cannot fill one, because it
+reads its parent's keys out of a table that is still empty while this one loads.
+A <code>Tree</code> reads nothing:</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">django_data_shape</span><span class="w"> </span><span class="kn">import</span> <span class="n">Constant</span><span class="p">,</span> <span class="n">Shape</span><span class="p">,</span> <span class="n">Table</span><span class="p">,</span> <span class="n">Tree</span><span class="p">,</span> <span class="n">Zipf</span>
+</span><span id="__span-12-2"><a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>
+</span><span id="__span-12-3"><a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="n">Shape</span><span class="p">(</span>
+</span><span id="__span-12-4"><a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a>    <span class="n">Table</span><span class="p">(</span><span class="n">Category</span><span class="p">,</span> <span class="n">rows</span><span class="o">=</span><span class="mi">50_000</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="n">Constant</span><span class="p">(</span><span class="s2">"c"</span><span class="p">),</span> <span class="n">parent</span><span class="o">=</span><span class="n">Tree</span><span class="p">(</span><span class="n">roots</span><span class="o">=</span><span class="mf">0.05</span><span class="p">,</span> <span class="n">sizes</span><span class="o">=</span><span class="n">Zipf</span><span class="p">())),</span>
+</span><span id="__span-12-5"><a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a><span class="p">)</span>
+</span></code></pre></div>
+<p><strong>Each row's parent is an earlier row, so the tree is acyclic by construction.</strong>
+This package owns the keys (see <a href="../keys/">Keys</a>), so a parent's key is the key
+the table's own strategy gives an earlier row index, and following parents
+strictly descends until it reaches a root. Nothing is checked afterwards,
+because nothing can go wrong.</p>
+<p><code>roots</code> is the share of rows with no parent, so the column has to be nullable.
+The count is exact, <code>ceil(rows * roots)</code>, spread evenly through the table, and
+the first row is always one of them because there is no earlier row for it to
+point at. That is also why <code>roots=0</code> is refused rather than read as one root.</p>
+<p><code>sizes</code> weighs how many children each row gets, as it does on a <code>FanOut</code>, and
+<strong>the weight is keyed on the row's position rather than ordered by it</strong>, so the
+largest families sit wherever their draws fell. Each child takes as its parent
+an earlier row that still has room, picked in proportion to the room it has
+left.</p>
+<p>The obvious construction is to have each child pick an earlier row by weight.
+It makes the first rows the whales simply because every later row could pick
+them. Measured on 5,000 rows of <code>Tree(roots=0.05, sizes=Zipf())</code> over seeds 0
+to 7, that construction puts 28% to 48% of the children under the first tenth of
+the keys; a <code>Tree</code> puts 10% to 23% there, against a fair share of 10%. The
+spread is a single <code>Zipf</code> whale, which can hold a fifth of the table.</p>
+<p>What remains is the rule's own price. A row near the end has few rows after it
+to be its children, so the last rows are leaves whatever they weigh. A child
+that finds no earlier row with room left goes to an earlier row by weight
+alone. Measured at 200,000 rows of <code>Tree(roots=0.05, sizes=Zipf())</code> over seeds
+0 to 15:</p>
+<ul>
+<li>the first tenth of the keys holds 10% to 35% of the children, and in 15 of the
+  16 seeds no more than 15%; the last tenth holds 2% to 10%;</li>
+<li>the Spearman correlation between a row's key and its number of children is
+  -0.19 to -0.01.</li>
+</ul>
+<p><strong><code>pg_stats.correlation</code> on the column comes out high, above 0.7.</strong> (That is the
+bound the test holds, on 5,000 rows of <code>Zipf()</code> at roots 0.05 and seed 1.)
+Every parent is an earlier row, so the column can only climb as the table goes
+on. That is also what a production tree looks like, because a row is inserted
+after the row it hangs from. It is the honest value here, not the clustered
+layout a fan-out's <code>placement="grouped"</code> manufactures, and a <code>Tree</code> has no
+<code>placement</code> of its own for that reason.</p>
+<p><strong>The sizes decide how far a family spreads and how deep the tree goes.</strong> A
+heavy row keeps room for a long time, so its children spread far through the
+rows after it; a row with room for one child usually gives it to a row soon
+after. Measured with <code>roots=0.05</code>, each cell the lowest and highest over seeds
+0 to 15 (a root is at depth 0):</p>
+<table>
+<thead>
+<tr>
+<th><code>sizes</code></th>
+<th>rows</th>
+<th>median rows from parent to child</th>
+<th>deepest row</th>
+<th>mean depth</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Zipf()</code></td>
+<td>20,000</td>
+<td>93 to 1,872.5</td>
+<td>22 to 72</td>
+<td>8.9 to 30.3</td>
+</tr>
+<tr>
+<td><code>Zipf()</code></td>
+<td>200,000</td>
+<td>77 to 14,150</td>
+<td>31 to 95</td>
+<td>9.3 to 22.8</td>
+</tr>
+<tr>
+<td><code>Uniform(1, 3)</code></td>
+<td>20,000</td>
+<td>6 to 14</td>
+<td>119 to 198</td>
+<td>18.2 to 20.1</td>
+</tr>
+<tr>
+<td><code>Uniform(1, 3)</code></td>
+<td>200,000</td>
+<td>13 to 35</td>
+<td>160 to 224</td>
+<td>18.4 to 19.4</td>
+</tr>
+</tbody>
+</table>
+<p>A heavy tail is a different tree for every seed: one whale decides how far the
+families spread, so the <code>Zipf()</code> rows span more than an order of magnitude where
+<code>Uniform(1, 3)</code> barely moves.</p>
+<p>Flat sizes give every row about one child, which is long chains. That is what
+they declare, and a heavy tail is what most trees have.</p>
+<p>A <code>Tree</code> has no <code>childless</code>, <code>null</code> or <code>max_children</code> either, and no depth of
+its own. It needs no other table, so it adds
+nothing to the load order. In <code>COPY</code>, every parent is written before its
+children. On SQLite the rows are inserted in order, so every parent is already
+in the table when its child arrives.</p>
 <h2 id="placement-where-the-children-physically-sit">Placement — where the children physically sit<a class="headerlink" href="#placement-where-the-children-physically-sit" title="Permanent link">&para;</a></h2>
 <p><code>placement</code> decides the order children are written in, and it is not cosmetic.</p>
 <table>
@@ -1499,7 +1626,18 @@ filled first is decided by the declarations and needs no connection to answer.</
   numbers whose sum is too large for a float. A size weighs a parent's share of
   the rows; <code>childless=</code> is how a parent with none is asked for.</li>
 <li>A <strong>self-referential</strong> <code>FanOut</code>. It would read keys from a table still empty at
-  load time; self-referential trees are their own feature.</li>
+  load time. The refusal names the <code>Tree</code> that fills the column instead.</li>
+<li>A <code>Tree</code> on a key to <strong>another</strong> table, where its parents would be keys that
+  table never had; on a column that <strong>cannot be null</strong>, since its first row is
+  always a root; and on a <strong>unique</strong> column, which takes one child per parent.</li>
+<li>Anything read <strong>across</strong> a <code>Tree</code>, or decided per <strong>family</strong> of one. The
+  parent is a row of the same table generated in the same pass, and a family is
+  not a range of rows the way a fan-out's group is.</li>
+<li>A <code>Tree</code> under a <strong>uniqueness</strong> with nothing beside it but per-row draws, as
+  in names unique among siblings: a drawn value cannot see its siblings, so two
+  of them sharing one is a matter of the seed. A column that is <code>Distinct</code> in
+  every row, such as <code>Sequential</code>, keeps the constraint; a <code>Tree</code> alone under a
+  <code>UniqueConstraint</code> is refused as a unique column is.</li>
 <li>A required relation <strong>left undeclared</strong>, which would fail the load on a
   not-null violation rather than at declaration time. The message names the
   column and the fan-out that fills it: forgetting one foreign key is the
