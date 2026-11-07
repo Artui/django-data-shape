@@ -10,9 +10,13 @@ from django_data_shape.declaration.table import Table
 from django_data_shape.derivations.derivation import Derivation
 from django_data_shape.derivations.scope import Scope
 from django_data_shape.distributions.distribution import Distribution
+from django_data_shape.keys.key_strategy import KeyStrategy
 from django_data_shape.relations.fan_out_plan import FanOutPlan
 from django_data_shape.relations.paired import Paired
 from django_data_shape.relations.paired_plan import PairedPlan
+from django_data_shape.relations.resolve_tree import resolve_tree
+from django_data_shape.relations.tree import Tree
+from django_data_shape.relations.tree_plan import TreePlan
 from django_data_shape.utils import draw, field_stream
 
 # One step of the computation: fill slot ``i`` of the row being built, given the
@@ -70,7 +74,7 @@ def generate_rows(
     # of column this is, and where each of its sources comes from, are decided
     # once rather than a million times.
     steps: list[_Step] = [
-        (slot_of[name], _producer(table, seed, plans, pairings, name))
+        (slot_of[name], _producer(table, seed, plans, pairings, name, key_stream))
         for name, _field in columns
         if name not in table.computation_order()
     ]
@@ -92,8 +96,16 @@ def _producer(
     plans: Mapping[str, FanOutPlan],
     pairings: Mapping[str, PairedPlan],
     name: str,
+    key_stream: int,
 ) -> Callable[[int, list[object]], object]:
     """The step for a column that depends on nothing already in the row."""
+    declared = table.fields[name]
+    if isinstance(declared, Tree):
+        # Resolved here rather than beside the fan-outs in the build, because
+        # it reads nothing: a tree's parents are rows of this table, and their
+        # keys come from the same strategy and stream as the row's own key.
+        tree = resolve_tree(declared, table.rows, seed, table.db_table, name)
+        return partial(_from_tree, tree, table.keys, key_stream)
     plan = plans.get(name)
     if plan is not None:
         return partial(_from_plan, plan)
@@ -164,6 +176,13 @@ def _from_distribution(
 
 def _from_plan(plan: FanOutPlan, row: int, values: list[object]) -> object:
     return plan.key_for(row)
+
+
+def _from_tree(
+    plan: TreePlan, keys: KeyStrategy, key_stream: int, row: int, values: list[object]
+) -> object:
+    parent = plan.parent_for(row)
+    return None if parent is None else keys.key_for(parent, key_stream)
 
 
 def _from_pairing(plan: FanOutPlan, pairing: PairedPlan, row: int, values: list[object]) -> object:

@@ -431,6 +431,66 @@ different sampling rule*, so a group one row over the halfway mark would get a
 materially different membership from one row under. A cliff at an arbitrary size
 that no declaration mentions is not something this package will build.
 
+## Trees — a key to the table's own rows
+
+An org unit's parent unit, a comment's reply-to, a category's parent category:
+a foreign key to the model's own table. A `FanOut` cannot fill one, because it
+reads its parent's keys out of a table that is still empty while this one loads.
+A `Tree` reads nothing:
+
+```python
+from django_data_shape import Constant, Shape, Table, Tree, Zipf
+
+Shape(
+    Table(Category, rows=50_000, name=Constant("c"), parent=Tree(roots=0.05, sizes=Zipf())),
+)
+```
+
+**Each row's parent is an earlier row, so the tree is acyclic by construction.**
+This package owns the keys (see [Keys](keys.md)), so a parent's key is the key
+the table's own strategy gives an earlier row index, and following parents
+strictly descends until it reaches a root. Nothing is checked afterwards,
+because nothing can go wrong.
+
+`roots` is the share of rows with no parent, so the column has to be nullable.
+The count is exact, `ceil(rows * roots)`, spread evenly through the table, and
+the first row is always one of them because there is no earlier row for it to
+point at. That is also why `roots=0` is refused rather than read as one root.
+
+`sizes` weighs how many children each row gets, as it does on a `FanOut`, and
+**the weight is keyed on the row's position rather than ordered by it**, so the
+largest families sit wherever their draws fell. Each child takes as its parent
+an earlier row that still has room, picked in proportion to the room it has
+left, which also scatters a row's children through the rows after it.
+
+The obvious construction is to have each child pick an earlier row by weight.
+It makes the first rows the whales simply because every later row could pick
+them: on 5,000 rows it puts 28% to 39% of the children under the first tenth of
+the keys. A `Tree` puts 11% to 21% there, against a fair share of 10%.
+
+What remains is the rule's own price. A row near the end has few rows after it
+to be its children, so the last rows are leaves whatever they weigh. A child
+that finds no earlier row with room left goes to an earlier row by weight
+alone. Measured at 200,000 rows on `Zipf()`:
+
+- the first tenth of the keys holds 11.4% of the children and the last tenth
+  9.1%;
+- the Spearman correlation between a row's key and its number of children is
+  -0.02.
+
+**`pg_stats.correlation` on the column comes out high, from 0.8 to 1.0.**
+Every parent is an earlier row, so the column can only climb as the table goes
+on. That is also what a production tree looks like, because a row is inserted
+after the row it hangs from. It is the honest value here, not the clustered
+layout a fan-out's `placement="grouped"` manufactures, and a `Tree` has no
+`placement` of its own for that reason.
+
+A `Tree` has no `childless`, `null` or `max_children` either, and no depth: the
+depth is whatever the sizes make it. It needs no other table, so it adds
+nothing to the load order. In `COPY`, every parent is written before its
+children. On SQLite the rows are inserted in order, so every parent is already
+in the table when its child arrives.
+
 ## Placement — where the children physically sit
 
 `placement` decides the order children are written in, and it is not cosmetic.
@@ -475,7 +535,13 @@ filled first is decided by the declarations and needs no connection to answer.
   numbers whose sum is too large for a float. A size weighs a parent's share of
   the rows; `childless=` is how a parent with none is asked for.
 - A **self-referential** `FanOut`. It would read keys from a table still empty at
-  load time; self-referential trees are their own feature.
+  load time. The refusal names the `Tree` that fills the column instead.
+- A `Tree` on a key to **another** table, where its parents would be keys that
+  table never had; on a column that **cannot be null**, since its first row is
+  always a root; and on a **unique** column, which takes one child per parent.
+- Anything read **across** a `Tree`, or decided per **family** of one. The
+  parent is a row of the same table generated in the same pass, and a family is
+  not a range of rows the way a fan-out's group is.
 - A required relation **left undeclared**, which would fail the load on a
   not-null violation rather than at declaration time. The message names the
   column and the fan-out that fills it: forgetting one foreign key is the

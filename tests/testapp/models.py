@@ -1248,3 +1248,28 @@ class DottedTable(models.Model):
 
     class Meta:
         db_table = "testapp.dotted_table"
+
+
+class Category(models.Model):
+    """A tree: a nullable foreign key to its own table, the column ``Tree`` fills."""
+
+    name = models.CharField(max_length=50)
+    parent = models.ForeignKey("self", null=True, on_delete=models.CASCADE, related_name="children")
+
+
+class RootlessNode(models.Model):
+    """A self-reference that cannot be null, which no tree can fill.
+
+    Its first row has no earlier row to point at, so a root -- a NULL -- is the
+    only thing it could hold, and the column refuses one.
+    """
+
+    parent = models.ForeignKey("self", on_delete=models.CASCADE)
+
+
+class Successor(models.Model):
+    """A unique self-reference: at most one row may point at each."""
+
+    previous = models.OneToOneField(
+        "self", null=True, on_delete=models.SET_NULL, related_name="following"
+    )

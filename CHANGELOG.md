@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`Tree(roots=, sizes=)` fills a foreign key to the model's own table.** An org
+  unit's parent, a comment's reply-to and a category's parent were refused as
+  self-referential, which left a tree to an `UPDATE` after `build()` and a manual
+  `ANALYZE`. Each row's parent is now an earlier row, so the tree is acyclic by
+  construction and needs no lookup. `roots` is the exact share of rows with a
+  NULL parent, and the first row is always one of them. `sizes` weighs each
+  row's family by its position, as a fan-out's does, so the largest families
+  are not the lowest keys. A `Tree` is refused on a key to another table, on a
+  column that cannot be null, and on a unique one. The refusal of a
+  self-referential `FanOut` now names it.
+
 ### Fixed
 
 - **A many-to-many field's name is refused as what it is.** Naming one in a
