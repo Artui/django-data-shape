@@ -21,6 +21,7 @@ from django_data_shape.utils import (
     check_statistics_target,
     field_stream,
     has_db_default,
+    many_to_many_refusal,
     primary_key_field,
 )
 
@@ -589,6 +590,8 @@ class Projection:
         known = _addressable(self._model)
         unknown = sorted(name for name in columns if name not in known)
         if unknown:
+            if (refusal := many_to_many_refusal(self._model, unknown)) is not None:
+                raise InvalidShape(refusal)
             raise InvalidShape(
                 f"{self._model.__name__} has no field named {', '.join(unknown)}. "
                 f"Its concrete fields are: {', '.join(sorted(known))} -- a relation appears "
@@ -615,6 +618,8 @@ class Projection:
         for name in sorted(self._statistics):
             where = f"{self._model.__name__}.{name}"
             if name not in known:
+                if (refusal := many_to_many_refusal(self._model, [name])) is not None:
+                    raise InvalidShape(refusal)
                 raise InvalidShape(
                     f"{self._model.__name__} has no field named {name}, so it cannot be given a "
                     f"statistics target. Its concrete fields are: {', '.join(sorted(known))}."

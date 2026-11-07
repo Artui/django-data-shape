@@ -5,9 +5,9 @@ from __future__ import annotations
 import hashlib
 import numbers
 import re
-from collections.abc import Generator
+from collections.abc import Generator, Iterable
 from contextlib import contextmanager
-from typing import Any
+from typing import Any, cast
 
 from django.core.exceptions import ValidationError
 from django.core.management.color import no_style
@@ -249,6 +249,32 @@ def draw(stream: int, row: int) -> float:
     # contract every distribution is written against. This is the same
     # construction the standard library uses for ``random.random()``.
     return (z >> 11) / 9007199254740992.0
+
+
+def many_to_many_refusal(model: type[Model], names: Iterable[str]) -> str | None:
+    """The refusal for the first of ``names`` that is a many-to-many field, or ``None``.
+
+    A many-to-many field is not a column: its rows are the through model's, so
+    "has no field named" with a list of concrete fields sends the reader away
+    from the fix. The fix is to declare the through model as a table of its own,
+    with ``FanOut`` for one end and ``Paired`` for the other. Every site that
+    refuses an unknown name calls this first, so the field a reader did name
+    gets that answer wherever the name was written.
+    """
+    fields = {field.name: field for field in model._meta.many_to_many}
+    for name in names:
+        if name in fields:
+            # A many-to-many field always resolves to a through model by the time a
+            # declaration is built, auto-created or declared.
+            through = cast(type[Model], fields[name].remote_field.through).__name__
+            return (
+                f"{model.__name__}.{name} is a many-to-many field, which is not a column of "
+                f"{model.__name__}: its rows are the through model's. Declare the through model "
+                f"{through} as a table of its own, with FanOut for one end and Paired for the "
+                "other (see Relations, under Many-to-many), and leave "
+                f"{name} out of this declaration."
+            )
+    return None
 
 
 def check_not_inherited(model: type[Model]) -> None:

@@ -27,6 +27,7 @@ from django_data_shape.utils import (
     check_not_inherited,
     check_statistics_target,
     has_db_default,
+    many_to_many_refusal,
     offsettable_kind,
     primary_key_field,
 )
@@ -199,6 +200,8 @@ class Table:
 
         unknown = sorted(name for name in self.fields if name not in known)
         if unknown:
+            if (refusal := many_to_many_refusal(self.model, unknown)) is not None:
+                raise InvalidShape(refusal)
             raise InvalidShape(
                 f"{self.model.__name__} has no field named {', '.join(unknown)}. "
                 f"Its concrete fields are: {', '.join(sorted(known))}."
@@ -295,6 +298,8 @@ class Table:
         for name in sorted(self._statistics):
             where = f"{self.model.__name__}.{name}"
             if name not in known:
+                if (refusal := many_to_many_refusal(self.model, [name])) is not None:
+                    raise InvalidShape(refusal)
                 raise InvalidShape(
                     f"{self.model.__name__} has no field named {name}, so it cannot be given a "
                     f"statistics target. Its concrete fields are: {', '.join(sorted(known))}."

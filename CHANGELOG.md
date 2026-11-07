@@ -17,6 +17,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Every unconditional check now reads both, and the refusal names the tuple:
   `unique_together ('company', 'person') needs every (company, person)
   combination distinct, ...`.
+- **A many-to-many field's name is refused as what it is.** Naming one in a
+  `Table`, in a `Projection`'s `columns=`, or in either's `statistics=` was
+  answered with "has no field named members" and a list of concrete fields, which
+  sent the reader away from the fix. It now says the field is many-to-many, names
+  its through model, and points at declaring that model as a table of its own with
+  `FanOut` for one end and `Paired` for the other.
 
 ## [0.24.0] — 2026-11-07
 
