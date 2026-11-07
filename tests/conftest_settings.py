@@ -75,8 +75,8 @@ DATABASES["templated"] = {
     "TEST": {"DEPENDENCIES": []},
 }
 
-# A fourth alias that no test asks for, so pytest-django never makes a test
-# database for it and its NAME stays the one configured here: the state of a
+# A fourth alias that no test asks for, so pytest-django (from 4.11) never makes a
+# test database for it and its NAME stays the one configured here: the state of a
 # developer's own database in a run whose tests touch none, which a fixture
 # replacing a test database has to leave alone. No test may name it in a
 # django_db mark, or pytest-django sets it up and the premise is gone.

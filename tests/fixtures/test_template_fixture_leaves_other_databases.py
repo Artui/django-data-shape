@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from importlib.metadata import version
 from typing import Any
 
 import pytest
@@ -21,6 +22,11 @@ ALIAS = "unrequested"
 _SHAPE = Shape(Table(Catalogue, rows=5, name=Constant("placeholder")), seed=23)
 
 _made: list[str] = []
+
+# Before 4.11 pytest-django made a test database for every alias, this one
+# included, so nothing is left configured for the fixture to protect, and the
+# fixture replacing that test database is what it should do.
+_EVERY_ALIAS_SET_UP = tuple(int(part) for part in version("pytest-django").split(".")[:2]) < (4, 11)
 
 
 def _developers_own(using: str) -> str:
@@ -52,6 +58,9 @@ def handed(unrequested: str, django_db_blocker: Any) -> Iterator[str]:
             drop_database(name, using=ALIAS)
 
 
+@pytest.mark.skipif(
+    _EVERY_ALIAS_SET_UP, reason="pytest-django before 4.11 makes a test database for every alias"
+)
 def test_a_database_pytest_django_did_not_make_is_left_alone(
     handed: str, django_db_blocker: Any
 ) -> None:

@@ -265,15 +265,17 @@ and clones the template in its place, under the same name. pytest-django's
 teardown drops the clone as it would have dropped its own, and each test's
 transaction wraps the clone as it would any test database.
 
-**Only a test database is replaced.** pytest-django makes a test database only
-for the aliases a collected test asks for, so in a run of tests that touch no
+**Only a test database is replaced.** pytest-django (from 4.11) makes a test
+database only for the aliases a collected test asks for, so in a run of tests that touch no
 database -- `pytest tests/test_pure.py` with the autouse fixture above -- the
 alias still names the database in your settings. The fixture leaves that one
 alone and only hands back the template's name. It does the same under a
 `django_db_setup` that makes no test database, as pytest-django's recipe for an
 existing database does. A test database here is `TEST["NAME"]` when that is set
 (pytest-django sets it under xdist) and your configured name with Django's
-`test_` prefix otherwise.
+`test_` prefix otherwise, so a database of your own whose configured name
+already starts with `test_` cannot be told apart from one: name it otherwise,
+or set `TEST["NAME"]`.
 
 ### What replacing the database means
 

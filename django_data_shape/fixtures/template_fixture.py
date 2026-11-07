@@ -70,14 +70,15 @@ def template_fixture(
     was handed, or on its key, can use.
 
     **Only a test database is replaced.** pytest-django makes one only for the
-    aliases a collected test asks for, so in a run whose tests touch no
+    aliases a collected test asks for (from 4.11; before that, for every alias), so in a run whose tests touch no
     database the alias still names the configured one -- a developer's own --
     and the fixture hands back the template's name and leaves it alone. The
     same goes for a ``django_db_setup`` that makes no test database, as
     pytest-django's recipe for an existing one does: the template is not
     cloned into a database the settings do not call a test database, which is
     ``TEST["NAME"]`` when that is set and the configured name with Django's
-    ``test_`` prefix otherwise.
+    ``test_`` prefix otherwise -- so a database of your own whose configured
+    name already starts with ``test_`` is not told apart from one.
 
     **What is worth knowing**, because each is a consequence of replacing the
     database rather than filling it:
@@ -121,7 +122,7 @@ def template_fixture(
             name = template(using)
             target = connection.settings_dict["NAME"]
             # pytest-django makes test databases only for the aliases a
-            # collected test asks for, so in a run whose tests touch no
+            # collected test asks for (from 4.11; every alias before that), so in a run whose tests touch no
             # database, or under a django_db_setup that makes none, the alias
             # still names the configured database, and replacing it would drop
             # a developer's own
