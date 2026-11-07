@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.24.0] — 2026-11-07
+
 ### Added
 
 - **`derive_template(template, step, *, key)` caches a world the application
@@ -1778,7 +1780,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   into `COPY FROM STDIN`, which psycopg 2 cannot do without materialising them
   first.
 
-[Unreleased]: https://github.com/Artui/django-data-shape/compare/v0.23.0...HEAD
+[Unreleased]: https://github.com/Artui/django-data-shape/compare/v0.24.0...HEAD
+[0.24.0]: https://github.com/Artui/django-data-shape/compare/v0.23.0...v0.24.0
 [0.23.0]: https://github.com/Artui/django-data-shape/compare/v0.22.0...v0.23.0
 [0.22.0]: https://github.com/Artui/django-data-shape/compare/v0.21.0...v0.22.0
 [0.21.0]: https://github.com/Artui/django-data-shape/compare/v0.20.0...v0.21.0
