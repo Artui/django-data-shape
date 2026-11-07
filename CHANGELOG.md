@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.24.0] — 2026-11-07
+
+### Added
+
+- **`derive_template(template, step, *, key)` caches a world the application
+  finishes.** Some columns are an application's own arithmetic, such as running
+  totals a replay through its services computes, and no declaration can describe
+  them. It copies a template `template_database` (or `derive_template`) returned,
+  runs `step(using)` once over the copy with the alias pointed at it, runs
+  `ANALYZE` over the whole database -- not only the declared tables, since the
+  step may write to others -- and keeps the result as a template of its own, so a
+  session pays a clone rather than the replay. `key` is required: a callable
+  cannot be hashed, so the caller names the step and changes the key when the
+  step changes. The derived name is a digest of the parent's name and the key,
+  so it also moves with everything the parent's name moves with. Steps chain, a
+  step that raises leaves nothing behind and is raised again as `StepFailed`
+  naming the key, and a parent this package did not finish is refused.
+  `strategy=` is the copy's, as for `clone_database`.
+- **`template_fixture(template)`, a session-scoped pytest fixture that makes the
+  test database a clone of a template**, which is how a test reaches a derived
+  one. `template` is a callable taking the connection alias and returning a
+  template's name. It requests `django_db_setup` and then replaces the test
+  database pytest-django made, under the same name, so xdist suffixes and
+  pytest-django's teardown work as before. Only a test database is replaced: in a
+  run whose tests touch no database the alias still names your configured one
+  (pytest-django 4.11 and later), and the fixture leaves it alone. The pytest page lists what replacing the
+  database means for tests that ran earlier and for transactional tests.
+- **`StepFailed`**, raised from the step's own exception.
+- **Documentation:** the statistics page has a section on a world the
+  application finishes, and the pytest page one on `template_fixture`.
+
 ## [0.23.0] — 2026-10-23
 
 ### Added
@@ -1751,7 +1782,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   into `COPY FROM STDIN`, which psycopg 2 cannot do without materialising them
   first.
 
-[Unreleased]: https://github.com/Artui/django-data-shape/compare/v0.23.0...HEAD
+[Unreleased]: https://github.com/Artui/django-data-shape/compare/v0.24.0...HEAD
+[0.24.0]: https://github.com/Artui/django-data-shape/compare/v0.23.0...v0.24.0
 [0.23.0]: https://github.com/Artui/django-data-shape/compare/v0.22.0...v0.23.0
 [0.22.0]: https://github.com/Artui/django-data-shape/compare/v0.21.0...v0.22.0
 [0.21.0]: https://github.com/Artui/django-data-shape/compare/v0.20.0...v0.21.0

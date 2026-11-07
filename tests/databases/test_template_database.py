@@ -38,7 +38,6 @@ from django_data_shape import (
     template_database,
 )
 from django_data_shape.databases.template_database import (
-    PREFIX,
     _ahead_of_disk,
     _base_context,
     _context,
@@ -46,6 +45,7 @@ from django_data_shape.databases.template_database import (
     _schema_digest,
     _stranded_squashes,
 )
+from django_data_shape.utils import TEMPLATE_PREFIX
 from django_data_shape.version import __version__
 from tests.testapp.models import (
     Award,
@@ -177,7 +177,9 @@ def _migrate(database: str, *arguments: str) -> None:
 
 def _templates_on_the_server() -> set[str]:
     with connection.cursor() as cursor:
-        cursor.execute("SELECT datname FROM pg_database WHERE datname LIKE %s", [f"{PREFIX}%"])
+        cursor.execute(
+            "SELECT datname FROM pg_database WHERE datname LIKE %s", [f"{TEMPLATE_PREFIX}%"]
+        )
         return {row[0] for row in cursor.fetchall()}
 
 
@@ -193,7 +195,7 @@ def test_it_creates_a_template_named_after_the_declaration(
 ) -> None:
     name = _template(_shape(), temporary_databases)
 
-    assert name.startswith(PREFIX)
+    assert name.startswith(TEMPLATE_PREFIX)
     assert _oid(name) is not None
 
 
@@ -316,7 +318,8 @@ def test_a_shape_whose_build_fails_leaves_no_half_built_template(
 
     with connection.cursor() as cursor:
         cursor.execute(
-            "SELECT count(*) FROM pg_database WHERE datname LIKE %s", [f"{PREFIX}%\\_\\_partial"]
+            "SELECT count(*) FROM pg_database WHERE datname LIKE %s",
+            [f"{TEMPLATE_PREFIX}%\\_\\_partial"],
         )
 
         assert cursor.fetchone()[0] == 0
@@ -469,7 +472,7 @@ def test_a_declaration_the_cache_cannot_key_on_is_the_only_thing_it_refuses(
         seed=14,
     )
 
-    assert _template(shape, temporary_databases).startswith(PREFIX)
+    assert _template(shape, temporary_databases).startswith(TEMPLATE_PREFIX)
 
 
 # The key, taken apart. Each piece is a function of its arguments rather than of
@@ -563,7 +566,7 @@ def test_a_template_can_start_from_a_migrated_base(temporary_databases: list[str
     temporary_databases.append(target)
     clone_database(name, target)
 
-    assert name.startswith(PREFIX)
+    assert name.startswith(TEMPLATE_PREFIX)
     assert _rows_in(target, "SELECT name FROM auth_group") == [("from the base",)]
     assert _rows_in(target, f"SELECT count(*) FROM {Catalogue._meta.db_table}") == [(40,)]
 
@@ -847,7 +850,7 @@ def test_a_partial_this_package_left_is_never_a_base(temporary_databases: list[s
     # A build killed between creating its working database and renaming it
     # leaves one under the template's name and the partial suffix, and it is
     # this package's as much as a finished template is.
-    partial = f"{PREFIX}{secrets.token_hex(8)}__partial"
+    partial = f"{TEMPLATE_PREFIX}{secrets.token_hex(8)}__partial"
     with connection._nodb_cursor() as cursor:
         cursor.execute(f"CREATE DATABASE {connection.ops.quote_name(partial)}")
     temporary_databases.append(partial)
@@ -1524,7 +1527,7 @@ def test_a_squash_whose_replaced_files_were_deleted_does_not_make_a_base_ahead(
     name = template_database(_shape(rows=40, seed=26), base=base)
     temporary_databases.append(name)
 
-    assert name.startswith(PREFIX)
+    assert name.startswith(TEMPLATE_PREFIX)
 
 
 def test_a_base_behind_a_squash_is_migrated_through_it(

@@ -40,6 +40,8 @@
 
 ::: django_data_shape.databases.template_database.template_database
 
+::: django_data_shape.databases.derive_template.derive_template
+
 ::: django_data_shape.databases.clone_database.clone_database
 
 ::: django_data_shape.databases.drop_database.drop_database
@@ -49,6 +51,8 @@
 ## The pytest surface
 
 ::: django_data_shape.fixtures.shape_fixture.shape_fixture
+
+::: django_data_shape.fixtures.template_fixture.template_fixture
 
 ::: django_data_shape.fixtures.scale_fixture.scale_fixture
 
@@ -137,6 +141,8 @@
 ::: django_data_shape.databases.unhashable_shape.UnhashableShape
 
 ::: django_data_shape.databases.unusable_base.UnusableBase
+
+::: django_data_shape.databases.step_failed.StepFailed
 
 ::: django_data_shape.invariants.invariant_violated.InvariantViolated
 

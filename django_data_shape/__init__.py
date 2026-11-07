@@ -3,8 +3,10 @@
 from django_data_shape.backends.require_clone_strategy import require_clone_strategy
 from django_data_shape.backends.unsupported_backend import UnsupportedBackend
 from django_data_shape.databases.clone_database import clone_database
+from django_data_shape.databases.derive_template import derive_template
 from django_data_shape.databases.drop_database import drop_database
 from django_data_shape.databases.shape_digest import shape_digest
+from django_data_shape.databases.step_failed import StepFailed
 from django_data_shape.databases.template_database import template_database
 from django_data_shape.databases.unhashable_shape import UnhashableShape
 from django_data_shape.databases.unusable_base import UnusableBase
@@ -103,6 +105,7 @@ __all__ = [
     "Skew",
     "SqlKeys",
     "SqlValue",
+    "StepFailed",
     "Table",
     "TableResult",
     "UnhashableShape",
@@ -117,6 +120,7 @@ __all__ = [
     "check_constraints",
     "check_invariants",
     "clone_database",
+    "derive_template",
     "drop_database",
     "fan_out_sizes",
     "require_clone_strategy",

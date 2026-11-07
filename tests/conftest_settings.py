@@ -58,4 +58,35 @@ DATABASES["not_postgres"] = {
     "NAME": ":memory:",
 }
 
+# A third alias, with a database of its own, for the fixture that replaces a
+# test database with a clone of a template. Its own NAME rather than the
+# default's, because Django treats two aliases naming one database as one test
+# database, and replacing it would replace the default's under every other test
+# in the session. Off PostgreSQL it is SQLite, so the fixture's skip is what
+# runs there. No test dependencies: Django orders every other alias after
+# ``default`` unless told otherwise, and a test asking for this alias alone then
+# reads as a circular dependency.
+DATABASES["templated"] = {
+    **(
+        {**DATABASES["default"], "NAME": f"{DATABASES['default']['NAME']}_templated"}
+        if _BACKEND != "sqlite"
+        else {"ENGINE": "django.db.backends.sqlite3", "NAME": ":memory:"}
+    ),
+    "TEST": {"DEPENDENCIES": []},
+}
+
+# A fourth alias that no test asks for, so pytest-django (from 4.11) never makes a
+# test database for it and its NAME stays the one configured here: the state of a
+# developer's own database in a run whose tests touch none, which a fixture
+# replacing a test database has to leave alone. No test may name it in a
+# django_db mark, or pytest-django sets it up and the premise is gone.
+DATABASES["unrequested"] = {
+    **(
+        {**DATABASES["default"], "NAME": f"{DATABASES['default']['NAME']}_unrequested"}
+        if _BACKEND != "sqlite"
+        else {"ENGINE": "django.db.backends.sqlite3", "NAME": ":memory:"}
+    ),
+    "TEST": {"DEPENDENCIES": []},
+}
+
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
