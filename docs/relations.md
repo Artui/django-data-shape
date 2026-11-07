@@ -461,7 +461,7 @@ point at. That is also why `roots=0` is refused rather than read as one root.
 **the weight is keyed on the row's position rather than ordered by it**, so the
 largest families sit wherever their draws fell. Each child takes as its parent
 an earlier row that still has room, picked in proportion to the room it has
-left, which also scatters a row's children through the rows after it.
+left.
 
 The obvious construction is to have each child pick an earlier row by weight.
 It makes the first rows the whales simply because every later row could pick
@@ -485,8 +485,23 @@ after the row it hangs from. It is the honest value here, not the clustered
 layout a fan-out's `placement="grouped"` manufactures, and a `Tree` has no
 `placement` of its own for that reason.
 
-A `Tree` has no `childless`, `null` or `max_children` either, and no depth: the
-depth is whatever the sizes make it. It needs no other table, so it adds
+**The sizes decide how far a family spreads and how deep the tree goes.** A
+heavy row keeps room for a long time, so its children spread far through the
+rows after it; a row with room for one child usually gives it to a row soon
+after. Measured on the plan:
+
+| `sizes` | rows | median rows from parent to child | deepest row | mean depth |
+| --- | --- | --- | --- | --- |
+| `Zipf()` | 20,000 | 484 | 24 | 8.9 |
+| `Zipf()` | 200,000 | 1,766 | 64 | 17.2 |
+| `Uniform(1, 3)` | 20,000 | 8 | 139 | 18.2 |
+| `Uniform(1, 3)` | 200,000 | 30 | 195 | 18.9 |
+
+Flat sizes give every row about one child, which is long chains. That is what
+they declare, and a heavy tail is what most trees have.
+
+A `Tree` has no `childless`, `null` or `max_children` either, and no depth of
+its own. It needs no other table, so it adds
 nothing to the load order. In `COPY`, every parent is written before its
 children. On SQLite the rows are inserted in order, so every parent is already
 in the table when its child arrives.

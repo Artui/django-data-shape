@@ -1,9 +1,9 @@
 """Building a self-referential tree: a foreign key that points at its own table.
 
 ``Tree`` is reached through the package's namespace inside each test rather
-than imported at the top, so that against a tree without it this module still
-collects and fails on its assertions -- a module that dies at import proves
-nothing about the feature.
+than imported at the top, and the model is one main already has, so that against
+a tree without the feature this module still collects and fails on its
+assertions -- a module that dies at import proves nothing about the feature.
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ from django.db import connection
 import django_data_shape
 from django_data_shape import Constant, Shape, Table, Zipf
 from django_data_shape import build as build_shape
-from tests.testapp.models import Category
+from tests.testapp.models import Referred
 
 pytestmark = [
     pytest.mark.django_db(transaction=True),
@@ -35,7 +35,7 @@ def _tree(**kwargs: object) -> object:
 
 def _parents() -> dict[int, int | None]:
     with connection.cursor() as cursor:
-        cursor.execute(f"SELECT id, parent_id FROM {Category._meta.db_table}")
+        cursor.execute(f"SELECT id, referrer_id FROM {Referred._meta.db_table}")
         return dict(cursor.fetchall())
 
 
@@ -43,10 +43,10 @@ def test_a_self_referential_foreign_key_builds_an_acyclic_tree_with_its_root_sha
     build_shape(
         Shape(
             Table(
-                Category,
+                Referred,
                 rows=2_000,
-                name=Constant("c"),
-                parent=_tree(roots=0.05, sizes=Zipf()),
+                label=Constant("c"),
+                referrer=_tree(roots=0.05, sizes=Zipf()),
             ),
             seed=11,
         )
@@ -64,11 +64,11 @@ def test_a_self_referential_foreign_key_builds_an_acyclic_tree_with_its_root_sha
     with connection.cursor() as cursor:
         cursor.execute(
             f"""
-            WITH RECURSIVE climb(id, parent_id, depth) AS (
-                SELECT id, parent_id, 0 FROM {Category._meta.db_table}
+            WITH RECURSIVE climb(id, referrer_id, depth) AS (
+                SELECT id, referrer_id, 0 FROM {Referred._meta.db_table}
                 UNION ALL
-                SELECT climb.id, node.parent_id, climb.depth + 1
-                FROM climb JOIN {Category._meta.db_table} node ON node.id = climb.parent_id
+                SELECT climb.id, node.referrer_id, climb.depth + 1
+                FROM climb JOIN {Referred._meta.db_table} node ON node.id = climb.referrer_id
                 WHERE climb.depth < 2000
             )
             SELECT max(depth) FROM climb
@@ -89,14 +89,16 @@ def test_the_parent_column_climbs_with_the_table_as_the_rule_makes_it() -> None:
     """
     build_shape(
         Shape(
-            Table(Category, rows=5_000, name=Constant("c"), parent=_tree(roots=0.05, sizes=Zipf())),
+            Table(
+                Referred, rows=5_000, label=Constant("c"), referrer=_tree(roots=0.05, sizes=Zipf())
+            ),
             seed=1,
         )
     )
     with connection.cursor() as cursor:
         cursor.execute(
             "SELECT correlation, null_frac FROM pg_stats WHERE tablename = %s AND attname = %s",
-            [Category._meta.db_table, "parent_id"],
+            [Referred._meta.db_table, "referrer_id"],
         )
         correlation, null_frac = cursor.fetchone()
     assert correlation > 0.7
@@ -109,8 +111,8 @@ def test_the_children_are_not_gathered_under_the_lowest_keys() -> None:
     The obvious construction -- each child picks an earlier row by weight --
     makes the first rows the largest parents purely because every later row
     could pick them. Measured over seeds 0 to 7 of this declaration it puts
-    28% to 39% of the children under the first tenth of the keys and 13% to 24%
-    under the last half; this one puts 11% to 21% and 41% to 49%, against a fair
+    28% to 48% of the children under the first tenth of the keys and 11% to 22%
+    under the last half; this one puts 10% to 23% and 39% to 50%, against a fair
     share of 10% and 50%. A single ``Zipf`` whale can hold a fifth of the table,
     which is why the bounds are wide. What is left of the gap is the rule's
     price rather than the construction's: the last rows have too few rows after
@@ -119,12 +121,12 @@ def test_the_children_are_not_gathered_under_the_lowest_keys() -> None:
     build_shape(
         Shape(
             Table(
-                Category,
+                Referred,
                 rows=5_000,
-                name=Constant("c"),
-                parent=_tree(roots=0.05, sizes=Zipf()),
+                label=Constant("c"),
+                referrer=_tree(roots=0.05, sizes=Zipf()),
             ),
-            seed=0,
+            seed=1,
         )
     )
     families = Counter(parent for parent in _parents().values() if parent is not None)

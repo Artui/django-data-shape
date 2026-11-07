@@ -45,11 +45,17 @@ def test_every_parent_is_an_earlier_row() -> None:
     assert all(parent < row for row, parent in enumerate(parents) if parent is not None)
 
 
-@pytest.mark.parametrize(("rows", "roots"), [(1, 0.5), (7, 0.3), (1_000, 0.05), (999, 0.333)])
-def test_the_root_count_is_exact_and_starts_at_the_first_row(rows: int, roots: float) -> None:
+@pytest.mark.parametrize(
+    ("rows", "roots", "expected"),
+    # 100 * 0.07 is 7.000000000000001 as floats, whose ceiling is 8.
+    [(1, 0.5, 1), (7, 0.3, 3), (1_000, 0.05, 50), (999, 0.333, 333), (100, 0.07, 7)],
+)
+def test_the_root_count_is_exact_and_starts_at_the_first_row(
+    rows: int, roots: float, expected: int
+) -> None:
     parents = _resolve(Tree(roots=roots, sizes=Zipf()), rows)
     placed = [row for row, parent in enumerate(parents) if parent is None]
-    assert len(placed) == math.ceil(rows * roots)
+    assert len(placed) == expected
     assert placed[0] == 0
 
 
@@ -139,3 +145,28 @@ def test_a_parent_key_is_the_key_its_own_strategy_gives_that_row() -> None:
     assert all(
         parent < row[0] for row, parent in zip(rows, parents, strict=True) if parent is not None
     )
+
+
+def _shape_of(sizes: object, rows: int) -> tuple[int, int]:
+    """The median rows from parent to child, and the deepest row."""
+    parents = _resolve(Tree(roots=0.05, sizes=sizes), rows)
+    depth = [0] * rows
+    gaps = []
+    for row, parent in enumerate(parents):
+        if parent is not None:
+            depth[row] = depth[parent] + 1
+            gaps.append(row - parent)
+    return sorted(gaps)[len(gaps) // 2], max(depth)
+
+
+def test_heavy_sizes_spread_a_family_far_and_keep_the_tree_shallow() -> None:
+    # The first two rows of the table in docs/relations.md, at 20,000 rows.
+    gap, deepest = _shape_of(Zipf(), 20_000)
+    assert gap > 200
+    assert deepest < 50
+
+
+def test_flat_sizes_make_chains_of_near_neighbours() -> None:
+    gap, deepest = _shape_of(Uniform(1, 3), 20_000)
+    assert gap < 50
+    assert deepest > 100

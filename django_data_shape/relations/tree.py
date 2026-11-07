@@ -41,11 +41,11 @@ class Tree:
     they could not take go to earlier rows by weight. See ``docs/relations.md``
     for how large that is.
 
-    There is no ``placement``: a row's children are chosen among all the rows
-    after it, so they are scattered through the table the way replies arrive,
-    and a clustered layout is not something this declaration can produce. Nor
-    is there a ``max_children``, a ``childless`` or a depth; the depth is
-    whatever the sizes make it.
+    There is no ``placement``. Every parent is an earlier row, so the parent
+    column climbs with the table whatever order a family is written in, which is
+    also how a production tree looks. Nor is there a ``max_children``, a
+    ``childless`` or a depth; the depth is whatever the sizes make it, and flat
+    sizes, where every row has about one child, make long chains.
     """
 
     def __init__(self, *, roots: float, sizes: Distribution) -> None:

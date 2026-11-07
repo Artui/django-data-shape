@@ -7,6 +7,7 @@ import numbers
 from array import array
 from bisect import bisect_right
 from decimal import Decimal
+from fractions import Fraction
 from itertools import accumulate, repeat
 
 from django_data_shape.declaration.invalid_shape import InvalidShape
@@ -30,8 +31,9 @@ def resolve_tree(tree: Tree, rows: int, seed: int, table: str, field: str) -> Tr
        wherever its draw put it.
     3. Each non-root row, in index order, takes as its parent an earlier row
        that still has room, chosen with probability proportional to the room
-       left. That is what spreads a row's children over the rows after it
-       instead of giving it the next few in a block.
+       left. A heavy row's room lasts, so its children spread far through the
+       rows after it; a row with room for one child usually gives it to a row
+       soon after.
 
     Step 3 cannot always honour step 2, and the rule is why. A row has only the
     rows after it to be its children, so a heavy row near the end of the table
@@ -41,7 +43,9 @@ def resolve_tree(tree: Tree, rows: int, seed: int, table: str, field: str) -> Tr
     Measured on ``Zipf()`` at 200,000 rows that is about 2% of the children;
     ``docs/relations.md`` has the shape of it.
     """
-    root_count = math.ceil(rows * tree.roots)
+    # Through the share's decimal reading rather than the float product, which
+    # overshoots: 100 * 0.07 is 7.000000000000001, and its ceiling is 8.
+    root_count = math.ceil(Fraction(repr(tree.roots)) * rows)
     children = rows - root_count
     # Nothing to place means nothing to weigh, as in a fan-out: a table of
     # roots alone is a legitimate thing to be, and refusing its weights would
@@ -54,8 +58,8 @@ def resolve_tree(tree: Tree, rows: int, seed: int, table: str, field: str) -> Tr
     parents = array("q", bytes(8 * rows))
     # One entry per unit of room an earlier row still has, so a uniform pick
     # from it is a pick weighted by room left. Taken by swapping the last entry
-    # into the hole, which keeps every step O(1); a Fenwick tree over the rows
-    # gives the same draw at O(log n) and was five times slower at a million.
+    # into the hole, which keeps every step O(1) where a Fenwick tree over the
+    # rows gives the same draw at O(log n).
     room = array("q")
     next_root, placed_roots = 0, 0
     for row in range(rows):
