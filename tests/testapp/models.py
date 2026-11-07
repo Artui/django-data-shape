@@ -1288,3 +1288,36 @@ class Successor(models.Model):
     previous = models.OneToOneField(
         "self", null=True, on_delete=models.SET_NULL, related_name="following"
     )
+
+
+class Folder(models.Model):
+    """A tree whose names are unique among siblings, as a file system's are.
+
+    ``(parent, name)`` is unique, so two children of one parent may not share a
+    name. A ``Tree`` gives a row several children whenever its sizes say so, and
+    a name drawn per row cannot see its siblings.
+    """
+
+    parent = models.ForeignKey("self", null=True, on_delete=models.CASCADE, related_name="+")
+    name = models.CharField(max_length=50)
+    code = models.CharField(max_length=50)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["parent", "name"], name="one_name_per_folder"),
+        ]
+
+
+class Chain(models.Model):
+    """A self-reference unique by constraint rather than by ``unique=True``.
+
+    The column itself is not unique, so the field-level refusal of a unique
+    tree column never sees it; the constraint says the same thing.
+    """
+
+    previous = models.ForeignKey("self", null=True, on_delete=models.CASCADE, related_name="+")
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["previous"], name="one_link_after_each"),
+        ]

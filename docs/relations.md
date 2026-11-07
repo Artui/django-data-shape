@@ -557,6 +557,11 @@ filled first is decided by the declarations and needs no connection to answer.
 - Anything read **across** a `Tree`, or decided per **family** of one. The
   parent is a row of the same table generated in the same pass, and a family is
   not a range of rows the way a fan-out's group is.
+- A `Tree` under a **uniqueness** with nothing beside it but per-row draws, as
+  in names unique among siblings: a drawn value cannot see its siblings, so two
+  of them sharing one is a matter of the seed. A column that is `Distinct` in
+  every row, such as `Sequential`, keeps the constraint; a `Tree` alone under a
+  `UniqueConstraint` is refused as a unique column is.
 - A required relation **left undeclared**, which would fail the load on a
   not-null violation rather than at declaration time. The message names the
   column and the fan-out that fills it: forgetting one foreign key is the

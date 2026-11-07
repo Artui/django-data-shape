@@ -172,6 +172,12 @@ how many companies there are.
   `unique=True` writes no entry in `_meta.constraints`, and a single table
   cannot see how many parents there are. The exemption is the same proof the
   others carry: flat sizes, no `childless` share, and rows no more than parents.
+- **A `Tree` beside drawn columns is refused the same way**, as in names
+  unique among siblings: a tree gives a row several children whenever its sizes
+  say so, and a drawn value cannot see its siblings. A tree's families are not
+  ranges of rows, so no derivation is decided per family; the exemption is
+  `Distinct`, and a `Tree` alone under a `UniqueConstraint` is refused as a
+  unique column is.
 - **Enough room is not a way to fill it.** An unconditional constraint over
   **two fan-outs** — the through table of a many-to-many — passes the pigeonhole
   comfortably, because the product of two parent counts dwarfs the row count,
