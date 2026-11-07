@@ -13,12 +13,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unit's parent, a comment's reply-to and a category's parent were refused as
   self-referential, which left a tree to an `UPDATE` after `build()` and a manual
   `ANALYZE`. Each row's parent is now an earlier row, so the tree is acyclic by
-  construction and needs no lookup. `roots` is the exact share of rows with a
-  NULL parent, and the first row is always one of them. `sizes` weighs each
-  row's family by its position, as a fan-out's does, so the largest families
-  are not the lowest keys. A `Tree` is refused on a key to another table, on a
-  column that cannot be null, and on a unique one, whether `unique=True` or a
-  `UniqueConstraint` over the column alone. A uniqueness pairing a `Tree` with
+  construction and needs no lookup. `roots` sets the count of rows with a
+  NULL parent exactly, `ceil(rows * roots)`, and the first row is always one of
+  them. `sizes` weighs each row's family by its position, as a fan-out's does,
+  so the largest families are not the lowest keys. A `Tree` is refused on a key to
+  another table, on a column that cannot be null, and on a unique one, whether
+  `unique=True` or a `UniqueConstraint` over the column alone. A uniqueness pairing a `Tree` with
   columns drawn per row, such as names unique among siblings, is refused at
   declaration as a `FanOut` there is, unless one of them is `Distinct`. The
   refusal of a self-referential `FanOut` now names it.

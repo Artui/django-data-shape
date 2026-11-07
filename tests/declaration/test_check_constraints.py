@@ -942,6 +942,22 @@ def test_a_tree_beside_a_column_distinct_in_every_row_is_accepted() -> None:
     )
 
 
+def test_a_tree_beside_a_column_that_does_not_move_is_refused() -> None:
+    # A zero step writes one value in every row, so the pair is not distinct
+    # through the name: the protocol answers for the parameters and not the
+    # class. Without the is_distinct_per_row() conjunct, this is accepted.
+    with pytest.raises(InvalidShape, match="one_name_per_folder"):
+        Shape(
+            Table(
+                Folder,
+                rows=200,
+                parent=Tree(roots=0.05, sizes=Zipf()),
+                name=Sequential(0, 0),
+                code=Constant("c"),
+            )
+        )
+
+
 def test_a_tree_beside_a_derivation_is_left_to_the_other_two_nets() -> None:
     # The exemption every arrangement check carries: a derivation reads
     # something other than its own row index, and whether its compute= keeps

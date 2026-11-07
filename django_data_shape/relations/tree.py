@@ -49,8 +49,7 @@ class Tree:
     """
 
     def __init__(self, *, roots: float, sizes: Distribution) -> None:
-        # bool is a float's cousin, and True would read as "every row a root".
-        if isinstance(roots, bool) or not isinstance(roots, (int, float)) or not 0 < roots < 1:
+        if not isinstance(roots, (int, float)) or not 0 < roots < 1:
             raise InvalidShape(
                 "Tree roots is the share of rows with no parent and must be in (0, 1), got "
                 f"{roots!r}. The first row is always a root, since no earlier row exists for it "

@@ -63,8 +63,11 @@ def test_a_tree_on_a_column_that_refuses_null_is_refused() -> None:
 
 
 def test_a_tree_on_a_unique_self_reference_is_refused() -> None:
-    with pytest.raises(InvalidShape, match="Successor.previous is unique"):
+    with pytest.raises(InvalidShape, match="Successor.previous is unique") as refused:
         Table(Successor, rows=5, previous=Tree(roots=0.1, sizes=Zipf()))
+    # The generic unique-column check opens with the same prefix, so the
+    # sentence only the Tree branch writes is what shows that branch ran.
+    assert "A chain of one-to-one links" in str(refused.value)
 
 
 def test_a_tree_on_a_column_that_is_not_a_relation_is_refused() -> None:
