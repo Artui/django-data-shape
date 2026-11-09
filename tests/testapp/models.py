@@ -1467,6 +1467,27 @@ class Shelf(models.Model):
         unique_together = [("parent", "name")]
 
 
+class SpelledShelf(models.Model):
+    """``Shelf`` with the key spelled by its attname, which ``unique_together`` keeps as written."""
+
+    parent = models.ForeignKey("self", null=True, on_delete=models.CASCADE, related_name="+")
+    name = models.CharField(max_length=50)
+    code = models.CharField(max_length=50)
+
+    class Meta:
+        unique_together = [("parent_id", "name")]
+
+
+class RootlessShelf(models.Model):
+    """``Shelf`` with a key that refuses NULL, so no tree can fill it and none is written."""
+
+    parent = models.ForeignKey("self", on_delete=models.CASCADE, related_name="+")
+    name = models.CharField(max_length=50)
+
+    class Meta:
+        unique_together = [("parent", "name")]
+
+
 class Sibling(models.Model):
     """A self-reference whose only uniqueness is conditional, so the column is not unique.
 

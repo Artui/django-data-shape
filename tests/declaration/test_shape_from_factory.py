@@ -31,12 +31,14 @@ from tests.testapp.models import (
     Relay,
     RootlessLink,
     RootlessNode,
+    RootlessShelf,
     Session,
     Shelf,
     Sibling,
     SpelledChain,
     SpelledFolder,
     SpelledRelay,
+    SpelledShelf,
     Successor,
     TiedLink,
 )
@@ -828,3 +830,62 @@ def test_a_uniqueness_over_the_self_key_alone_is_no_composite_finding(
     report = _report_over_a_self_key_no_shape_can_fill(model)
 
     assert "unique together" not in report
+
+
+def test_a_composite_unique_together_spelled_with_the_attname_is_a_finding() -> None:
+    """Fails with ``unique_together`` read as written: ``parent_id`` is not ``parent``.
+
+    Unread, the report wrote ``Tree`` beside ``Skew`` with nothing said, which ``Shape``
+    refuses. The finding names the columns by field name, whichever way ``Meta`` spelled them.
+    """
+    report = shape_from_factory(
+        _named_factory(SpelledShelf, lambda n: f"n{n % 3}", code=_one_code), samples=20
+    )
+
+    finding = _the_finding_about(report, "SpelledShelf.parent")
+    assert "unique_together ('parent', 'name') makes (parent, name) unique together" in finding
+    with pytest.raises(InvalidShape, match="is a Tree beside"):
+        Shape(_built(report, SpelledShelf))
+
+
+def test_a_self_key_with_no_declaration_gets_no_finding_about_a_composite_uniqueness() -> None:
+    """Fails without ``declaration is not None`` at the call in ``_render``.
+
+    A key that refuses NULL is written as a comment, not a tree, so a finding about a tree
+    beside a draw would describe source the report never wrote. Each call points at a key of
+    its own, deferred and rolled back, so ``(parent, name)`` holds while ``name`` repeats.
+    """
+    calls = {"n": 0}
+
+    def factory() -> Model:
+        calls["n"] += 1
+        return RootlessShelf.objects.create(parent_id=calls["n"], name="same")
+
+    report = shape_from_factory(factory, samples=10)
+
+    assert "    # parent: nothing written here" in report
+    assert "a key that refuses NULL has no first row to point at" in report
+    assert "unique together" not in report
+
+
+def test_every_composite_finding_ends_with_a_full_stop() -> None:
+    """A finding is a sentence, and one naming only keys ended at ``sql=`` without its stop."""
+    made: list[Mirror] = []
+
+    def factory() -> Mirror:
+        row = Mirror.objects.create(
+            company=Company.objects.create(name="c"), parent=made[-1] if made else None
+        )
+        made.append(row)
+        return row
+
+    keys_only = _the_finding_about(shape_from_factory(factory, samples=20), "Mirror.parent")
+    plain_only = _the_finding_about(
+        shape_from_factory(
+            _named_factory(Shelf, lambda n: f"n{n % 3}", code=_one_code), samples=20
+        ),
+        "Shelf.parent",
+    )
+
+    assert keys_only.endswith("columns= and sql=.")
+    assert plain_only.endswith("columns= and sql=.")

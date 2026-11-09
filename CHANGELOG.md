@@ -108,6 +108,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   takes the proof away, and that stays refused.
 - **A shape of one row is accepted under any uniqueness that has room for it.** Two
   rows are what a collision takes, and a drawn pair was refused at one row.
+- **A `FanOut` on a `unique=True` column is accepted at one row.** The same index
+  written as a `UniqueConstraint` was, and the field was refused for a skew that had
+  no second row to put on a parent. One check now decides both spellings, and it loads.
 
 ### Documentation
 

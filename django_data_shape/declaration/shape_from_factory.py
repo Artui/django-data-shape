@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 from collections import Counter
-from collections.abc import Callable, Iterable, Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from typing import Any
 
 from django.apps import apps
 from django.db import DEFAULT_DB_ALIAS, transaction
 from django.db.models import Field, Model, UniqueConstraint
 
+from django_data_shape.declaration.field_names import field_names
 from django_data_shape.declaration.invalid_shape import InvalidShape
 
 _MANY_VALUES = 12
@@ -282,19 +283,9 @@ def _is_unique(model: type[Model], field: Field[Any, Any]) -> bool:
     """
     return (
         field.unique
-        or any(_names(model, entry) == (field.name,) for entry in model._meta.unique_together)
+        or any(field_names(model, entry) == (field.name,) for entry in model._meta.unique_together)
         or any(_constraints_on_it_alone(model, field))
     )
-
-
-def _names(model: type[Model], spelled: Iterable[str]) -> tuple[str, ...]:
-    """The fields' names, however each was spelled.
-
-    Django takes ``parent`` and ``parent_id`` in a ``UniqueConstraint`` and in
-    ``unique_together`` alike and keeps them as written, so comparing the text to
-    ``field.name`` misses the attname's. ``get_field`` answers to either.
-    """
-    return tuple(model._meta.get_field(name).name for name in spelled)
 
 
 def _nulls_count_as_one(model: type[Model], field: Field[Any, Any]) -> bool:
@@ -315,7 +306,7 @@ def _constraints_on_it_alone(
     return (
         constraint
         for constraint in _unconditional_constraints(model)
-        if _names(model, constraint.fields) == (field.name,)
+        if field_names(model, constraint.fields) == (field.name,)
     )
 
 
@@ -333,11 +324,11 @@ def _composite_uniqueness(
 ) -> Iterator[tuple[str, tuple[str, ...]]]:
     """Each uniqueness over this column together with others: how it is named, and its columns."""
     for constraint in _unconditional_constraints(model):
-        names = _names(model, constraint.fields)
+        names = field_names(model, constraint.fields)
         if field.name in names and len(names) > 1:
             yield constraint.name, names
     for entry in model._meta.unique_together:
-        names = _names(model, entry)
+        names = field_names(model, entry)
         if field.name in names and len(names) > 1:
             yield f"unique_together {names!r}", names
 
@@ -404,7 +395,7 @@ def _composite_finding(
         findings.append(
             f"{label} makes ({', '.join(names)}) unique together, and {' and '.join(why)}. "
             "Shape refuses a Tree beside a draw under it, because siblings of one parent cannot "
-            f"see what each other drew. {advice[0].upper()}{advice[1:]}"
+            f"see what each other drew. {advice[0].upper()}{advice[1:]}."
         )
     return findings
 
