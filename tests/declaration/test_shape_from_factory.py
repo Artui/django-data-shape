@@ -7,11 +7,24 @@ flat world this package exists to argue against, so the value is in saying so.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 import pytest
 from django.db import connection
+from django.db.models import Model
 
-from django_data_shape import InvalidShape, shape_from_factory
-from tests.testapp.models import Company, Project, Session
+import django_data_shape
+from django_data_shape import InvalidShape, Table, Tree, shape_from_factory
+from tests.testapp.models import (
+    Category,
+    Chain,
+    Company,
+    Project,
+    Relay,
+    RootlessNode,
+    Session,
+    Successor,
+)
 
 pytestmark = [
     pytest.mark.django_db(transaction=True),
@@ -246,3 +259,185 @@ def test_a_factory_that_fails_for_its_own_reasons_says_which_call_it_was() -> No
         shape_from_factory(eventually_fails, samples=10)
 
     assert "call 4 of 10" in str(raised.value)
+
+
+def _built(report: str, model: type[Model], rows: int = 100) -> Table:
+    """Build the emitted source against ``Table``, which is the whole claim.
+
+    The report is source with ``rows=...`` left for the reader to fill, so the
+    only edit made is the one a reader would: a row count. Everything else is
+    evaluated as written, so a declaration ``Table`` refuses -- the defect this
+    guards -- raises here rather than passing as a string that merely looks right.
+    """
+    names = {**vars(django_data_shape), model.__name__: model}
+    table = eval(report.replace("rows=...", f"rows={rows}"), names)  # noqa: S307
+    assert isinstance(table, Table)
+    return table
+
+
+def _tree_factory(model: type[Model], parents: Callable[[int], int | None]) -> Callable[[], Model]:
+    """A factory over a self-keyed model; ``parents(n)`` is the nth call's parent index.
+
+    The index counts calls, 1-based, and ``None`` makes a root. A parent is
+    always an earlier call's row, so the factory could be a real one.
+    """
+    made: list[Model] = []
+
+    def factory() -> Model:
+        n = len(made) + 1
+        index = parents(n)
+        row = model.objects.create(  # type: ignore[attr-defined]
+            name=f"n{n % 3}", parent=None if index is None else made[index]
+        )
+        made.append(row)
+        return row
+
+    return factory
+
+
+def test_a_self_referential_key_is_a_tree_that_table_accepts() -> None:
+    """The defect: the report said ``FanOut``, which ``Table`` refuses on a self-key."""
+    factory = _tree_factory(Category, lambda n: None if n % 4 == 1 else (n * 7) % (n - 1))
+
+    report = shape_from_factory(factory, samples=20)
+
+    assert "parent=Tree(roots=0.25, sizes=Zipf())" in report
+    declared = _built(report, Category).fields["parent"]
+    assert isinstance(declared, Tree)
+    assert declared.roots == 0.25
+    assert "FanOut" not in report
+
+
+def test_the_measured_root_share_counts_the_nulls_and_not_a_parent_called_none() -> None:
+    # Every child points at the one root, so a Counter over the values would see
+    # two "parents" -- the root's key and None -- and call this a flat fan-out.
+    factory = _tree_factory(Category, lambda n: None if n == 1 else 0)
+
+    report = shape_from_factory(factory, samples=40)
+
+    assert "parent=Tree(roots=0.025, sizes=Zipf())" in report
+    assert isinstance(_built(report, Category).fields["parent"], Tree)
+
+
+def test_a_self_key_nobody_left_null_is_the_figure_table_offers_and_a_finding() -> None:
+    # A root made outside the calls, so every measured row has a parent: a root
+    # share of zero, which Tree refuses, so the figure Table's own refusal
+    # offers is written instead and the finding says it is not a measurement.
+    root = Category.objects.create(name="root")
+
+    report = shape_from_factory(lambda: Category.objects.create(name="x", parent=root), samples=20)
+
+    assert "parent=Tree(roots=0.05, sizes=Zipf())" in report
+    assert "Category.parent: no row was left without a parent" in report
+    assert "not measured" in report
+    assert isinstance(_built(report, Category).fields["parent"], Tree)
+
+
+def test_a_self_key_always_left_null_is_the_figure_table_offers_and_a_finding() -> None:
+    report = shape_from_factory(lambda: Category.objects.create(name="x"), samples=20)
+
+    assert "parent=Tree(roots=0.05, sizes=Zipf())" in report
+    assert "Category.parent: every row was left without a parent" in report
+    assert "not measured" in report
+    assert isinstance(_built(report, Category).fields["parent"], Tree)
+
+
+def test_a_root_share_that_rounds_to_one_is_written_in_full() -> None:
+    # 2499 roots in 2500 calls is a share of 0.9996, which three figures write
+    # as 1 -- and Tree refuses a share of 1. So it is written as it was measured.
+    first = Category.objects.create(name="root")
+    calls = {"n": 0}
+
+    def factory() -> Category:
+        calls["n"] += 1
+        return Category.objects.create(name="x", parent=first if calls["n"] == 1 else None)
+
+    report = shape_from_factory(factory, samples=2500)
+
+    assert "parent=Tree(roots=0.9996, sizes=Zipf())" in report
+    assert _built(report, Category).fields["parent"].roots == 0.9996  # type: ignore[attr-defined]
+
+
+@pytest.mark.parametrize(
+    ("model", "why"),
+    [
+        (RootlessNode, "a key that refuses NULL has no first row to point at"),
+        (Successor, "a unique key cannot give a row several children"),
+        (Chain, "a unique key cannot give a row several children"),
+        (Relay, "a unique key cannot give a row several children"),
+    ],
+)
+def test_a_self_key_no_shape_can_fill_is_a_comment_and_a_finding_not_a_tree(
+    model: type[Model], why: str
+) -> None:
+    """``Table`` refuses a ``Tree`` here and a ``FanOut`` everywhere, so neither is written.
+
+    The report does not raise either: the rest of the factory was measured
+    and is worth reading, and a comment sits where the declaration would be.
+    """
+    link = "parent_id" if model is RootlessNode else "previous_id"
+    calls = {"n": 0}
+
+    def factory() -> Model:
+        calls["n"] += 1
+        # A required self-key is pointed at a row that is never committed: the
+        # call runs in a transaction that is rolled back, and the constraint is
+        # deferred, so nothing checks it.
+        if model is RootlessNode:
+            return model.objects.create(**{link: 1})  # type: ignore[attr-defined]
+        previous = model.objects.last()  # type: ignore[attr-defined]
+        return model.objects.create(**{link: previous.pk if previous else None})  # type: ignore[attr-defined]
+
+    report = shape_from_factory(factory, samples=10)
+
+    field = link.removesuffix("_id")
+    assert "Tree(" not in report
+    assert "FanOut(" not in report
+    assert f"    # {field}: no shape can fill this" in report
+    assert f"{model.__name__}.{field}: {why}" in report
+    assert f"{field}=" not in report
+
+
+@pytest.mark.parametrize("model", [Successor, Chain, Relay])
+def test_a_report_with_a_comment_where_the_self_key_was_is_source_table_accepts(
+    model: type[Model],
+) -> None:
+    # The comment is where a declaration would have been, and the rest still
+    # builds: these self-keys are nullable, so leaving one out is a shape.
+    def factory() -> Model:
+        previous = model.objects.last()  # type: ignore[attr-defined]
+        return model.objects.create(previous=previous)  # type: ignore[attr-defined]
+
+    report = shape_from_factory(factory, samples=10)
+
+    assert isinstance(_built(report, model), Table)
+
+
+def test_a_relation_to_another_table_is_reported_exactly_as_before() -> None:
+    """The tree branch must not touch a key to a different table, byte for byte."""
+    companies = [Company.objects.create(name=f"c{i}") for i in range(4)]
+
+    report = shape_from_factory(lambda: _shared_parent(companies), samples=20)
+
+    assert report == (
+        "# Measured from 20 calls. This is source to read and edit, not a shape to\n"
+        "# build from: what it found is what your factory does, which is not the same\n"
+        "# question as what your production data looks like.\n"
+        "\n"
+        "# What your factory does not vary, which is what this is for:\n"
+        "#   - Session.company: every one of the 4 parents got exactly 5 row(s). A flat "
+        "fan-out is the one shape in which a join estimate cannot miss, because the "
+        "average is the truth -- declare the tail you actually have, and childless= for "
+        "the parents nobody references.\n"
+        "#   - Session.label: every row got 's'. The factory fixes this column, so the "
+        "declaration above says the planner will see one value -- decide what the real "
+        "spread is.\n"
+        "\n"
+        "Table(Session, rows=...,\n"
+        "    company=FanOut(Zipf()),  # was flat: 4 parents, 5 row(s) each,\n"
+        "    label=Constant('s'),\n"
+        ")\n"
+        "\n"
+        "# Read at 20 samples. A larger run sees more of the tail, so the numbers above "
+        "move with it."
+    )

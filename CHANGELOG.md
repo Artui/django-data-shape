@@ -15,14 +15,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   self-keys in 0 of 20. A `Distinct` column keeps the constraint, and so does a
   fan-out that gives no parent two rows; a `Projection` fills the rest.
 - **A `Tree` in a conditional `UniqueConstraint` is refused at declaration** when a
-  row can land inside the condition; a 10% share loaded in 3 of 20 seeds. The refusal names what a tree accepts rather than `PerParent`, which `Table`
-  refuses over one. A constraint grouping a `Tree` with a `FanOut` keeps the
-  `PerParent` remedy, and its message now names the fan-out wherever it sits in
-  the constraint, where it used to name the first field.
+  row can land inside the condition; a 10% share loaded in 3 of 20 seeds. The
+  refusal names what a tree accepts rather than `PerParent`, which `Table` refuses
+  over one. A constraint grouping a `Tree` with a `FanOut` keeps the `PerParent`
+  remedy, and its message now names the fan-out wherever it sits in the constraint,
+  where it used to name the first field.
 - **The `Tree` measurements in `docs/relations.md` name their table and field,**
   because draw streams are keyed on those names and the same declaration on another
   column is a different tree. The share of children that fall back to choosing by
   weight, stated as about 2%, is 0.5% to 17.8% at 200,000 rows over sixteen seeds.
+- **`shape_from_factory` writes a `Tree` for a key to the model's own table.** It
+  suggested `FanOut(Zipf())` for every relation, which `Table` has refused on a
+  self-referential key since 0.25.0, so the report for a category's parent could
+  not be built. It now writes `Tree(roots=<measured NULL share>, sizes=Zipf())`,
+  the share counted from the rows left without a parent rather than as one more
+  parent. A key the factory never left NULL, or always did, has no share a
+  `Tree` takes, and gets `roots=0.05` -- the figure `Table`'s own refusal offers
+  -- with a finding that it was not measured. A key no shape can fill, one that
+  refuses NULL or is unique by `unique=True`, a `UniqueConstraint` or
+  `unique_together`, gets a comment where the declaration would be and a finding
+  saying why, instead of a `Tree` that `Table` refuses. A key to another table is
+  reported exactly as before.
 
 ## [0.25.0] — 2026-11-07
 
