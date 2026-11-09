@@ -232,6 +232,30 @@ how many companies there are.
   children, or a `Projection`. A `Tree` beside a `FanOut` keeps the `PerParent`
   remedy over that fan-out, because one row per company is enough to keep
   `(parent, company)`.
+- **A relation named by the condition is refused** when a row can land inside it, as
+  in `UniqueConstraint(fields=["company"], condition=Q(owner=1))` with `owner` a
+  `FanOut`, a `Tree` or a `Paired`. Which row holds a key comes from the row index, so
+  it is the per-row draw again, and size only moves the odds: over twenty seeds that
+  shape loaded 20 times at 200 rows over 300 people and once over 10. `PerParent` is
+  refused on a relation, so the message offers what would build for that declaration:
+  `parents=` naming only keys outside the condition, no null share, a cap of one, sizes
+  of one value or one root on a tree, the column left out, a `Distinct` column in the
+  constraint, or a `Projection`. Accepted, each at 20 loads in 20:
+  - nothing can land inside: `parents=(2, 3)` under `Q(owner=1)`, or `Q(owner=None)`
+    with no null share. A `Paired` never writes NULL, and a tree always does.
+  - a NULL in a column of the constraint itself, while each NULL is its own group,
+    because those rows are out of the index: `Q(owner=None)` over `(owner, label)`.
+    Under `nulls_distinct=False` they are one group, which loaded 0 times in 20.
+  - at most one row inside: a single key under `max_children=1` or flat sizes, a single
+    key on a tree that gives no row two children, and `Q(prev=None)` on one root. A set
+    is not a single key: `Q(owner__in=[1, 2])` under a cap of one loaded 10 in 20.
+  - `Paired` beside its own relation. Its partners are distinct inside each group of
+    that relation, so `(company, person)` under any condition holds, and so does
+    `Q(person=1)` over `company`. Under `nulls_distinct=False` with a null share on
+    the relation that proof is gone, and it loaded 13 in 20. Anywhere else a `Paired`
+    is refused like a fan-out: 11 in 20 under another fan-out, and 11 for a set of
+    three partners over its own relation. Narrowing it with `parents=` is accepted and
+    not offered, since it builds only if the partners left cover the busiest group.
 - **A tree that gives no row two children keeps all three of those constraints**,
   beside any number of fan-outs, and it is a proof rather than a probability. Sizes
   holding one value, such as
@@ -338,7 +362,9 @@ how many companies there are.
 - A constraint written over `expressions` rather than `fields`.
 - A conditional constraint whose grouping columns include neither a declared
   `FanOut` nor a declared `Tree`, because there is no partition here to satisfy
-  it with and a refusal would name no remedy.
+  it with and a refusal would name no remedy. That holds whatever the condition names:
+  `Q(owner=1)` over `(label)` with `label` drawn loaded 0 times in 20 and is accepted,
+  and so is `Q(person=1)` over `(person)` with `person` a `Paired`, at 5 in 20.
 - A column the shape leaves out whose `db_default` is an expression other than
   `Now()`. Nothing here can read what it writes: `gen_random_uuid()` is new in every
   row and loaded 20 times in 20, and a call this package has not read may do either.
@@ -363,6 +389,10 @@ refused, and the arithmetic is what drops out of the message.
   refused although it never writes that value and loads 20 times in 20, over a
   `FanOut` as over a `Tree`. The remedy
   is a declaration that says what it writes, such as a `Skew`.
+- A key under a condition, where `parents=` does not settle it. Nothing here reads a
+  parent's keys before the build, so `Q(owner=99)` over five people and `Q(prev=500)`
+  over two hundred rows are refused although each loads 20 times in 20. The remedy is
+  `parents=`, or the column left out.
 - A distribution that cannot enumerate itself and a fan-out over a parent this
   shape does not build, under an unconditional constraint. Both make the *capacity*
   unknown, so the refusal falls back to the structural sentence.
