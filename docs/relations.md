@@ -520,6 +520,25 @@ to 1,618, 24 to 65 and 4.9 to 32.2 on `testapp_folder.parent`.
 Flat sizes give every row about one child, which is long chains. That is what
 they declare, and a heavy tail is what most trees have.
 
+**Sizes of one value give no row two children**, whatever the seed or the table's
+name, and that is what fills a nullable unique self-key, however it is spelled:
+`unique=True`, a `OneToOneField`, a `UniqueConstraint` on the column alone, or
+`unique_together` on it alone. It is `FanOut(max_children=1)` for a key to the
+table's own rows:
+
+```python
+# models.py
+class Link(models.Model):
+    previous = models.OneToOneField("self", null=True, on_delete=models.SET_NULL)
+
+
+Shape(Table(Link, rows=50_000, previous=Tree(roots=0.05, sizes=Constant(1))))
+```
+
+Each root's NULL is its own group in the unique index, so the roots do not collide
+either. Under `nulls_distinct=False` they do, and no tree is accepted there.
+`shape_from_factory` writes this tree for a unique self-key.
+
 A `Tree` has no `childless`, `null` or `max_children` either, and no depth of
 its own. It needs no other table, so it adds
 nothing to the load order. In `COPY`, every parent is written before its
@@ -573,7 +592,8 @@ filled first is decided by the declarations and needs no connection to answer.
   load time. The refusal names the `Tree` that fills the column instead.
 - A `Tree` on a key to **another** table, where its parents would be keys that
   table never had; on a column that **cannot be null**, since its first row is
-  always a root; and on a **unique** column, which takes one child per parent.
+  always a root; and on a **unique** column, which takes one child per parent,
+  unless the tree gives no row two children. The refusal names the flat `Tree`.
 - Anything read **across** a `Tree`, or decided per **family** of one. The
   parent is a row of the same table generated in the same pass, and a family is
   not a range of rows the way a fan-out's group is.
@@ -581,8 +601,10 @@ filled first is decided by the declarations and needs no connection to answer.
   in names unique among siblings: a drawn value cannot see its siblings, so two
   of them sharing one is a matter of the seed. A column that is `Distinct` in
   every row, such as `Sequential`, keeps the constraint, and so does a tree with
-  sizes of one value, such as `Constant(1)`, which gives no row two children; a
-  `Tree` alone under a `UniqueConstraint` is refused as a unique column is.
+  sizes of one value, such as `Constant(1)`, which gives no row two children. A
+  `Tree` alone under a `UniqueConstraint` is decided as a unique column is, and
+  under `nulls_distinct=False` it is refused whatever its sizes, since the roots
+  then collide among themselves.
 - A `Tree` under a uniqueness beside a **`FanOut` or a second `Tree`**. Each column
   is computed from the row index without seeing the other, so two rows sharing a
   combination is a matter of the seed. A `Distinct` column keeps the constraint,

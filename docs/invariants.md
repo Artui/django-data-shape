@@ -176,9 +176,15 @@ how many companies there are.
   unique among siblings: a tree gives a row several children whenever its sizes
   say so, and a drawn value cannot see its siblings. A tree's families are not
   ranges of rows, so no derivation is decided per family. The exemptions are
-  `Distinct` and a tree that provably gives no row two children (below), and a
-  `Tree` alone under a `UniqueConstraint` is refused as a unique column is,
-  whatever its sizes.
+  `Distinct` and a tree that provably gives no row two children (below).
+- **A `Tree` alone on a unique self-key is refused unless it gives no row two
+  children**, in all four spellings: `unique=True`, a `OneToOneField`, a
+  `UniqueConstraint` and `unique_together`. Sizes of one value, such as
+  `Constant(1)`, fill it, as `FanOut(max_children=1)` fills a unique key to another
+  table, and the refusal of any other sizes names that tree. A column that refuses
+  NULL keeps no tree at all, and under `nulls_distinct=False` the roots collide
+  among themselves, so that is refused whatever the sizes, and a `Projection` with
+  `columns=` and `sql=` fills it.
 - **A `Tree` beside a `FanOut`, or two `Tree`s, under one constraint are refused**
   for the reason two fan-outs are: each column is computed from the row index
   and neither sees the other. Measured over twenty seeds on tables named

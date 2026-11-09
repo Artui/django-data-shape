@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import Counter
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from typing import Any
 
 from django.apps import apps
@@ -207,50 +207,63 @@ def _self_key(
     :class:`~django_data_shape.relations.tree.Tree` where one can fill it.
 
     **Where none can, there is no declaration at all** (``None``) and the finding
-    says why, rather than a ``Tree`` that ``Table`` will refuse. A column that
-    refuses NULL has no first row to point at, and a unique one cannot give a row
-    several children, which is what a tree's sizes weigh. Neither is an error of
-    the factory's, and the rest of what it measured is still worth reading, so
-    this does not raise.
+    says why, rather than a ``Tree`` that will be refused. A column that refuses
+    NULL has no first row to point at, and a constraint counting every NULL as one
+    value makes a tree's roots collide. Neither is an error of the factory's, and
+    the rest of what it measured is still worth reading, so this does not raise.
+
+    **A unique key gets sizes of one value**, because a tree whose sizes hold one
+    value gives no row two children, and that is what such a column requires. Every
+    other key gets ``Zipf()``, which the factory did not measure either.
 
     The root share is measured from ``values``, whose ``None`` is a root and not a
     parent: a ``Counter`` over them would count it as one more parent, as
     :func:`_relation` does for a key to another table, where it is harmless.
     """
-    reasons = []
-    if not field.null:
-        reasons.append("a key that refuses NULL has no first row to point at")
-    if _is_unique(model, field):
-        reasons.append("a unique key cannot give a row several children")
-    if reasons:
-        # Leaving a column out is a shape only where it may be NULL: ``Table`` refuses
-        # the undeclared required one, so the remedy differs by ``field.null``.
+    tied = _nulls_count_as_one(model, field)
+    if tied or not field.null:
+        reasons = []
+        if not field.null:
+            reasons.append("a key that refuses NULL has no first row to point at")
+        if tied:
+            reasons.append("a constraint counting every NULL as one value makes the roots collide")
+        # Leaving a column out is no shape under either: ``Table`` refuses the
+        # undeclared required one, and a tied one would hold one NULL in every row.
         remedy = (
-            "Leave it out and fill it after the build."
-            if field.null
+            "Fill the table with a Projection."
+            if tied
             else "Make the column null=True, or fill the table with a Projection."
         )
         return None, (
             f"{' and '.join(reasons)}, so no shape can fill it: a Tree is refused on this "
             f"column and a FanOut reads keys from a table still empty at load time. {remedy}"
         )
+    unique = _is_unique(model, field)
+    sizes = "Constant(1)" if unique else "Zipf()"
     roots = sum(value is None for value in values)
     if roots in (0, rows):
+        unmeasured = "roots not measured" if unique else "roots and sizes not measured"
+        why_these_sizes = (
+            f"sizes={sizes} is the one spread a unique key holds"
+            if unique
+            else f"sizes={sizes} is not measured either"
+        )
         return (
-            f"Tree(roots={_OFFERED_ROOTS}, sizes=Zipf()),  # roots and sizes not measured",
+            f"Tree(roots={_OFFERED_ROOTS}, sizes={sizes}),  # {unmeasured}",
             ("every row was left without a parent" if roots else "no row was left without a parent")
             + f" over {rows} calls, so there is no root share to write down: a tree's first "
             "row is always a root, and Tree takes a share strictly between 0 and 1. "
             f"roots={_OFFERED_ROOTS} is the figure Table's own refusal offers, not measured, "
-            "and sizes=Zipf() is not measured either.",
+            f"and {why_these_sizes}.",
         )
     share = f"{roots / rows:.3g}"
     if not 0 < float(share) < 1:
         # Three figures write a share past 0.9995 as 1, which Tree refuses.
         share = repr(roots / rows)
+    why_these_sizes = "a unique key gives no row two children" if unique else "sizes not measured"
     return (
-        f"Tree(roots={share}, sizes=Zipf()),  # {roots} of {rows} rows had no parent; "
-        "sizes not measured",
+        f"Tree(roots={share}, sizes={sizes}),  # {roots} of {rows} rows had no parent; "
+        f"{why_these_sizes}",
         None,
     )
 
@@ -259,19 +272,38 @@ def _is_unique(model: type[Model], field: Field[Any, Any]) -> bool:
     """Whether the column alone is unique, by whichever of the three spellings.
 
     ``unique=True`` is on the field. A ``UniqueConstraint`` and ``unique_together``
-    are on the model, in two different places, and ``Table`` refuses a tree under
+    are on the model, in two different places, and a shape decides a tree under
     each as the unique column it amounts to. A constraint with a condition holds
     only on some rows, so it is not this.
     """
     return (
         field.unique
         or (field.name,) in map(tuple, model._meta.unique_together)
-        or any(
-            isinstance(constraint, UniqueConstraint)
-            and constraint.condition is None
-            and tuple(constraint.fields) == (field.name,)
-            for constraint in model._meta.constraints
-        )
+        or any(_constraints_on_it_alone(model, field))
+    )
+
+
+def _nulls_count_as_one(model: type[Model], field: Field[Any, Any]) -> bool:
+    """Whether a constraint on this column alone makes its NULLs one value.
+
+    Read with ``getattr`` because ``nulls_distinct`` arrived in Django 5.0.
+    """
+    return any(
+        getattr(constraint, "nulls_distinct", None) is False
+        for constraint in _constraints_on_it_alone(model, field)
+    )
+
+
+def _constraints_on_it_alone(
+    model: type[Model], field: Field[Any, Any]
+) -> Iterator[UniqueConstraint]:
+    """The unconditional ``UniqueConstraint``s over this one column and nothing else."""
+    return (
+        constraint
+        for constraint in model._meta.constraints
+        if isinstance(constraint, UniqueConstraint)
+        and constraint.condition is None
+        and tuple(constraint.fields) == (field.name,)
     )
 
 

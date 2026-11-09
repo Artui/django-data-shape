@@ -975,14 +975,15 @@ def test_a_tree_beside_a_derivation_is_left_to_the_other_two_nets() -> None:
 
 def test_a_tree_alone_under_a_uniqueness_is_refused_as_a_unique_column_is() -> None:
     # unique=True is refused on the field, and a UniqueConstraint over the one
-    # column says the same thing without the field knowing. A tree gives some
-    # parents several children, which one link per row cannot hold.
+    # column says the same thing without the field knowing. A tree of a skew gives
+    # some parents several children, which one link per row cannot hold.
     with pytest.raises(
         InvalidShape, match="one_link_after_each permits one row per Chain"
     ) as raised:
         Shape(Table(Chain, rows=50, previous=Tree(roots=0.05, sizes=Zipf())))
 
-    assert "A chain of one-to-one links is not a tree" in str(raised.value)
+    assert "previous=Tree(roots=0.05, sizes=Constant(1))" in str(raised.value)
+    assert "A chain of one-to-one links is not a tree" not in str(raised.value)
 
 
 def test_a_single_fan_out_under_a_uniqueness_says_which_columns_it_means() -> None:

@@ -45,7 +45,8 @@ class Tree:
     column climbs with the table whatever order a family is written in, which is
     also how a production tree looks. Nor is there a ``max_children``, a
     ``childless`` or a depth; the depth is whatever the sizes make it, and flat
-    sizes, where every row has about one child, make long chains.
+    sizes, where every row has about one child, make long chains. Sizes of one
+    value give no row two children, which is what fills a unique key to this table.
     """
 
     def __init__(self, *, roots: float, sizes: Distribution) -> None:

@@ -15,8 +15,8 @@ from django_data_shape.derivations.per_parent import PerParent
 from django_data_shape.distributions.bounded import Bounded
 from django_data_shape.distributions.categorical import Categorical
 from django_data_shape.distributions.distinct import Distinct
-from django_data_shape.relations.count_roots import count_roots
 from django_data_shape.relations.fan_out import FanOut
+from django_data_shape.relations.gives_no_row_two_children import gives_no_row_two_children
 from django_data_shape.relations.tree import Tree
 
 
@@ -370,12 +370,14 @@ def _check_a_tree_beside_a_draw(table: Table, name: str, fields: tuple[str, ...]
     ``test_two_trees_under_one_uniqueness_are_refused_as_two_trees`` and
     ``test_two_trees_beside_a_draw_are_refused_as_two_trees`` are what fail.
 
-    **A tree alone under a constraint is refused here too**, because it is the
-    unique column :class:`~django_data_shape.declaration.table.Table` refuses
+    **A tree alone under a constraint is decided here too**, because it is the
+    unique column :class:`~django_data_shape.declaration.table.Table` decides,
     spelled as a constraint: ``unique=True`` is read off the field there, and a
-    ``UniqueConstraint(fields=["parent"])`` never reaches that check. That holds
-    for a flat tree as well, so the two spellings keep saying one thing:
-    ``test_a_flat_tree_alone_under_a_uniqueness_stays_refused``.
+    ``UniqueConstraint(fields=["parent"])`` never reaches that check. Both accept a
+    tree that gives no row two children, as a unique key to another table accepts
+    ``FanOut(max_children=1)``, so the spellings keep saying one thing:
+    ``test_a_flat_tree_alone_under_a_uniqueness_is_accepted``. The rest are refused,
+    and the refusal offers the flat tree only where the proof would hold for it.
     """
     trees = [column for column in fields if isinstance(table.fields.get(column), Tree)]
     others = [column for column in fields if column not in trees]
@@ -383,20 +385,15 @@ def _check_a_tree_beside_a_draw(table: Table, name: str, fields: tuple[str, ...]
     # One question, as in the fan-out check: is every other column a per-row
     # draw? A tree beside anything that is not a draw is a shape this refusal
     # is not about. A tree with nothing beside it passes this vacuously, and is
-    # refused below as the unique column it amounts to.
+    # then the unique column it amounts to.
     if len(trees) != 1 or not all(_is_drawn_per_row(one) for one in declared):
+        return
+    if _a_tree_gives_no_row_two_children(table, name, fields):
         return
     where = table.model.__name__
     if not others:
-        raise InvalidShape(
-            f"{name} permits one row per {where}.{trees[0]}, so each row may be the parent of "
-            f"one row at most, and {table.fields[trees[0]]!r} spreads children over parents by "
-            "weight, which gives some parents several. A chain of one-to-one links is not a "
-            "tree this package builds; leave the column out and fill it after the build."
-        )
+        raise InvalidShape(_a_tree_alone(table, name, where, trees[0]))
     if any(isinstance(one, Distinct) and one.is_distinct_per_row() for one in declared):
-        return
-    if _a_tree_gives_no_row_two_children(table, name, fields):
         return
     drawn = ", ".join(f"{where}.{column}={table.fields[column]!r}" for column in others)
     flat = (
@@ -415,6 +412,31 @@ def _check_a_tree_beside_a_draw(table: Table, name: str, fields: tuple[str, ...]
         "column that is distinct in every row keeps the constraint on its own and says so with "
         f"Distinct -- Sequential does. {flat}A table whose rows have to be a particular set is "
         "filled by a Projection with columns= and sql=."
+    )
+
+
+def _a_tree_alone(table: Table, name: str, where: str, column: str) -> str:
+    """Why a tree alone under this constraint is refused, and what would fill the column.
+
+    Two different answers, because the second leaves nothing to offer. Under
+    ``nulls_distinct=False`` the flat tree collides as any other does, and leaving
+    the column out loads the same NULL in every row, so neither may be named.
+    """
+    tree = cast("Tree", table.fields[column])
+    if not _each_null_is_its_own_group(table, name):
+        return (
+            f"{name} permits one row per {where}.{column} and counts every NULL as one value "
+            "under nulls_distinct=False. A tree's roots are the rows whose parent is NULL, so "
+            "they collide among themselves whatever the sizes, and a column left out of the "
+            "shape holds that one NULL in every row. A table whose rows have to be a particular "
+            "set is filled by a Projection with columns= and sql=."
+        )
+    return (
+        f"{name} permits one row per {where}.{column}, so each row may be the parent of one row "
+        f"at most, and {tree!r} spreads children over parents by weight, which gives some parents "
+        "several. A tree whose sizes hold one value gives no row two children and fills it: "
+        f"{column}=Tree(roots={tree.roots!r}, sizes=Constant(1)). Or leave the column out and "
+        "fill it after the build."
     )
 
 
@@ -524,51 +546,21 @@ def _a_tree_gives_no_row_two_children(table: Table, name: str, fields: tuple[str
     **A proof rather than a probability**, the line :func:`_cannot_collide` draws
     for a fan-out. A combination holding a key no other row holds is distinct
     whatever the other columns do, and a root's NULL is its own group, so a tree
-    in which no row has two children cannot collide. Two ways to know that.
+    in which no row has two children cannot collide. That last is
+    :func:`~django_data_shape.relations.gives_no_row_two_children.gives_no_row_two_children`.
 
     **Only where each NULL is its own group.** Under ``nulls_distinct=False`` the
     roots are one group and can collide among themselves, so nothing here is a
     proof and every call answers no. That also refuses a tree with a single root,
     which would load, and that is the price of keeping one proof.
-
-    **At most one row has a parent**, by arithmetic on the roots, read the way
-    the build reads them. One child has no sibling, whatever the sizes weigh.
-
-    **The sizes hold one value.** ``_targets`` then gives every row the same
-    share, below one, and its largest remainder gives one child each to the first
-    rows, as many rows as there are children. Each of those units is taken once.
-    The fall-back that goes past a target never runs: row 0 is always a root, so
-    up to the last row with a target there is always an earlier row with room, and
-    after it the units left equal the children still to come. So the seed and the
-    table's name change nothing here, unlike every other figure about a tree.
-    ``Constant(0)`` weighs nothing and is refused when the tree is resolved.
-
-    Two values are not enough, since one row can then weigh more than a share of
-    one, and ``_check_a_tree_beside_a_draw`` still refuses a flat tree alone.
-
-    .. warning::
-
-       **Three conjuncts the coverage gate cannot see.** The ``children`` bound
-       is held from both sides by
-       ``test_a_tree_with_one_child_has_no_siblings_to_collide`` and
-       ``test_a_tree_with_two_children_can_give_them_one_parent``, and the value
-       count by ``test_a_tree_of_two_sizes_is_not_flat``.
-       ``test_nulls_distinct_spelled_out_is_the_default`` and the
-       ``test_roots_counted_as_one_group_*`` tests hold the NULL reading from
-       both sides.
+    ``test_nulls_distinct_spelled_out_is_the_default`` and the
+    ``test_roots_counted_as_one_group_*`` tests hold that reading from both sides.
     """
-    if not _each_null_is_its_own_group(table, name):
-        return False
-    for column in fields:
-        tree = table.fields.get(column)
-        if not isinstance(tree, Tree):
-            continue
-        children = table.rows - count_roots(tree, table.rows)
-        if children <= 1:
-            return True
-        if isinstance(tree.sizes, Bounded) and tree.sizes.distinct_values() == 1:
-            return True
-    return False
+    return _each_null_is_its_own_group(table, name) and any(
+        gives_no_row_two_children(tree, table.rows)
+        for tree in (table.fields.get(column) for column in fields)
+        if isinstance(tree, Tree)
+    )
 
 
 def _check_a_fan_out_on_a_unique_column(table: Table, rows_of: dict[type[Model], int]) -> None:

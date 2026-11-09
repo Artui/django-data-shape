@@ -11,11 +11,13 @@ from django_data_shape import (
     InvalidShape,
     PerParent,
     Shape,
+    Skew,
     Table,
     Tree,
     Zipf,
 )
 from django_data_shape.databases.shape_digest import shape_digest
+from django_data_shape.distributions.distribution import Distribution
 from tests.testapp.models import Category, RootlessNode, Session, Successor
 
 
@@ -67,7 +69,32 @@ def test_a_tree_on_a_unique_self_reference_is_refused() -> None:
         Table(Successor, rows=5, previous=Tree(roots=0.1, sizes=Zipf()))
     # The generic unique-column check opens with the same prefix, so the
     # sentence only the Tree branch writes is what shows that branch ran.
-    assert "A chain of one-to-one links" in str(refused.value)
+    assert "previous=Tree(roots=0.1, sizes=Constant(1))" in str(refused.value)
+    assert "A chain of one-to-one links" not in str(refused.value)
+
+
+@pytest.mark.parametrize(
+    "sizes", [Constant(1), Constant(3), Skew({3: 1})], ids=["one", "three", "skew_of_one"]
+)
+def test_a_tree_of_one_size_on_a_unique_self_reference_is_accepted(sizes: Distribution) -> None:
+    # Table alone decides unique=True, and it answers past _check_trees too: the
+    # generic unique-column check reads a tree as a draw if it is not told.
+    assert isinstance(Table(Successor, rows=50, previous=Tree(roots=0.1, sizes=sizes)), Table)
+
+
+def test_a_tree_with_one_child_on_a_unique_self_reference_is_accepted_whatever_it_weighs() -> None:
+    # One child has no sibling, so the sizes decide nothing here.
+    Table(Successor, rows=2, previous=Tree(roots=0.5, sizes=Zipf()))
+
+
+def test_a_tree_with_two_children_on_a_unique_self_reference_is_refused() -> None:
+    with pytest.raises(InvalidShape, match="Successor.previous is unique"):
+        Table(Successor, rows=3, previous=Tree(roots=0.1, sizes=Zipf()))
+
+
+def test_a_tree_of_two_sizes_on_a_unique_self_reference_is_refused() -> None:
+    with pytest.raises(InvalidShape, match="Successor.previous is unique"):
+        Table(Successor, rows=50, previous=Tree(roots=0.1, sizes=Skew({1: 1, 2: 1})))
 
 
 def test_a_tree_on_a_column_that_is_not_a_relation_is_refused() -> None:

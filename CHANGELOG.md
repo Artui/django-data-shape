@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **A `Tree` that gives no row two children fills a nullable unique self-key.**
+  `Tree(roots=0.05, sizes=Constant(1))` was refused on `unique=True`, a `OneToOneField`,
+  a `UniqueConstraint` and `unique_together` over the one column, though the proof that
+  keeps a uniqueness beside other columns holds for it alone, as `FanOut(max_children=1)`
+  holds on a unique key to another table. It now builds on Postgres under each spelling.
+  Any other sizes stay refused, and the refusal names the flat `Tree`. A self-key that
+  refuses NULL stays refused, and so does any tree under `nulls_distinct=False`, whose
+  roots collide among themselves.
+- **`shape_from_factory` writes that `Tree` for a nullable unique self-key,** with the
+  root share it measured, instead of a comment and a finding. A self-key that refuses
+  NULL keeps both, and a self-key under `nulls_distinct=False` now gets them too, naming
+  a `Projection`, rather than a `Tree` a shape would refuse.
+
 ## [0.25.1] — 2026-11-09
 
 ### Fixed

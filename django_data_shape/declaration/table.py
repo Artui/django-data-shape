@@ -22,6 +22,7 @@ from django_data_shape.distributions.distribution import Distribution
 from django_data_shape.keys.infer_key_strategy import infer_key_strategy
 from django_data_shape.keys.key_strategy import KeyStrategy
 from django_data_shape.relations.fan_out import FanOut
+from django_data_shape.relations.gives_no_row_two_children import gives_no_row_two_children
 from django_data_shape.relations.paired import Paired
 from django_data_shape.relations.tree import Tree
 from django_data_shape.utils import (
@@ -288,14 +289,19 @@ class Table:
         self._computation_order = order_derivations(self.model.__name__, self._fields)
 
     def _check_trees(self, known: dict[str, Field[Any, Any]]) -> None:
-        """A ``Tree`` fills a nullable, non-unique key to this same table, and nothing else.
+        """A ``Tree`` fills a nullable key to this same table, and nothing else.
 
         Each condition is the arithmetic of the declaration rather than a
         preference. A tree's parents are this table's own earlier rows, so on a
         key to another table it would emit keys that table never had. Its roots
         are NULL, and the first row is always one, so a column that refuses
         NULL cannot hold any tree at all. And a unique column takes one child
-        per parent, which a tree exists to exceed.
+        per parent, which only a tree that gives no row two children keeps.
+
+        A unique index keeps each NULL its own group, so here the roots do not
+        collide, and the proof needs nothing else from this column. A
+        ``UniqueConstraint`` can say otherwise, and is decided by
+        :func:`~django_data_shape.declaration.check_constraints.check_constraints`.
         """
         for name, declared in sorted(self.fields.items()):
             if not isinstance(declared, Tree):
@@ -316,12 +322,13 @@ class Table:
                     "point at, so no tree fits a column that refuses NULL. Make the column "
                     "null=True, or leave it out and fill it after the build."
                 )
-            if field.unique:
+            if field.unique and not gives_no_row_two_children(declared, self.rows):
                 raise InvalidShape(
                     f"{where} is unique, so each row may be the parent of one row at most, and "
                     f"{declared!r} spreads children over parents by weight, which gives some "
-                    "parents several. A chain of one-to-one links is not a tree this package "
-                    "builds; leave the column out and fill it after the build."
+                    "parents several. A tree whose sizes hold one value gives no row two children "
+                    f"and fills it: {name}=Tree(roots={declared.roots!r}, sizes=Constant(1)). Or "
+                    "leave the column out and fill it after the build."
                 )
 
     def _check_statistics(self, known: dict[str, Field[Any, Any]]) -> None:
@@ -665,8 +672,8 @@ class Table:
                 continue
             # A partition is not a draw, and a derivation reads something other
             # than its own row index. Both are left to the checks that can see
-            # what they depend on.
-            if isinstance(distribution, (FanOut, Derivation)):
+            # what they depend on, and a tree here has passed _check_trees.
+            if isinstance(distribution, (FanOut, Derivation, Tree)):
                 continue
             if isinstance(distribution, Distinct) and distribution.is_distinct_per_row():
                 continue

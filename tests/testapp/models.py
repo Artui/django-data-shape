@@ -1338,6 +1338,31 @@ class Relay(models.Model):
         unique_together = [("previous",)]
 
 
+class RootlessLink(models.Model):
+    """A unique self-reference that refuses NULL: no tree has a first row to give it."""
+
+    previous = models.OneToOneField("self", on_delete=models.CASCADE, related_name="+")
+
+
+class TiedLink(models.Model):
+    """A unique self-reference whose NULLs count as one value, where Django can say so.
+
+    ``nulls_distinct`` arrived in Django 5.0, so below it this is a plain ``Chain``
+    and the tests reading the difference skip.
+    """
+
+    previous = models.ForeignKey("self", null=True, on_delete=models.CASCADE, related_name="+")
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["previous"],
+                name="one_tied_link_after_each",
+                **({"nulls_distinct": False} if django.VERSION >= (5, 0) else {}),
+            ),
+        ]
+
+
 class Sibling(models.Model):
     """A self-reference whose only uniqueness is conditional, so the column is not unique.
 

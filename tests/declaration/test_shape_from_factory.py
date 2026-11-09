@@ -9,12 +9,13 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+import django
 import pytest
 from django.db import connection
 from django.db.models import Model
 
 import django_data_shape
-from django_data_shape import InvalidShape, Table, Tree, shape_from_factory
+from django_data_shape import InvalidShape, Shape, Table, Tree, build, shape_from_factory
 from tests.testapp.models import (
     Category,
     Chain,
@@ -24,10 +25,12 @@ from tests.testapp.models import (
     Folder,
     Project,
     Relay,
+    RootlessLink,
     RootlessNode,
     Session,
     Sibling,
     Successor,
+    TiedLink,
 )
 
 pytestmark = [
@@ -37,6 +40,11 @@ pytestmark = [
         reason="it runs a factory against a database and rolls it back",
     ),
 ]
+
+
+_NEEDS_NULLS_DISTINCT = pytest.mark.skipif(
+    django.VERSION < (5, 0), reason="UniqueConstraint(nulls_distinct=) arrived in Django 5.0"
+)
 
 
 def _sub_factory() -> Session:
@@ -366,9 +374,7 @@ def test_a_root_share_that_rounds_to_one_is_written_in_full() -> None:
     ("model", "why"),
     [
         (RootlessNode, "a key that refuses NULL has no first row to point at"),
-        (Successor, "a unique key cannot give a row several children"),
-        (Chain, "a unique key cannot give a row several children"),
-        (Relay, "a unique key cannot give a row several children"),
+        (RootlessLink, "a key that refuses NULL has no first row to point at"),
     ],
 )
 def test_a_self_key_no_shape_can_fill_is_a_comment_and_a_finding_not_a_tree(
@@ -386,11 +392,9 @@ def test_a_self_key_no_shape_can_fill_is_a_comment_and_a_finding_not_a_tree(
         calls["n"] += 1
         # A required self-key is pointed at a row that is never committed: the
         # call runs in a transaction that is rolled back, and the constraint is
-        # deferred, so nothing checks it.
-        if model is RootlessNode:
-            return model.objects.create(**{link: 1})  # type: ignore[attr-defined]
-        previous = model.objects.last()  # type: ignore[attr-defined]
-        return model.objects.create(**{link: previous.pk if previous else None})  # type: ignore[attr-defined]
+        # deferred, so nothing checks it. A unique one needs a new row each call.
+        key = 1 if model is RootlessNode else calls["n"]
+        return model._default_manager.create(**{link: key})
 
     report = shape_from_factory(factory, samples=10)
 
@@ -400,17 +404,19 @@ def test_a_self_key_no_shape_can_fill_is_a_comment_and_a_finding_not_a_tree(
     assert f"    # {field}: no shape can fill this" in report
     assert f"{model.__name__}.{field}: {why}" in report
     assert f"{field}=" not in report
+    # Being unique is no longer why nothing fills it.
+    assert "a unique key cannot" not in report
 
 
 def _report_over_a_self_key_no_shape_can_fill(model: type[Model]) -> str:
-    """The report for a factory over one of the self-keyed models whose key gets a comment."""
+    """The report for a factory linking each row to the one before, or a required key to a row."""
 
     def factory() -> Model:
         if model is RootlessNode:
             # Never committed: the call is rolled back and the constraint deferred.
             return model.objects.create(parent_id=1)  # type: ignore[attr-defined]
-        previous = model.objects.last()  # type: ignore[attr-defined]
-        return model.objects.create(previous=previous)  # type: ignore[attr-defined]
+        previous = model._default_manager.order_by("pk").last()
+        return model._default_manager.create(previous=previous)
 
     return shape_from_factory(factory, samples=10)
 
@@ -432,28 +438,62 @@ def test_a_self_key_that_refuses_null_is_not_told_to_be_left_out() -> None:
 
 
 @pytest.mark.parametrize("model", [Successor, Chain, Relay])
-def test_a_nullable_unique_self_key_is_still_told_to_be_left_out(model: type[Model]) -> None:
-    # Leaving a nullable column out is a shape, so for these the remedy is true.
+def test_a_nullable_unique_self_key_is_written_as_a_flat_tree_not_told_to_be_left_out(
+    model: type[Model],
+) -> None:
+    # A tree that gives no row two children fills it, as FanOut(max_children=1)
+    # fills a unique key to another table, so the comment and its remedy are gone.
     report = _report_over_a_self_key_no_shape_can_fill(model)
 
-    assert "Leave it out and fill it after the build." in report
-    assert "null=True" not in report
-    assert "Projection" not in report
+    assert "previous=Tree(roots=0.1, sizes=Constant(1))," in report
+    assert "1 of 10 rows had no parent" in report
+    assert "no shape can fill" not in report
+    assert "Leave it out and fill it after the build." not in report
+    assert "Zipf" not in report
 
 
 @pytest.mark.parametrize("model", [Successor, Chain, Relay])
-def test_a_report_with_a_comment_where_the_self_key_was_is_source_table_accepts(
+def test_a_report_over_a_unique_self_key_is_source_a_shape_builds(
     model: type[Model],
 ) -> None:
-    # The comment is where a declaration would have been, and the rest still
-    # builds: these self-keys are nullable, so leaving one out is a shape.
-    def factory() -> Model:
-        previous = model.objects.last()  # type: ignore[attr-defined]
-        return model.objects.create(previous=previous)  # type: ignore[attr-defined]
+    # Through Shape and build rather than Table alone: Table cannot see a
+    # constraint, so it accepted Chain and Relay even while Shape refused them.
+    report = _report_over_a_self_key_no_shape_can_fill(model)
 
-    report = shape_from_factory(factory, samples=10)
+    table = _built(report, model, rows=200)
 
-    assert isinstance(_built(report, model), Table)
+    assert isinstance(table.fields["previous"], Tree)
+    build(Shape(table))
+    links = [row for row in model._default_manager.values_list("previous_id", flat=True) if row]
+    assert len(links) == 180
+    assert len(links) == len(set(links))
+
+
+@pytest.mark.parametrize("model", [Successor, Chain, Relay])
+def test_a_unique_self_key_always_left_null_is_the_figure_table_offers_and_a_finding(
+    model: type[Model],
+) -> None:
+    report = shape_from_factory(model._default_manager.create, samples=20)
+
+    assert "previous=Tree(roots=0.05, sizes=Constant(1))," in report
+    assert f"{model.__name__}.previous: every row was left without a parent" in report
+    assert "sizes=Zipf()" not in report
+    assert isinstance(_built(report, model).fields["previous"], Tree)
+    Shape(_built(report, model))
+
+
+@_NEEDS_NULLS_DISTINCT
+def test_a_self_key_whose_nulls_count_as_one_is_still_a_comment_and_a_finding() -> None:
+    # Shape refuses every tree on this column, flat or not, and the column left
+    # out holds one NULL many times, so neither is what the report may offer.
+    report = _report_over_a_self_key_no_shape_can_fill(TiedLink)
+
+    assert "Tree(" not in report
+    assert "    # previous: no shape can fill this" in report
+    assert "TiedLink.previous: a constraint counting every NULL as one value" in report
+    assert "Fill the table with a Projection." in report
+    assert "Leave it out" not in report
+    assert "null=True" not in report
 
 
 def _chain_with_roots(n: int) -> int | None:
