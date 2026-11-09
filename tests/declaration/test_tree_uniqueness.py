@@ -8,6 +8,7 @@ refusal test fails on its assertion rather than dying at import.
 
 from __future__ import annotations
 
+import django
 import pytest
 from django.db import models
 from django.test.utils import isolate_apps
@@ -155,6 +156,103 @@ with isolate_apps("tests.testapp"):
                 ),
             ]
 
+    # The keyword arrived in Django 5.0, and the tests reading it skip below that.
+    _NULLS_TOGETHER: dict[str, bool] = {"nulls_distinct": False} if django.VERSION >= (5, 0) else {}
+
+    class NullFolder(models.Model):
+        """Names unique among siblings, with every root counted as one sibling group."""
+
+        parent = models.ForeignKey("self", null=True, on_delete=models.CASCADE, related_name="+")
+        name = models.CharField(max_length=50)
+
+        class Meta:
+            app_label = "testapp"
+            constraints = [
+                models.UniqueConstraint(
+                    fields=["parent", "name"], name="one_null_folder", **_NULLS_TOGETHER
+                ),
+            ]
+
+    class NullBranch(models.Model):
+        """A self-key and a company, with the roots' NULLs counted as one value."""
+
+        parent = models.ForeignKey("self", null=True, on_delete=models.CASCADE, related_name="+")
+        company = models.ForeignKey(Company, null=True, on_delete=models.CASCADE, related_name="+")
+
+        class Meta:
+            app_label = "testapp"
+            constraints = [
+                models.UniqueConstraint(
+                    fields=["parent", "company"], name="one_null_branch", **_NULLS_TOGETHER
+                ),
+            ]
+
+    class NullReply(models.Model):
+        """One accepted reply per parent, with the roots counted as one parent."""
+
+        parent = models.ForeignKey("self", null=True, on_delete=models.CASCADE, related_name="+")
+        company = models.ForeignKey(Company, null=True, on_delete=models.CASCADE, related_name="+")
+        status = models.CharField(max_length=50)
+
+        class Meta:
+            app_label = "testapp"
+            constraints = [
+                models.UniqueConstraint(
+                    fields=["parent"],
+                    condition=models.Q(status="accepted"),
+                    name="one_null_reply",
+                    **_NULLS_TOGETHER,
+                ),
+            ]
+
+    class NullGrouped(models.Model):
+        """A conditional uniqueness over a tree and a fan-out, NULLs counted as one value."""
+
+        parent = models.ForeignKey("self", null=True, on_delete=models.CASCADE, related_name="+")
+        company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name="+")
+        status = models.CharField(max_length=50)
+
+        class Meta:
+            app_label = "testapp"
+            constraints = [
+                models.UniqueConstraint(
+                    fields=["parent", "company"],
+                    condition=models.Q(status="live"),
+                    name="one_null_grouped",
+                    **_NULLS_TOGETHER,
+                ),
+            ]
+
+    class TwoRules(models.Model):
+        """Two constraints, and the NULLs are counted together under only one of them."""
+
+        parent = models.ForeignKey("self", null=True, on_delete=models.CASCADE, related_name="+")
+        name = models.CharField(max_length=50)
+        code = models.CharField(max_length=50, null=True)
+
+        class Meta:
+            app_label = "testapp"
+            constraints = [
+                models.UniqueConstraint(fields=["parent", "name"], name="one_name_apart"),
+                models.UniqueConstraint(fields=["code"], name="one_code", **_NULLS_TOGETHER),
+            ]
+
+    class NullsApart(models.Model):
+        """The default NULL handling, spelled out."""
+
+        parent = models.ForeignKey("self", null=True, on_delete=models.CASCADE, related_name="+")
+        name = models.CharField(max_length=50)
+
+        class Meta:
+            app_label = "testapp"
+            constraints = [
+                models.UniqueConstraint(
+                    fields=["parent", "name"],
+                    name="one_apart_folder",
+                    **({"nulls_distinct": True} if django.VERSION >= (5, 0) else {}),
+                ),
+            ]
+
 
 def _tree() -> Tree:
     return Tree(roots=0.05, sizes=Zipf())
@@ -295,6 +393,75 @@ def test_a_flat_tree_alone_under_a_uniqueness_stays_refused() -> None:
         message = _refusal(Table(Alone, rows=50, previous=_flat()))
 
     assert "one_link_alone" in message
+
+
+_NEEDS_NULLS_DISTINCT = pytest.mark.skipif(
+    django.VERSION < (5, 0), reason="UniqueConstraint(nulls_distinct=) arrived in Django 5.0"
+)
+
+
+@_NEEDS_NULLS_DISTINCT
+@pytest.mark.parametrize(
+    ("tree", "rows"),
+    [(Tree(roots=0.05, sizes=Constant(1)), 300), (Tree(roots=0.95, sizes=Zipf()), 20)],
+)
+def test_roots_counted_as_one_group_collide_beside_a_draw(tree: Tree, rows: int) -> None:
+    # Every root holds the same NULL, so the roots collide among themselves
+    # however few children the tree gives anyone.
+    message = _refusal(Table(NullFolder, rows=rows, parent=tree, name=Skew({"a": 1, "b": 1})))
+
+    assert "one_null_folder" in message
+    assert "is a Tree beside" in message
+    # The refusal must not offer the shape it has just refused.
+    assert "Constant(1)," not in message
+
+
+@_NEEDS_NULLS_DISTINCT
+def test_roots_counted_as_one_group_collide_beside_a_fan_out() -> None:
+    message = _refusal(
+        _companies(5), Table(NullBranch, rows=500, parent=_flat(), company=FanOut(Zipf()))
+    )
+
+    assert "one_null_branch" in message
+    assert "Constant(1)," not in message
+    # Left out of the shape, the tree's NULLs are one group here as well.
+    assert "its own group" not in message
+
+
+@_NEEDS_NULLS_DISTINCT
+def test_roots_counted_as_one_group_collide_in_a_conditional_uniqueness() -> None:
+    message = _refusal(Table(NullReply, rows=500, parent=_flat(), status=Constant("accepted")))
+
+    assert "one_null_reply" in message
+    assert "Constant(1)," not in message
+
+
+@_NEEDS_NULLS_DISTINCT
+def test_roots_counted_as_one_group_collide_beside_a_fan_out_in_a_conditional() -> None:
+    message = _refusal(
+        _companies(),
+        Table(
+            NullGrouped,
+            rows=200,
+            parent=_flat(),
+            company=FanOut(Zipf()),
+            status=Skew({"live": 1, "dead": 1}),
+        ),
+    )
+
+    assert "one_null_grouped" in message
+
+
+@_NEEDS_NULLS_DISTINCT
+def test_nulls_counted_together_under_another_constraint_change_nothing_here() -> None:
+    # The reading is per constraint, because the NULLs of one index say nothing
+    # about another's.
+    Shape(Table(TwoRules, rows=300, parent=_flat(), name=Skew({"a": 1, "b": 1})))
+
+
+@_NEEDS_NULLS_DISTINCT
+def test_nulls_distinct_spelled_out_is_the_default() -> None:
+    Shape(Table(NullsApart, rows=20, parent=_flat(), name=Constant("same")))
 
 
 def test_a_tree_of_two_sizes_is_not_flat() -> None:

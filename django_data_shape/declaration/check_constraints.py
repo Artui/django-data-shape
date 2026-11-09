@@ -150,7 +150,7 @@ def _check_one(
     declared = table.fields.get(column)
     if declared is None:
         return
-    if _a_tree_gives_no_row_two_children(table, fields):
+    if _a_tree_gives_no_row_two_children(table, name, fields):
         return
     grouping = [table.fields.get(field) for field in fields]
     # A fan-out first, whatever else is grouped beside it: one row per company
@@ -396,9 +396,15 @@ def _check_a_tree_beside_a_draw(table: Table, name: str, fields: tuple[str, ...]
         )
     if any(isinstance(one, Distinct) and one.is_distinct_per_row() for one in declared):
         return
-    if _a_tree_gives_no_row_two_children(table, fields):
+    if _a_tree_gives_no_row_two_children(table, name, fields):
         return
     drawn = ", ".join(f"{where}.{column}={table.fields[column]!r}" for column in others)
+    flat = (
+        "So does a tree whose sizes hold one value, such as Constant(1), which gives no row two "
+        "children. "
+        if _each_null_is_its_own_group(table, name)
+        else ""
+    )
     raise InvalidShape(
         f"{name} needs every ({', '.join(fields)}) combination distinct, and {where}."
         f"{trees[0]} is a Tree beside {drawn}. A tree gives a row several children whenever "
@@ -407,9 +413,8 @@ def _check_a_tree_beside_a_draw(table: Table, name: str, fields: tuple[str, ...]
         "and the load then fails inside COPY at a row number that moves when the seed does. "
         "Nothing is decided per family of a tree, since a family is not a range of rows. A "
         "column that is distinct in every row keeps the constraint on its own and says so with "
-        "Distinct -- Sequential does. So does a tree whose sizes hold one value, such as "
-        "Constant(1), which gives no row two children. A table whose rows have to be a "
-        "particular set is filled by a Projection with columns= and sql=."
+        f"Distinct -- Sequential does. {flat}A table whose rows have to be a particular set is "
+        "filled by a Projection with columns= and sql=."
     )
 
 
@@ -425,8 +430,8 @@ def _check_a_tree_beside_a_partition(
     that index. Measured over twenty seeds on tables named ``testapp_branch`` and
     ``testapp_edge``, a tree beside ``FanOut(Zipf())`` loaded no times at two
     hundred rows over fifty companies, and ten times at fifty rows over a
-    thousand, nine under other names, since the draws are keyed on them. Two trees
-    loaded no times at two hundred rows.
+    thousand, and another count under another name, since the draws are keyed on
+    them. Two trees loaded no times at two hundred rows.
 
     **A tree's remedies are narrower than a fan-out's.** ``Paired`` takes distinct
     partners inside a fan-out's groups and ``Derived(..., scope='group')`` numbers
@@ -459,7 +464,7 @@ def _check_a_tree_beside_a_partition(
         return
     if any(_cannot_collide(table, column, rows_of) for column in fanned):
         return
-    if _a_tree_gives_no_row_two_children(table, fields):
+    if _a_tree_gives_no_row_two_children(table, name, fields):
         return
     where = table.model.__name__
     named = [
@@ -467,6 +472,19 @@ def _check_a_tree_beside_a_partition(
         *(f"{where}.{column} is a fan-out" for column in fanned),
         *(f"{where}.{column}={table.fields[column]!r} is drawn per row" for column in others),
     ]
+    apart = _each_null_is_its_own_group(table, name)
+    flat = (
+        ", and so does a tree whose sizes hold one value, such as Constant(1), which gives no row "
+        "two children"
+        if apart
+        else ""
+    )
+    left_out = (
+        f"Leaving {trees[0]} out of the shape loads NULL, and each NULL in a unique index is its "
+        "own group, so it can be filled after the build. "
+        if apart
+        else ""
+    )
     capped = (
         "A fan-out that gives no parent two rows keeps the constraint on its own and says so with "
         "max_children=1. "
@@ -480,22 +498,38 @@ def _check_a_tree_beside_a_partition(
         "index and two rows sharing one is a matter of the seed. The load then fails inside COPY "
         "at a row number that moves when the seed does. Nothing is decided per family of a tree, "
         f"since a family is not a range of rows. {capped}A column of the constraint that is "
-        "distinct in every row keeps it too and says so with Distinct -- Sequential does, and so "
-        "does a tree whose sizes hold one value, such as Constant(1), which gives no row two "
-        "children. Leaving "
-        f"{trees[0]} out of the shape loads NULL, and each NULL in a unique index is its own "
-        "group, so it can be filled after the build. A table whose rows have to be a particular "
-        "set is filled by a Projection with columns= and sql=."
+        f"distinct in every row keeps it too and says so with Distinct -- Sequential does{flat}. "
+        f"{left_out}A table whose rows have to be a particular set is filled by a Projection with "
+        "columns= and sql=."
     )
 
 
-def _a_tree_gives_no_row_two_children(table: Table, fields: tuple[str, ...]) -> bool:
+def _each_null_is_its_own_group(table: Table, name: str) -> bool:
+    """Whether this constraint counts each NULL apart, which is PostgreSQL's default.
+
+    ``nulls_distinct=False`` makes them one value. Read with ``getattr`` because
+    the attribute arrived in Django 5.0. A ``unique_together`` matches no
+    constraint's name here, and its index always keeps the default.
+    """
+    return all(
+        getattr(constraint, "nulls_distinct", None) is not False
+        for constraint in table.model._meta.constraints
+        if constraint.name == name
+    )
+
+
+def _a_tree_gives_no_row_two_children(table: Table, name: str, fields: tuple[str, ...]) -> bool:
     """Whether a tree among these columns provably keeps the constraint on its own.
 
     **A proof rather than a probability**, the line :func:`_cannot_collide` draws
     for a fan-out. A combination holding a key no other row holds is distinct
     whatever the other columns do, and a root's NULL is its own group, so a tree
     in which no row has two children cannot collide. Two ways to know that.
+
+    **Only where each NULL is its own group.** Under ``nulls_distinct=False`` the
+    roots are one group and can collide among themselves, so nothing here is a
+    proof and every call answers no. That also refuses a tree with a single root,
+    which would load, and that is the price of keeping one proof.
 
     **At most one row has a parent**, by arithmetic on the roots, read the way
     the build reads them. One child has no sibling, whatever the sizes weigh.
@@ -519,7 +553,12 @@ def _a_tree_gives_no_row_two_children(table: Table, fields: tuple[str, ...]) -> 
        ``test_a_tree_with_one_child_has_no_siblings_to_collide`` and
        ``test_a_tree_with_two_children_can_give_them_one_parent``, and the value
        count by ``test_a_tree_of_two_sizes_is_not_flat``.
+       ``test_nulls_distinct_spelled_out_is_the_default`` and the
+       ``test_roots_counted_as_one_group_*`` tests hold the NULL reading from
+       both sides.
     """
+    if not _each_null_is_its_own_group(table, name):
+        return False
     for column in fields:
         tree = table.fields.get(column)
         if not isinstance(tree, Tree):
@@ -792,9 +831,9 @@ def _check_conditional_over_a_tree(
     ``Reply(parent, status)`` with one ``accepted`` reply per parent. The defect
     is :func:`_check_conditional`'s: a per-row draw cannot keep a rule about a
     group, at any weight. Measured over twenty seeds at two hundred rows on a table
-    named ``testapp_reply``, a share of 10% loaded three times, once under other
-    names, and 2.5% fourteen, so a smaller share moves the collision rather than
-    removing it.
+    named ``testapp_reply``, a share of 10% loaded three times and 2.5% fourteen,
+    and other names give other counts, so a smaller share moves the collision
+    rather than removing it.
 
     **It is a check of its own because that remedy is refused here.**
     ``PerParent`` reads a group from a fan-out's ranges, and a tree's families are
@@ -837,6 +876,11 @@ def _check_conditional_over_a_tree(
     else:
         asks = _asks(table, declared, values)
     where = table.model.__name__
+    flat = (
+        "sizes that hold one value, such as Constant(1), which give no row two children; "
+        if _each_null_is_its_own_group(table, name)
+        else ""
+    )
     named = [
         *(f"{where}.{field} is a Tree" for field in trees),
         *(f"{where}.{field}={table.fields[field]!r} is drawn per row" for field in others),
@@ -849,8 +893,7 @@ def _check_conditional_over_a_tree(
         "at any weight, and the load then fails inside COPY at a row number that moves when the "
         f"seed does. What a tree accepts: {column} filled so that no row lands inside the "
         "condition; a column of the constraint that is distinct in every row, which says so with "
-        "Distinct -- Sequential does; sizes that hold one value, such as Constant(1), which give "
-        "no row two children; or a Projection with columns= and sql=."
+        f"Distinct -- Sequential does; {flat}or a Projection with columns= and sql=."
     )
 
 

@@ -205,7 +205,9 @@ how many companies there are.
   first rows one child each and room lasts until the last child is placed. At most
   one non-root row, by arithmetic on `roots`, has no sibling whatever the sizes
   weigh. Neither depends on the seed or the table's name, and a load test holds
-  the first of them on a real table.
+  the first of them on a real table. Both stand on each root's NULL being its own
+  group, so under `nulls_distinct=False`, where the roots are one group and collide
+  among themselves, the constraint is refused and no such tree exempts it.
 - **Enough room is not a way to fill it.** An unconditional constraint over
   **two fan-outs** — the through table of a many-to-many — passes the pigeonhole
   comfortably, because the product of two parent counts dwarfs the row count,

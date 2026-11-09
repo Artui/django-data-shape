@@ -20,14 +20,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A `Tree` in a conditional `UniqueConstraint` is refused at declaration** when a
   row can land inside the condition; a 10% share loaded in 3 of 20 seeds on a table
   named `testapp_reply`. The refusal names what a tree accepts rather than
-  `PerParent`, which `Table` refuses over one. A constraint grouping a `Tree` with a `FanOut` keeps the `PerParent`
-  remedy, and its message now names the fan-out wherever it sits in the constraint,
-  where it used to name the first field.
-- **A `Tree` that gives no row two children is accepted beside drawn columns,** where
-  0.25.0 refused it. Sizes of one value, such as `Constant(1)`, give each parent one
-  child, and at most one non-root row has no sibling at all, so `(parent, name)` over
-  such a tree cannot collide whatever the seed. A `Tree` alone under a uniqueness is
-  still refused.
+  `PerParent`, which `Table` refuses over one. A constraint grouping a `Tree` with a
+  `FanOut` keeps the `PerParent` remedy, and its message now names the fan-out wherever
+  it sits in the constraint, where it used to name the first field.
+- **A `Tree` that gives no row two children keeps a uniqueness it shares with other
+  columns,** which 0.25.0 refused beside drawn columns and beside a `FanOut` in a
+  conditional constraint. Sizes of one value, such as `Constant(1)`, give each parent
+  one child, and a tree with at most one non-root row has no siblings, so with each
+  root's NULL its own group `(parent, name)` cannot collide whatever the seed. Under
+  `nulls_distinct=False` the roots are one group, and the constraint stays refused. A
+  `Tree` alone under a uniqueness is still refused.
 - **The `Tree` measurements in `docs/relations.md` name their table and field,**
   because draw streams are keyed on those names and the same declaration on another
   column is a different tree. The share of children that fall back to choosing by
