@@ -754,8 +754,7 @@ def _a_tree_gives_no_row_two_children(table: Table, name: str, fields: tuple[str
     group and collide among themselves, so a second root is what breaks the proof,
     and with a single root the one NULL is as distinct as every key. A flat tree of
     many roots stays refused and so does one root over siblings.
-    ``test_nulls_distinct_spelled_out_is_the_default`` and the
-    ``test_roots_counted_as_one_group_*`` tests hold the NULL reading, and
+    The ``test_roots_counted_as_one_group_*`` tests hold the NULL reading, and
     ``db_default_beside_a_flat_tree`` in ``test_each_exemption_is_accepted_and_loads``
     holds ``apart``. That test holds the root's bound from below, on
     ``one_root_alone``, and ``test_one_root_is_not_enough_and_nor_is_a_flat_tree``
