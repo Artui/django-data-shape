@@ -616,8 +616,10 @@ filled first is decided by the declarations and needs no connection to answer.
   condition. `PerParent` is refused over a tree, so what keeps it is a column that
   stays outside the condition, a `Distinct` column in the constraint, a tree that
   gives no row two children, or a `Projection`. Beside a `FanOut`, `PerParent` over
-  that fan-out is the remedy. A tree's exemption needs each root's NULL to be its own
-  group, so under `nulls_distinct=False` it also needs one root, which is one NULL.
+  that fan-out is the remedy, and a fan-out that gives no parent two rows
+  (`max_children=1`) keeps it on its own. A tree's exemption needs each root's NULL to
+  be its own group, so under `nulls_distinct=False` it also needs one root, which is
+  one NULL.
 - A required relation **left undeclared**, which would fail the load on a
   not-null violation rather than at declaration time. The message names the
   column and the fan-out that fills it: forgetting one foreign key is the

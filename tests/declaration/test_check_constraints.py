@@ -25,6 +25,7 @@ from typing import Any, cast
 import django
 import pytest
 from django.db import connection, models
+from django.db.models.functions import Now
 from django.test.utils import isolate_apps
 
 from django_data_shape import (
@@ -1516,6 +1517,120 @@ with isolate_apps("tests.testapp"):
                 ),
             ]
 
+    class StampedFolder(models.Model):
+        """Now() as a db_default, which every row of one COPY reads alike."""
+
+        parent = _self_key()
+        at = models.DateTimeField(null=True, **_db_default(Now()))
+
+        class Meta:
+            app_label = "testapp"
+            constraints = [
+                models.UniqueConstraint(fields=["parent", "at"], name="one_stamped_folder"),
+            ]
+
+    class StampedSeat(models.Model):
+        company = _key(Company)
+        at = models.DateTimeField(null=True, **_db_default(Now()))
+
+        class Meta:
+            app_label = "testapp"
+            constraints = [
+                models.UniqueConstraint(fields=["company", "at"], name="one_stamped_seat"),
+            ]
+
+    class StampedOnly(models.Model):
+        at = models.DateTimeField(null=True, **_db_default(Now()))
+
+        class Meta:
+            app_label = "testapp"
+            constraints = [
+                models.UniqueConstraint(fields=["at"], name="one_stamped_only"),
+            ]
+
+    class UnstampedRule(models.Model):
+        company = _key(Company)
+        at = models.DateTimeField(null=True, **_db_default(Now()))
+
+        class Meta:
+            app_label = "testapp"
+            constraints = [
+                models.UniqueConstraint(
+                    fields=["company"], condition=models.Q(at=None), name="one_unstamped_rule"
+                ),
+            ]
+
+    class OnRule(models.Model):
+        """One row inside the condition per company, with the status drawn per row."""
+
+        company = _key(Company)
+        status = models.CharField(max_length=50)
+
+        class Meta:
+            app_label = "testapp"
+            constraints = [
+                models.UniqueConstraint(
+                    fields=["company"], condition=models.Q(status="on"), name="one_on_rule"
+                ),
+            ]
+
+    class TiedOnRule(models.Model):
+        company = _key(Company)
+        status = models.CharField(max_length=50)
+
+        class Meta:
+            app_label = "testapp"
+            constraints = [
+                models.UniqueConstraint(
+                    fields=["company"],
+                    condition=models.Q(status="on"),
+                    name="one_tied_on_rule",
+                    **_TOGETHER,
+                ),
+            ]
+
+    class OnRuleBetweenTwo(models.Model):
+        company = _key(Company)
+        person = _key(Person)
+        status = models.CharField(max_length=50)
+
+        class Meta:
+            app_label = "testapp"
+            constraints = [
+                models.UniqueConstraint(
+                    fields=["company", "person"],
+                    condition=models.Q(status="on"),
+                    name="one_on_rule_between_two",
+                ),
+            ]
+
+    class BranchOnRule(models.Model):
+        parent = _self_key()
+        company = _key(Company)
+        status = models.CharField(max_length=50)
+
+        class Meta:
+            app_label = "testapp"
+            constraints = [
+                models.UniqueConstraint(
+                    fields=["parent", "company"],
+                    condition=models.Q(status="on"),
+                    name="one_on_rule_on_a_branch",
+                ),
+            ]
+
+    class UnownedRule(models.Model):
+        company = _key(Company)
+        owner = _key(Person)
+
+        class Meta:
+            app_label = "testapp"
+            constraints = [
+                models.UniqueConstraint(
+                    fields=["company"], condition=models.Q(owner_id=None), name="one_unowned_rule"
+                ),
+            ]
+
     class KeyRule(models.Model):
         company = _key(Company)
 
@@ -1608,6 +1723,20 @@ _ON_POSTGRES = pytest.mark.skipif(
             "one_value_seat",
             "'same'",
             id="written_as_a_value",
+        ),
+        # Measured at 0 of 20 on each, past the checks: Now() is STATEMENT_TIMESTAMP() on
+        # PostgreSQL, and one table's rows arrive in one COPY statement.
+        pytest.param(
+            lambda: [Table(StampedFolder, rows=200, parent=Tree(roots=0.05, sizes=Zipf()))],
+            "one_stamped_folder",
+            "Now()",
+            id="now_beside_a_tree",
+        ),
+        pytest.param(
+            lambda: [_companies(), Table(StampedSeat, rows=20, company=FanOut(Zipf()))],
+            "one_stamped_seat",
+            "Now()",
+            id="now_beside_a_fan_out",
         ),
     ],
 )
@@ -1838,6 +1967,44 @@ def test_a_condition_nothing_can_read_is_left_alone() -> None:
     Shape(_companies(), Table(TokenCondition, rows=200, company=FanOut(Zipf())))
 
 
+def test_a_condition_may_name_a_left_out_key_by_its_attname() -> None:
+    # Q(owner_id=None) over a key the shape leaves out puts every row inside the
+    # condition, measured at 0 of 20. No field is called owner_id, so without the
+    # attname's name this read as a column nothing can read and was accepted.
+    with pytest.raises(InvalidShape) as raised:
+        Shape(_companies(), Table(UnownedRule, rows=200, company=FanOut(Zipf())))
+
+    assert "one_unowned_rule" in str(raised.value)
+    assert "NULL in every row" in str(raised.value)
+
+
+@_NEEDS_DJANGO_5
+def test_now_alone_counts_as_one_combination() -> None:
+    with pytest.raises(InvalidShape) as raised:
+        Shape(Table(StampedOnly, rows=20))
+
+    assert "one_stamped_only" in str(raised.value)
+    assert "can produce 1" in str(raised.value)
+
+
+@_NEEDS_DJANGO_5
+def test_a_cap_of_one_under_a_condition_is_no_proof_where_its_nulls_are_one_group() -> None:
+    # Loads 0 of 20: the rows of the null share are one group under nulls_distinct=False,
+    # and every one of them is inside the condition. _cannot_collide alone says yes here.
+    with pytest.raises(InvalidShape) as raised:
+        Shape(
+            _companies(),
+            Table(
+                TiedOnRule,
+                rows=20,
+                company=FanOut(Zipf(), max_children=1, null=0.5),
+                status=Constant("on"),
+            ),
+        )
+
+    assert "one_tied_on_rule" in str(raised.value)
+
+
 def test_a_condition_every_left_out_row_lands_inside_is_refused() -> None:
     # Q(status=None) is IS NULL, and a column the shape leaves out holds NULL, so every
     # row is inside the condition. Measured at 0 of 20: the guard this replaces read
@@ -2042,6 +2209,123 @@ def test_one_root_is_offered_beside_a_draw_and_in_a_conditional_when_it_would_ho
             lambda: [_companies(), Table(KeyRule, rows=200, company=FanOut(Zipf()))],
             id="condition_on_the_key",
         ),
+        # Now() is one value and no more than that: a proof about the other column holds,
+        # one row cannot collide, and a value that is never NULL stays outside IS NULL.
+        pytest.param(
+            (StampedFolder,),
+            lambda: [Table(StampedFolder, rows=200, parent=Tree(roots=0.05, sizes=Constant(1)))],
+            id="now_beside_a_flat_tree",
+            marks=_NEEDS_DJANGO_5,
+        ),
+        pytest.param(
+            (StampedSeat,),
+            lambda: [
+                _companies(),
+                Table(StampedSeat, rows=20, company=FanOut(Zipf(), max_children=1)),
+            ],
+            id="now_beside_a_cap_of_one",
+            marks=_NEEDS_DJANGO_5,
+        ),
+        pytest.param(
+            (StampedOnly,),
+            lambda: [Table(StampedOnly, rows=1)],
+            id="now_on_one_row",
+            marks=_NEEDS_DJANGO_5,
+        ),
+        pytest.param(
+            (UnstampedRule,),
+            lambda: [_companies(), Table(UnstampedRule, rows=200, company=FanOut(Zipf()))],
+            id="now_outside_a_condition_on_null",
+            marks=_NEEDS_DJANGO_5,
+        ),
+        # A partition with no group of two leaves a condition nothing to count.
+        pytest.param(
+            (OnRule,),
+            lambda: [
+                _companies(),
+                Table(
+                    OnRule,
+                    rows=20,
+                    company=FanOut(Zipf(), max_children=1),
+                    status=Skew({"on": 1, "off": 1}),
+                ),
+            ],
+            id="cap_of_one_under_a_condition_drawn_per_row",
+        ),
+        pytest.param(
+            (OnRule,),
+            lambda: [
+                _companies(),
+                Table(
+                    OnRule, rows=50, company=FanOut(Zipf(), max_children=1), status=Constant("on")
+                ),
+            ],
+            id="cap_of_one_with_every_row_inside_the_condition",
+        ),
+        pytest.param(
+            (OnRule,),
+            lambda: [
+                _companies(),
+                Table(
+                    OnRule,
+                    rows=20,
+                    company=FanOut(Zipf(), max_children=1, null=0.5),
+                    status=Constant("on"),
+                ),
+            ],
+            id="cap_of_one_with_a_null_share_under_a_condition",
+        ),
+        pytest.param(
+            (OnRule,),
+            lambda: [
+                _companies(),
+                Table(OnRule, rows=50, company=FanOut(Constant(1)), status=Constant("on")),
+            ],
+            id="flat_sizes_under_a_condition",
+        ),
+        pytest.param(
+            (OnRuleBetweenTwo,),
+            lambda: [
+                _companies(),
+                Table(Person, rows=50, name=Constant("ada")),
+                Table(
+                    OnRuleBetweenTwo,
+                    rows=20,
+                    company=FanOut(Zipf(), max_children=1),
+                    person=FanOut(Zipf()),
+                    status=Constant("on"),
+                ),
+            ],
+            id="cap_of_one_beside_a_second_fan_out_under_a_condition",
+        ),
+        pytest.param(
+            (BranchOnRule,),
+            lambda: [
+                _companies(),
+                Table(
+                    BranchOnRule,
+                    rows=20,
+                    parent=Tree(roots=0.05, sizes=Zipf()),
+                    company=FanOut(Zipf(), max_children=1),
+                    status=Constant("on"),
+                ),
+            ],
+            id="cap_of_one_beside_a_tree_under_a_condition",
+        ),
+        pytest.param(
+            (TiedOnRule,),
+            lambda: [
+                _companies(),
+                Table(
+                    TiedOnRule,
+                    rows=20,
+                    company=FanOut(Zipf(), max_children=1),
+                    status=Constant("on"),
+                ),
+            ],
+            id="cap_of_one_with_no_null_to_tie_under_a_condition",
+            marks=_NEEDS_DJANGO_5,
+        ),
         # The nulls reading: a cap of one still holds with nothing NULL to tie.
         pytest.param(
             (TiedSeat,),
@@ -2241,6 +2525,47 @@ def test_one_root_is_offered_beside_a_draw_and_in_a_conditional_when_it_would_ho
 )
 def test_each_exemption_is_accepted_and_loads(owned: Any, tables: Any) -> None:
     _assert_builds(owned, *tables())
+
+
+@_ON_POSTGRES
+@_NEEDS_DJANGO_5
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.parametrize(
+    ("model", "column", "table", "distinct"),
+    [
+        pytest.param(
+            StampedFolder,
+            "at",
+            lambda: Table(StampedFolder, rows=200, parent=Tree(roots=0.05, sizes=Constant(1))),
+            1,
+            id="now_is_one_instant",
+        ),
+        pytest.param(
+            TokenFolder,
+            "token",
+            lambda: Table(TokenFolder, rows=200, parent=Tree(roots=0.05, sizes=Zipf())),
+            200,
+            id="gen_random_uuid_is_new_in_every_row",
+        ),
+    ],
+)
+def test_what_an_expression_db_default_writes_across_one_copy(
+    model: type[models.Model], column: str, table: Any, distinct: int
+) -> None:
+    # The premise under the Now reading, read off the table rather than off a collision.
+    quote = connection.ops.quote_name
+    with connection.schema_editor() as editor:
+        editor.create_model(model)
+    try:
+        build_shape(Shape(table()))
+        with connection.cursor() as cursor:
+            cursor.execute(
+                f"SELECT COUNT(DISTINCT {quote(column)}) FROM {quote(model._meta.db_table)}"
+            )
+            assert cursor.fetchone()[0] == distinct
+    finally:
+        with connection.schema_editor() as editor:
+            editor.delete_model(model)
 
 
 def test_one_row_cannot_collide_with_anything() -> None:

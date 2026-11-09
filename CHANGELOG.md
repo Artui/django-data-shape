@@ -27,9 +27,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A column the shape leaves out is read as what the load leaves in it.** A literal
   `db_default` holds one value in every row, and was read as a NULL that keeps rows
   apart, so beside a `Tree` or a `FanOut` it was accepted and died in `COPY`. It now
-  counts as one value in every check, and is refused by name. A `db_default` that is
-  an expression stays with the other two nets, since `gen_random_uuid()` loads and
-  `Now()` does not.
+  counts as one value in every check, and is refused by name. `Now()` is read the same
+  way, since a table's rows arrive in one `COPY` and it is one instant across that
+  statement. Any other expression stays with the other two nets, since
+  `gen_random_uuid()` loads.
 - **A condition reads a column left out too.** `Q(status=None)` over one puts every
   row inside the condition, and so does `Q(status="on")` over a `db_default` of
   `"on"`. Both were accepted and died in `COPY`; both are refused.
@@ -52,6 +53,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   sizes of one value holds one NULL and no repeated key, and it was refused whatever
   it was beside. It loads, and a refusal there now names it. A tree of many roots
   stays refused.
+- **A fan-out that gives no group two rows keeps a conditional constraint.**
+  `FanOut(Zipf(), max_children=1)` and flat sizes were refused under a condition with a
+  drawn or constant column, and both load. A `null` share under `nulls_distinct=False`
+  takes the proof away, and that stays refused.
 - **A shape of one row is accepted under any uniqueness that has room for it.** Two
   rows are what a collision takes, and a drawn pair was refused at one row.
 

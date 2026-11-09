@@ -183,6 +183,12 @@ how many companies there are.
   condition reads the same value: `Q(status=None)` over a column left out puts
   every row inside it, 0 in 20, and `Q(status="on")` over a `db_default` of `"off"`
   puts none.
+- **`Now()` as a `db_default` is one value in every row too.** Django compiles it to
+  `STATEMENT_TIMESTAMP()` on PostgreSQL and a table's rows arrive in one `COPY`, so
+  every row holds one instant. Beside a skewed `Tree` or `FanOut` it loaded 0 times
+  in 20 and is refused by name, and beside a tree that gives no row two children or
+  a cap of one it loaded 20 times in 20 and is accepted. Every other expression is
+  left to the other two nets (below).
 - **A column may be named by its attname.** `fields=["parent_id", "name"]` is the
   index `fields=["parent", "name"]` is, and it is read as that one.
 - **Under `nulls_distinct=False` a NULL is one value**, which takes away what
@@ -312,6 +318,11 @@ how many companies there are.
   equality form.
 - A declaration that provably never lands inside the condition -- a `Constant`
   of something else, a `Skew` listing none of the members -- is accepted.
+- A fan-out in the constraint that gives no group two rows, by `max_children=1` or
+  the proof flat sizes make, is accepted whatever fills the condition, because a
+  group of one row has nothing to count. Each loaded 20 times in 20. A `null` share
+  under `nulls_distinct=False` is one more group, so it takes the proof away, and
+  that shape loaded 0 times in 20.
 
 ### What it cannot decide, and leaves to the other two nets
 
@@ -326,9 +337,9 @@ how many companies there are.
 - A conditional constraint whose grouping columns include neither a declared
   `FanOut` nor a declared `Tree`, because there is no partition here to satisfy
   it with and a refusal would name no remedy.
-- A column the shape leaves out whose `db_default` is an expression. Nothing here
-  can read what it writes: `gen_random_uuid()` is new in every row and loads, and
-  `Now()` is one value across a `COPY` and does not.
+- A column the shape leaves out whose `db_default` is an expression other than
+  `Now()`. Nothing here can read what it writes: `gen_random_uuid()` is new in every
+  row and loaded 20 times in 20, and a call this package has not read may do either.
 - A column filled by a `Derivation` under an unconditional constraint. A
   derivation reads something other than its own row index, so it is the one kind
   of declaration that *can* be arranged around a group — and whether a
@@ -347,7 +358,8 @@ refused, and the arithmetic is what drops out of the message.
 
 - A distribution that cannot enumerate itself, under a condition. Unknown is read
   as able to land inside it, so `Uniform(1, 9)` under `Q(status="accepted")` is
-  refused although it never writes that value and loads 20 times in 20. The remedy
+  refused although it never writes that value and loads 20 times in 20, over a
+  `FanOut` as over a `Tree`. The remedy
   is a declaration that says what it writes, such as a `Skew`.
 - A distribution that cannot enumerate itself and a fan-out over a parent this
   shape does not build, under an unconditional constraint. Both make the *capacity*

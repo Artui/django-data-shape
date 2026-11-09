@@ -6,6 +6,7 @@ from collections.abc import Iterable
 from typing import Any, cast
 
 from django.db.models import NOT_PROVIDED, Field, Model, Q, UniqueConstraint, Value
+from django.db.models.functions import Now
 
 from django_data_shape.declaration.invalid_shape import InvalidShape
 from django_data_shape.declaration.projection import Projection
@@ -25,8 +26,8 @@ from django_data_shape.relations.tree import Tree
 class _LeftOut(Constant):
     """What a column the shape leaves out holds: one value, in every row.
 
-    ``COPY`` does not name the column, so the database fills it: a literal
-    ``db_default`` where it has one, and NULL where it does not. A ``Constant``
+    ``COPY`` does not name the column, so the database fills it: a literal or
+    ``Now()`` ``db_default`` where it has one, and NULL where it has none. A ``Constant``
     because that is what it amounts to for the arithmetic and for a condition, and
     a class of its own so that a refusal says where the value came from rather
     than naming a declaration the caller never wrote.
@@ -96,8 +97,9 @@ def check_constraints(tables: tuple[Table | Projection, ...]) -> None:
     constraint whose grouping columns include neither a declared ``FanOut`` nor
     a declared ``Tree`` is skipped because there is no partition here to satisfy
     it with, so a refusal would name no remedy. A column the shape leaves out whose
-    ``db_default`` is an expression is skipped too, because nothing here can read
-    what it writes: ``gen_random_uuid()`` keeps a constraint and ``Now()`` does not.
+    ``db_default`` is an expression other than ``Now()`` is skipped too, because nothing
+    here can read what it writes: ``gen_random_uuid()`` keeps a constraint, and
+    :func:`_held` says why ``Now()`` is the one that can be read.
     In every one of those cases the declaration is allowed through and the
     post-load check and the database are what catch it.
 
@@ -153,7 +155,10 @@ def _uniquenesses(model: type[Model]) -> Iterable[tuple[str, tuple[str, ...], Q 
 
 
 def _named(model: type[Model], columns: Iterable[str]) -> tuple[str, ...]:
-    """These columns by field name. Django refuses a constraint naming anything else."""
+    """These columns by field name. Django refuses a constraint naming anything else.
+
+    Held by ``test_a_column_named_by_its_attname_is_the_column``.
+    """
     return tuple(model._meta.get_field(column).name for column in columns)
 
 
@@ -177,7 +182,8 @@ def _check_one(
         # above it would answer the wrong question first and, under a 100%
         # branch gate with no pragma, would take the 0.8.0 message down with it.
         _check_unconditional(table, name, fields, capacity)
-    # A collision takes two rows, and the rest of this is about arranging them.
+    # A collision takes two rows, and the rest of this is about arranging them. Held by
+    # db_defaults_on_one_row in test_each_exemption_is_accepted_and_loads.
     if table.rows < 2:
         return
     if condition is None:
@@ -195,11 +201,26 @@ def _check_one(
         return
     column, values = decoded
     # By name through the concrete fields rather than _named, because a condition
-    # may say Q(pk=...), which is no field. None is a column nothing here can read,
-    # and the guard is held by test_a_condition_nothing_can_read_is_left_alone:
-    # without it, None reads as the value NULL and Q(token=None) is refused.
+    # may say Q(pk=...), which is no field. The attname is held by
+    # test_a_condition_may_name_a_left_out_key_by_its_attname. None is a column nothing
+    # here can read, and the guard is held by
+    # test_a_condition_nothing_can_read_is_left_alone: without it, None reads as the
+    # value NULL and Q(token=None) is refused.
     declared = _held(table, _attname_to_name(table.model).get(column, column))
     if declared is None:
+        return
+    # A partition with no group of two leaves the condition nothing to count, so what
+    # fills it is not consulted, as with a column that keeps every row apart. Measured at
+    # twenty loads in twenty, and through _no_group_of_two because _cannot_collide would
+    # accept a cap of one whose null share is one group, which loaded none. One fan-out
+    # is enough, the isinstance keeps a column with no cap to read out of it, and
+    # test_a_cap_of_one_under_a_condition_is_no_proof_where_its_nulls_are_one_group and
+    # test_every_constraint_this_cannot_read_is_left_to_the_other_two_nets hold those.
+    if any(
+        isinstance(table.fields.get(field), FanOut)
+        and _no_group_of_two(table, name, field, rows_of)
+        for field in fields
+    ):
         return
     grouping = [table.fields.get(field) for field in fields]
     # A fan-out first, whatever else is grouped beside it: one row per company
@@ -647,12 +668,21 @@ def _held(table: Table, column: str) -> object:
     :class:`~django_data_shape.declaration.table.Table` refuses one left out that
     cannot, and a ``Value(None)`` default is the same NULL.
 
+    ``Now()`` is read as a literal is, and it is the one expression that is. Django
+    compiles it to ``STATEMENT_TIMESTAMP()`` on PostgreSQL, and all of a table's rows
+    arrive in one ``COPY``, so every row holds one instant, which
+    ``test_what_an_expression_db_default_writes_across_one_copy`` reads off the table:
+    no loads in twenty beside a tree and beside a fan-out, and twenty beside a proof
+    about the other column.
+    The portable route inserts by chunks, where the instants may differ, and a shape
+    is checked before any backend is chosen, so it is refused there as well.
+
     None is what nothing here can read, and it reads as not drawn per row, which
-    leaves the constraint to the other two nets. A ``db_default`` that is an
-    expression: ``gen_random_uuid()`` keeps a constraint and ``Now()`` is one value
-    across a ``COPY``. A ``GeneratedField``, which the database computes per row. A
-    key, which this package fills itself. And ``pk``, which a condition may say and
-    no field is called.
+    leaves the constraint to the other two nets. Any other ``db_default`` that is an
+    expression, since ``gen_random_uuid()`` keeps a constraint and a call this package
+    has not read may do either. A ``GeneratedField``, which the database computes per
+    row. A key, which this package fills itself. And ``pk``, which a condition may say
+    and no field is called.
 
     .. warning::
 
@@ -661,7 +691,10 @@ def _held(table: Table, column: str) -> object:
        ``test_each_exemption_is_accepted_and_loads``: ``primary_key`` by
        ``db_default_on_the_key_this_package_fills``, ``generated`` by
        ``generated_column_counted_together``, ``resolve_expression`` by
-       ``expression_db_default_new_in_every_row``.
+       ``expression_db_default_new_in_every_row``, ``field is None`` by
+       ``condition_on_the_key``. ``test_a_db_default_is_one_value_in_every_row`` holds
+       the ``Now`` reading, on its two ``now_`` parameters, and the ``Value`` unwrap, on
+       ``written_as_a_value``.
     """
     if column in table.fields:
         return table.fields[column]
@@ -677,7 +710,9 @@ def _held(table: Table, column: str) -> object:
     # Django 5.0 wraps a literal in a Value and later versions keep it bare, and a
     # caller can write the Value themselves, so both spell one value.
     literal = default.value if isinstance(default, Value) else default
-    return None if hasattr(literal, "resolve_expression") else _LeftOut(literal)
+    if hasattr(literal, "resolve_expression") and not isinstance(literal, Now):
+        return None
+    return _LeftOut(literal)
 
 
 def _one_root(table: Table) -> str:
@@ -720,9 +755,11 @@ def _a_tree_gives_no_row_two_children(table: Table, name: str, fields: tuple[str
     and with a single root the one NULL is as distinct as every key. A flat tree of
     many roots stays refused and so does one root over siblings.
     ``test_nulls_distinct_spelled_out_is_the_default`` and the
-    ``test_roots_counted_as_one_group_*`` tests hold the NULL reading,
-    ``test_each_exemption_is_accepted_and_loads`` holds the root's bound from below
-    and ``test_one_root_is_not_enough_and_nor_is_a_flat_tree`` from above.
+    ``test_roots_counted_as_one_group_*`` tests hold the NULL reading, and
+    ``db_default_beside_a_flat_tree`` in ``test_each_exemption_is_accepted_and_loads``
+    holds ``apart``. That test holds the root's bound from below, on
+    ``one_root_alone``, and ``test_one_root_is_not_enough_and_nor_is_a_flat_tree``
+    from above.
     """
     apart = _each_null_is_its_own_group(table, name)
     return any(
@@ -746,9 +783,9 @@ def _no_group_of_two(table: Table, name: str, column: str, rows_of: dict[type[Mo
        ``test_nulls_counted_together_are_one_value_where_the_checks_read_them`` holds
        the whole of the left side. ``tied_left_out_column_beside_a_cap_of_one`` in
        ``test_each_exemption_is_accepted_and_loads`` holds ``not fan_out.null``, and
-       ``test_a_cap_of_one_is_a_proof_whatever_the_sizes`` beside a null share in
        ``test_a_null_share_keeps_the_cap_while_each_null_is_its_own_group`` holds the
-       NULL reading.
+       NULL reading. ``test_a_skew_beside_a_fan_out_under_a_partial_constraint_is_refused``
+       holds the right side.
     """
     fan_out = cast("FanOut", table.fields[column])
     return (not fan_out.null or _each_null_is_its_own_group(table, name)) and _cannot_collide(
@@ -965,6 +1002,10 @@ def _check_conditional(
     several for an ``__in``. Nothing below distinguishes the two, because
     nothing below needs to: a row is inside the condition if its value is any
     of them, and the constraint permits one such row per group either way.
+
+    The exemptions have answered before this runs, in :func:`_check_one`: a column
+    that keeps every row apart, :func:`_a_column_keeps_every_row_apart`, and a fan-out
+    that leaves no group two rows, :func:`_no_group_of_two`.
     """
     where = f"{table.model.__name__}.{column}"
     group = ", ".join(fields)
@@ -1117,6 +1158,9 @@ def _capacity(
     None where any one of them cannot be counted, because a capacity that
     guessed low would refuse a shape that builds perfectly well -- and a refusal
     that is sometimes wrong is worse than the load failure it replaces.
+
+    ``test_a_null_share_counted_together_is_one_more_parent`` holds ``and apart`` and
+    the ``+ 1`` below, which the coverage gate cannot see.
     """
     apart = _each_null_is_its_own_group(table, name)
     total = 1
