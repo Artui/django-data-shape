@@ -1092,12 +1092,12 @@ _REMEDIES = (
     ),
     pytest.param(
         _refused("roots_under_a_draw"),
-        ("roots=1/200", "Distinct"),
+        ("roots=1/201", "Distinct"),
         ("left out of the shape", "sizes that hold one value"),
         (
             _refused("roots_under_a_draw")._replace(
                 name="draw_remedy_one_root",
-                columns={"prev": Tree(roots=1 / 200, sizes=Zipf()), "label": _skew()},
+                columns={"prev": Tree(roots=1 / 201, sizes=Zipf()), "label": _skew()},
             ),
             _refused("roots_under_a_draw")._replace(
                 name="draw_remedy_distinct_beside_roots",
@@ -1390,8 +1390,24 @@ def test_the_tree_remedies_are_not_offered_where_they_prove_nothing() -> None:
     # and one root leaves a key with every child there is.
     assert "sizes that hold one value" not in _refusal(_refused("set_over_a_flat_tree"))
     assert "sizes that hold one value" in _refusal(_refused("key_over_one_root"))
-    assert "Tree(roots=1/200" not in _refusal(_refused("key_over_one_root"))
-    assert "Tree(roots=1/200" in _refusal(_refused("roots_of_a_flat_tree"))
+    assert "Tree(roots=1/201" not in _refusal(_refused("key_over_one_root"))
+    assert "Tree(roots=1/201" in _refusal(_refused("roots_of_a_flat_tree"))
+
+
+@_ON_POSTGRES
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.parametrize("rows", [11, 13])
+def test_the_one_root_a_refusal_offers_is_one_root_at_any_row_count(rows: int) -> None:
+    # roots=1/rows is two roots at rows 11 and 13 among others, because the share is read
+    # through its decimal spelling and 1/11 rounds up. The offer is 1/(rows + 1).
+    flat = {"company": FanOut(Zipf()), "prev": Tree(roots=0.3, sizes=Constant(1))}
+    refused = _refused("roots_of_a_flat_tree")._replace(
+        name=f"one_root_at_{rows}", rows=rows, columns=flat
+    )
+
+    assert f"prev=Tree(roots=1/{rows + 1}, sizes=...)" in _refusal(refused)
+    one_root = {"company": FanOut(Zipf()), "prev": Tree(roots=1 / (rows + 1), sizes=Zipf())}
+    _assert_loads(refused._replace(columns=one_root))
 
 
 def test_the_cap_is_not_offered_for_a_set_or_for_a_null() -> None:

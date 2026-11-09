@@ -210,7 +210,7 @@ how many companies there are.
   `Constant(1)`, fill it, as `FanOut(max_children=1)` fills a unique key to another
   table, and the refusal of any other sizes names that tree. A column that refuses
   NULL keeps no tree at all. Under `nulls_distinct=False` two roots collide, so what
-  fills it there is one root, with `roots` at most `1 / rows`, and sizes of one value,
+  fills it there is one root, with `roots` at most `1 / (rows + 1)`, and sizes of one value,
   or a `Projection` with `columns=` and `sql=`.
 - **A `Tree` beside a `FanOut`, or two `Tree`s, under one constraint are refused**
   for the reason two fan-outs are: each column is computed from the row index
