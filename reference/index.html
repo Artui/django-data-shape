@@ -5981,10 +5981,10 @@ that is not a single equality -- <code>Q(status__in=[...])</code>, a negation, t
 clauses -- is skipped, because reading it would mean this package deciding
 what an arbitrary predicate matches. A constraint over <code>expressions</code>
 rather than <code>fields</code> is skipped for the same reason. A conditional
-constraint whose grouping columns include no declared <code>FanOut</code> is skipped
-because there is no partition here to satisfy it with, so a refusal would
-name no remedy. A column filled by a distribution that cannot enumerate
-itself -- anything not
+constraint whose grouping columns include neither a declared <code>FanOut</code> nor
+a declared <code>Tree</code> is skipped because there is no partition here to satisfy
+it with, so a refusal would name no remedy. A column filled by a distribution
+that cannot enumerate itself -- anything not
 :class:<code>~django_data_shape.distributions.categorical.Categorical</code> -- is
 undecidable, and so is a fan-out over a parent this shape does not build,
 or one carrying a null share, because PostgreSQL counts each NULL as its own

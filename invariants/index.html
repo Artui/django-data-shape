@@ -1046,9 +1046,39 @@ this case. <code>_meta.constraints</code> is read directly.</p>
 <li><strong>A <code>Tree</code> beside drawn columns is refused the same way</strong>, as in names
   unique among siblings: a tree gives a row several children whenever its sizes
   say so, and a drawn value cannot see its siblings. A tree's families are not
-  ranges of rows, so no derivation is decided per family; the exemption is
-  <code>Distinct</code>, and a <code>Tree</code> alone under a <code>UniqueConstraint</code> is refused as a
-  unique column is.</li>
+  ranges of rows, so no derivation is decided per family. The exemptions are
+  <code>Distinct</code> and a tree that provably gives no row two children (below), and a
+  <code>Tree</code> alone under a <code>UniqueConstraint</code> is refused as a unique column is,
+  whatever its sizes.</li>
+<li><strong>A <code>Tree</code> beside a <code>FanOut</code>, or two <code>Tree</code>s, under one constraint are refused</strong>
+  for the reason two fan-outs are: each column is computed from the row index
+  and neither sees the other. Measured over twenty seeds on tables named
+  <code>testapp_branch</code> and <code>testapp_edge</code>, a tree beside <code>FanOut(Zipf())</code> loaded 0
+  times at 200 rows over 50 companies and 10 times at 50 rows over 1,000; two
+  trees loaded 0 times at 200 rows. The draws are keyed on the names, so another
+  table's 10 is another number. <code>Paired</code> is refused over a tree, so what keeps the
+  constraint is a <code>Distinct</code> column, a fan-out that gives no parent two rows
+  (<code>max_children=1</code>, or the proof flat sizes make), a tree that gives no row two
+  children, leaving the tree out, or a <code>Projection</code> with <code>columns=</code> and <code>sql=</code>.</li>
+<li><strong>A <code>Tree</code> in a conditional <code>UniqueConstraint</code> is refused</strong> when a row can land
+  inside the condition, as in one accepted reply per parent. A per-row draw
+  cannot keep a rule about a family at any weight: on a table named
+  <code>testapp_reply</code>, a 10% share loaded 3 times in 20 at 200 rows and a 2.5% share
+  14, and another name moves those too. <code>PerParent</code> is refused over a tree, so
+  what keeps the constraint is a filling of the column that stays outside the
+  condition, a <code>Distinct</code> column in the constraint, a tree that gives no row two
+  children, or a <code>Projection</code>. A <code>Tree</code> beside a <code>FanOut</code> keeps the <code>PerParent</code>
+  remedy over that fan-out, because one row per company is enough to keep
+  <code>(parent, company)</code>.</li>
+<li><strong>A tree that gives no row two children keeps all three of those constraints</strong>,
+  and it is a proof rather than a probability. Sizes holding one value, such as
+  <code>Constant(1)</code>, weigh every row the same, so the largest remainder gives the
+  first rows one child each and room lasts until the last child is placed. At most
+  one non-root row, by arithmetic on <code>roots</code>, has no sibling whatever the sizes
+  weigh. Neither depends on the seed or the table's name, and a load test holds
+  the first of them on a real table. Both stand on each root's NULL being its own
+  group, so under <code>nulls_distinct=False</code>, where the roots are one group and collide
+  among themselves, the constraint is refused and no such tree exempts it.</li>
 <li><strong>Enough room is not a way to fill it.</strong> An unconditional constraint over
   <strong>two fan-outs</strong> — the through table of a many-to-many — passes the pigeonhole
   comfortably, because the product of two parent counts dwarfs the row count,
@@ -1136,9 +1166,9 @@ cannot be built when it demonstrably can.</p>
   wrote out is not that -- it is a list of values, and deciding membership in it
   needs no planner.</li>
 <li>A constraint written over <code>expressions</code> rather than <code>fields</code>.</li>
-<li>A conditional constraint whose grouping columns include no declared <code>FanOut</code>,
-  because there is no partition here to satisfy it with and a refusal would name
-  no remedy.</li>
+<li>A conditional constraint whose grouping columns include neither a declared
+  <code>FanOut</code> nor a declared <code>Tree</code>, because there is no partition here to satisfy
+  it with and a refusal would name no remedy.</li>
 <li>A column filled by a distribution that cannot enumerate itself, and a fan-out
   over a parent this shape does not build. Both make the <em>capacity</em> unknown, so
   a conditional refusal drops its arithmetic and an unconditional one falls back
@@ -1151,7 +1181,10 @@ cannot be built when it demonstrably can.</p>
 <li>A column filled by a <code>Derivation</code> under an unconditional constraint. A
   derivation reads something other than its own row index, so it is the one kind
   of declaration that <em>can</em> be arranged around a group — and whether a
-  particular <code>compute=</code> is arranged around it is not readable from here.</li>
+  particular <code>compute=</code> is arranged around it is not readable from here. A
+  <code>Derivation</code> filling the condition column of a <code>Tree</code>'s conditional constraint
+  is left alone for the same reason, except <code>PerParent</code>, whose values are
+  readable.</li>
 </ul>
 <p>In every one of those the declaration is allowed through, and net 2 and net 3
 are what catch it.</p>
