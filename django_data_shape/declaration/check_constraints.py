@@ -233,8 +233,9 @@ def _check_one(
         return
     # Ahead of the gate and the two below it. A relation takes no PerParent, so a constraint
     # with no partition to offer one over loses nothing here, and what this refusal offers
-    # builds over draws alone: test_the_refusal_offers_only_what_builds loads each. Neither
-    # reading below can read a relation either.
+    # builds over draws alone: test_the_refusal_offers_only_what_builds loads each. The
+    # return is for the reader and no test can hold it, since _produces reads every relation
+    # as False, so the two below would pass one through anyway.
     if isinstance(declared, (FanOut, Paired, Tree)):
         _check_a_relation_in_a_condition(table, name, fields, named, values, declared, rows_of)
         return
@@ -1321,7 +1322,9 @@ def _keeps_one_row_inside_per_group(
        ``paired_under_another_fan_out`` holds the relation being in the constraint.
        ``relation_set_over_its_pairing`` holds the one value for the pairing from its other
        end, ``relation_null_over_its_pairing`` holds ``is not None`` for it, and
-       ``another_key_over_a_pairing`` holds its ``relation == column``.
+       ``another_key_over_a_pairing`` holds its ``relation == column``. No test holds its
+       ``isinstance`` apart from that: a derivation also has a ``relation``, and one in the
+       constraint is left to the other two nets whichever way this answers.
     """
     if len(inside) != 1:
         return False

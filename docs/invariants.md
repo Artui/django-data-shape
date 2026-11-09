@@ -258,9 +258,9 @@ how many companies there are.
     not offered, since it builds only if the partners left cover the busiest group.
   - one key of the relation a `Paired` in the constraint takes its groups from.
     `Q(company=1)` over `(person)` is one group, whose partners are distinct, and it holds
-    at four rows of every company over four people, beside a drawn column or another
-    `FanOut`, with a null share and under `nulls_distinct=False`, since a key holds no
-    NULL. Two keys are two groups (`Q(company__in=[1, 2, 3])` loaded 2 in 20), and the
+    at four rows of every company over four people, there beside a drawn column or another
+    `FanOut` too. At thirty people it holds with a null share and under
+    `nulls_distinct=False`, since a key holds no NULL. Two keys are two groups (`Q(company__in=[1, 2, 3])` loaded 2 in 20), and the
     rows a null share leaves had no group at all (`Q(company=None)` loaded 0 in 20).
 - **That refusal needs no partition in the constraint**, because nothing it offers does.
   Over twenty seeds, on tables named for each shape: `Q(owner=1)` over a drawn `label`
