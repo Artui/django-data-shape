@@ -8,11 +8,15 @@ from typing import Any
 
 from django.apps import apps
 from django.db import DEFAULT_DB_ALIAS, transaction
-from django.db.models import Field, Model
+from django.db.models import Field, Model, UniqueConstraint
 
 from django_data_shape.declaration.invalid_shape import InvalidShape
 
 _MANY_VALUES = 12
+
+# The root share and sizes ``Table``'s own refusal of a self-referential fan-out
+# offers, written where the factory gave no share a ``Tree`` accepts.
+_OFFERED_ROOTS = 0.05
 
 
 def shape_from_factory(
@@ -191,6 +195,86 @@ def _relation(values: list[object], rows: int) -> tuple[str, str | None]:
     )
 
 
+def _self_key(
+    model: type[Model], field: Field[Any, Any], values: list[object], rows: int
+) -> tuple[str | None, str | None]:
+    """A declaration for a key to the model's own table, and the finding it deserves.
+
+    Its own function rather than a branch of :func:`_relation`, because the
+    answer is a different kind of thing: ``Table`` refuses a self-referential
+    ``FanOut`` everywhere, so the suggestion :func:`_relation` makes for every
+    other key would hand back source that cannot be built. The key is a
+    :class:`~django_data_shape.relations.tree.Tree` where one can fill it.
+
+    **Where none can, there is no declaration at all** (``None``) and the finding
+    says why, rather than a ``Tree`` that ``Table`` will refuse. A column that
+    refuses NULL has no first row to point at, and a unique one cannot give a row
+    several children, which is what a tree's sizes weigh. Neither is an error of
+    the factory's, and the rest of what it measured is still worth reading, so
+    this does not raise.
+
+    The root share is measured from ``values``, whose ``None`` is a root and not a
+    parent: a ``Counter`` over them would count it as one more parent, as
+    :func:`_relation` does for a key to another table, where it is harmless.
+    """
+    reasons = []
+    if not field.null:
+        reasons.append("a key that refuses NULL has no first row to point at")
+    if _is_unique(model, field):
+        reasons.append("a unique key cannot give a row several children")
+    if reasons:
+        # Leaving a column out is a shape only where it may be NULL: ``Table`` refuses
+        # the undeclared required one, so the remedy differs by ``field.null``.
+        remedy = (
+            "Leave it out and fill it after the build."
+            if field.null
+            else "Make the column null=True, or fill the table with a Projection."
+        )
+        return None, (
+            f"{' and '.join(reasons)}, so no shape can fill it: a Tree is refused on this "
+            f"column and a FanOut reads keys from a table still empty at load time. {remedy}"
+        )
+    roots = sum(value is None for value in values)
+    if roots in (0, rows):
+        return (
+            f"Tree(roots={_OFFERED_ROOTS}, sizes=Zipf()),  # roots and sizes not measured",
+            ("every row was left without a parent" if roots else "no row was left without a parent")
+            + f" over {rows} calls, so there is no root share to write down: a tree's first "
+            "row is always a root, and Tree takes a share strictly between 0 and 1. "
+            f"roots={_OFFERED_ROOTS} is the figure Table's own refusal offers, not measured, "
+            "and sizes=Zipf() is not measured either.",
+        )
+    share = f"{roots / rows:.3g}"
+    if not 0 < float(share) < 1:
+        # Three figures write a share past 0.9995 as 1, which Tree refuses.
+        share = repr(roots / rows)
+    return (
+        f"Tree(roots={share}, sizes=Zipf()),  # {roots} of {rows} rows had no parent; "
+        "sizes not measured",
+        None,
+    )
+
+
+def _is_unique(model: type[Model], field: Field[Any, Any]) -> bool:
+    """Whether the column alone is unique, by whichever of the three spellings.
+
+    ``unique=True`` is on the field. A ``UniqueConstraint`` and ``unique_together``
+    are on the model, in two different places, and ``Table`` refuses a tree under
+    each as the unique column it amounts to. A constraint with a condition holds
+    only on some rows, so it is not this.
+    """
+    return (
+        field.unique
+        or (field.name,) in map(tuple, model._meta.unique_together)
+        or any(
+            isinstance(constraint, UniqueConstraint)
+            and constraint.condition is None
+            and tuple(constraint.fields) == (field.name,)
+            for constraint in model._meta.constraints
+        )
+    )
+
+
 def _render(
     model: type[Model], made: list[Model], grown: dict[type[Model], int], samples: int
 ) -> str:
@@ -220,11 +304,17 @@ def _render(
         if field.primary_key:
             continue
         values = [getattr(row, _read(field)) for row in made]
-        if field.is_relation:
+        declaration: str | None
+        if field.is_relation and field.related_model is model:
+            declaration, finding = _self_key(model, field, values, len(made))
+        elif field.is_relation:
             declaration, finding = _relation(values, len(made))
         else:
             declaration, finding = _describe(values, len(made))
-        body.append(f"    {field.name}={declaration},")
+        if declaration is None:
+            body.append(f"    # {field.name}: no shape can fill this -- see the findings above.")
+        else:
+            body.append(f"    {field.name}={declaration},")
         if finding:
             findings.append(f"{model.__name__}.{field.name}: {finding}")
     body.append(")")

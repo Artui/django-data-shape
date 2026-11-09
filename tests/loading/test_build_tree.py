@@ -16,7 +16,7 @@ from django.db import connection
 import django_data_shape
 from django_data_shape import Constant, Shape, Table, Zipf
 from django_data_shape import build as build_shape
-from tests.testapp.models import Referred
+from tests.testapp.models import Folder, Referred
 
 pytestmark = [
     pytest.mark.django_db(transaction=True),
@@ -161,3 +161,23 @@ def test_sizes_refused_inside_the_load_leave_the_connection_usable() -> None:
             )
         )
     assert Referred.objects.count() == 0
+
+
+@pytest.mark.parametrize("seed", range(5))
+def test_a_flat_tree_beside_a_draw_loads_under_its_uniqueness(seed: int) -> None:
+    # One name for every row collides among any siblings at all, so a load here
+    # is the claim the declaration check stands on: no row has two children.
+    build_shape(
+        Shape(
+            Table(
+                Folder,
+                rows=300,
+                parent=_tree(roots=0.05, sizes=Constant(1)),
+                name=Constant("same"),
+                code=Constant("c"),
+            ),
+            seed=seed,
+        )
+    )
+
+    assert Folder.objects.count() == 300

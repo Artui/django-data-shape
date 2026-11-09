@@ -463,26 +463,35 @@ largest families sit wherever their draws fell. Each child takes as its parent
 an earlier row that still has room, picked in proportion to the room it has
 left.
 
+**The figures below hold for the table and field each one names.** Draw streams
+are keyed on the table and field name, so the same declaration on another column
+is a different tree, and a range here describes a shape rather than a bound on
+yours. The names are this package's own test models.
+
 The obvious construction is to have each child pick an earlier row by weight.
 It makes the first rows the whales simply because every later row could pick
-them. Measured on 5,000 rows of `Tree(roots=0.05, sizes=Zipf())` over seeds 0
-to 7, that construction puts 28% to 48% of the children under the first tenth of
-the keys; a `Tree` puts 10% to 23% there, against a fair share of 10%. The
-spread is a single `Zipf` whale, which can hold a fifth of the table.
+them. Measured on 5,000 rows of `testapp_referred.referrer` with
+`Tree(roots=0.05, sizes=Zipf())` over seeds 0 to 7, that construction puts 28%
+to 48% of the children under the first tenth of the keys; a `Tree` puts 10% to
+23% there, against a fair share of 10%. The spread is a single `Zipf` whale,
+which can hold a fifth of the table.
 
 What remains is the rule's own price. A row near the end has few rows after it
 to be its children, so the last rows are leaves whatever they weigh. A child
 that finds no earlier row with room left goes to an earlier row by weight
-alone. Measured at 200,000 rows of `Tree(roots=0.05, sizes=Zipf())` over seeds
-0 to 15:
+alone. Measured at 200,000 rows of `testapp_category.parent` with
+`Tree(roots=0.05, sizes=Zipf())` over seeds 0 to 15:
 
 - the first tenth of the keys holds 10% to 35% of the children, and in 15 of the
   16 seeds no more than 15%; the last tenth holds 2% to 10%;
 - the Spearman correlation between a row's key and its number of children is
-  -0.19 to -0.01.
+  -0.19 to -0.01;
+- 0.5% to 17.8% of the children found no room and went by weight alone, with a
+  median of 3.2%.
 
 **`pg_stats.correlation` on the column comes out high, above 0.7.** (That is the
-bound the test holds, on 5,000 rows of `Zipf()` at roots 0.05 and seed 1.)
+bound the test holds, on 5,000 rows of `testapp_referred.referrer` with `Zipf()`
+at roots 0.05 and seed 1.)
 Every parent is an earlier row, so the column can only climb as the table goes
 on. That is also what a production tree looks like, because a row is inserted
 after the row it hangs from. It is the honest value here, not the clustered
@@ -492,8 +501,8 @@ layout a fan-out's `placement="grouped"` manufactures, and a `Tree` has no
 **The sizes decide how far a family spreads and how deep the tree goes.** A
 heavy row keeps room for a long time, so its children spread far through the
 rows after it; a row with room for one child usually gives it to a row soon
-after. Measured with `roots=0.05`, each cell the lowest and highest over seeds
-0 to 15 (a root is at depth 0):
+after. Measured on `testapp_category.parent` with `roots=0.05`, each cell the
+lowest and highest over seeds 0 to 15 (a root is at depth 0):
 
 | `sizes` | rows | median rows from parent to child | deepest row | mean depth |
 | --- | --- | --- | --- | --- |
@@ -504,7 +513,9 @@ after. Measured with `roots=0.05`, each cell the lowest and highest over seeds
 
 A heavy tail is a different tree for every seed: one whale decides how far the
 families spread, so the `Zipf()` rows span more than an order of magnitude where
-`Uniform(1, 3)` barely moves.
+`Uniform(1, 3)` barely moves. The name moves it too: the 20,000-row `Zipf()` row
+is 64 to 2,255, 23 to 65 and 5.3 to 22.7 on `testapp_referred.referrer`, and 74
+to 1,618, 24 to 65 and 4.9 to 32.2 on `testapp_folder.parent`.
 
 Flat sizes give every row about one child, which is long chains. That is what
 they declare, and a heavy tail is what most trees have.
@@ -569,8 +580,22 @@ filled first is decided by the declarations and needs no connection to answer.
 - A `Tree` under a **uniqueness** with nothing beside it but per-row draws, as
   in names unique among siblings: a drawn value cannot see its siblings, so two
   of them sharing one is a matter of the seed. A column that is `Distinct` in
-  every row, such as `Sequential`, keeps the constraint; a `Tree` alone under a
-  `UniqueConstraint` is refused as a unique column is.
+  every row, such as `Sequential`, keeps the constraint, and so does a tree with
+  sizes of one value, such as `Constant(1)`, which gives no row two children; a
+  `Tree` alone under a `UniqueConstraint` is refused as a unique column is.
+- A `Tree` under a uniqueness beside a **`FanOut` or a second `Tree`**. Each column
+  is computed from the row index without seeing the other, so two rows sharing a
+  combination is a matter of the seed. A `Distinct` column keeps the constraint,
+  and so do a fan-out that gives no parent two rows (`max_children=1`) and a tree
+  that gives no row two children, either from sizes of one value or because at
+  most one row has a parent; a `Projection` with `columns=` and `sql=` fills a
+  table whose rows have to be a particular set, and a tree left out loads NULL.
+- A `Tree` in a **conditional** uniqueness, when a row can land inside the
+  condition. `PerParent` is refused over a tree, so what keeps it is a column that
+  stays outside the condition, a `Distinct` column in the constraint, a tree that
+  gives no row two children, or a `Projection`. Beside a `FanOut`, `PerParent` over
+  that fan-out is the remedy. A tree's exemption needs each root's NULL to be its own
+  group, so it does not apply under `nulls_distinct=False`.
 - A required relation **left undeclared**, which would fail the load on a
   not-null violation rather than at declaration time. The message names the
   column and the fan-out that fills it: forgetting one foreign key is the

@@ -232,6 +232,17 @@ fixture can do. A round-robin over four parents is the same defect wearing a
 different number: every parent gets the same count, so the average is still the
 truth.
 
+**A foreign key to the model's own table is a `Tree`, not a `FanOut`.** A category's
+parent or a comment's reply-to is written as
+`parent=Tree(roots=0.25, sizes=Zipf())`, the root share being the share of rows
+the factory left NULL, which `Table` builds as it stands. `sizes` is not
+measured. Where the factory left every row a root, or none, there is no share to
+write, so the report offers `roots=0.05` and says it is not a measurement. Where
+no shape can fill the key -- one that refuses NULL has no first row to point at,
+a unique one cannot give a row several children -- the report holds a comment
+where the declaration would be, and a finding saying why, rather than a `Tree`
+that `Table` refuses.
+
 A factory that already varies everything gets a declaration and **no findings** —
 if the quiet case were not quiet, the loud one would stop meaning anything.
 
