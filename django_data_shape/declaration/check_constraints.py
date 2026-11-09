@@ -123,7 +123,9 @@ def check_constraints(tables: tuple[Table | Projection, ...]) -> None:
     because the product of two parent counts dwarfs the row count, and still
     cannot be built: two partitions of the same rows are computed independently,
     so the pairs they produce are an artefact of the row index and a collision
-    is a matter of the seed. It is refused rather than counted.
+    is a matter of the seed. It is refused rather than counted. So is a ``Paired`` under a
+    constraint that does not name the relation it is paired over, since it keeps its
+    partners apart only inside each group of that relation.
 
     **A conditional ``UniqueConstraint`` is a statement about a group**, and the
     refusal is categorical rather than arithmetic. ``one_active_project_per_company``
@@ -244,6 +246,9 @@ def _check_one(
         _check_a_tree_beside_a_draw(table, name, fields)
         _check_independent_fan_outs(table, name, fields, rows_of)
         _check_a_pairing_whose_nulls_are_one_group(table, name, fields)
+        # After the one above, which refuses the pairings whose relation is here and whose
+        # groups this constraint does not see, so every one left beside its relation keeps it.
+        _check_a_pairing_without_its_relation(table, name, fields, rows_of)
         # After the two-fan-out check, so a tree beside two fan-outs keeps the
         # refusal that can offer a pairing; Paired is a remedy for those two
         # and the tree is then beside a pair that is already distinct.
@@ -401,6 +406,77 @@ def _check_a_pairing_whose_nulls_are_one_group(
             "fails inside COPY at a row number that moves when the seed does. The pairing keeps "
             f"the constraint with no null share on {paired.relation}. A table whose rows have to "
             "be a particular set is filled by a Projection with columns= and sql=."
+        )
+
+
+def _check_a_pairing_without_its_relation(
+    table: Table, name: str, fields: tuple[str, ...], rows_of: dict[type[Model], int]
+) -> None:
+    """A ``Paired`` under a uniqueness that does not name the relation it is paired over.
+
+    ``Paired`` keeps partners distinct inside each group of its relation and nowhere else,
+    so one partner falls to rows of different groups, and a constraint that does not name
+    the relation sees those rows as one. Measured on ``testapp_paired_alone_without_its_relation``,
+    two hundred rows over fifty companies and three hundred people: no loads in twenty,
+    every one an IntegrityError, and none beside a drawn column or with a null share
+    counted as one group either.
+
+    What keeps it has answered before this runs: a relation with one parent, whose one
+    group is every row, in :func:`_a_column_keeps_every_row_apart`, and any other column
+    that keeps every row apart. A relation over parents this shape does not build is
+    refused, since a proof resting on a count nothing here can read is no proof. A second
+    ``Paired`` beside its own relation keeps the pair it is in, and so the constraint:
+    ``cc_paired_beside_a_kept_pair`` loads twenty times in twenty.
+
+    The offers each loaded twenty times in twenty where they are made. A fan-out that
+    gives each partner one row, flat or capped, where the partners can hold every row:
+    over fewer partners than rows each loaded none. The column left out, while each NULL is
+    its own group: none where they are one. A ``Distinct`` column beside it, where one is
+    drawn, which over 150 partners loaded nineteen times, the twentieth the build refusing
+    a partner count short of the busiest group, a refusal that stays the build's. And a
+    statement. Adding the relation to the constraint keeps it too, and is not offered,
+    since that changes the rule rather than the shape.
+
+    .. warning::
+
+       **Conjuncts the coverage gate cannot see.**
+       ``test_a_pairing_beside_a_kept_pair_is_accepted_and_loads`` holds the exemption,
+       ``test_a_pairing_without_its_relation_is_offered_only_what_builds`` each offer's
+       condition and the bound on the partners from both sides, and
+       ``test_a_fan_out_of_one_row_per_partner_is_offered_where_the_partners_are_unknown``
+       the unknown count.
+    """
+    if _a_pairing_keeps_every_pair_apart(table, name, fields):
+        return
+    for column in fields:
+        paired = table.fields.get(column)
+        # A Paired beside its relation keeps its groups by now, so the exemption answered:
+        # the one above refused each that does not.
+        if not isinstance(paired, Paired):
+            continue
+        where = table.model.__name__
+        offers: list[str] = []
+        partners = _parents_available(table, column, paired, rows_of)
+        if partners is None or table.rows <= partners:
+            offers.append(
+                f"{column}=FanOut(Constant(1)), or a FanOut with max_children=1, which gives each "
+                f"partner one row at most over at least as many partners as {where} has rows"
+            )
+        if _each_null_is_its_own_group(table, name) and _may_be_left_out(table, column):
+            offers.append(f"{column} left out of the shape, which holds NULL so no row is in it")
+        if any(_is_drawn_per_row(_held(table, field)) for field in fields):
+            offers.append(
+                "a column of the constraint that is distinct in every row, which says so with "
+                "Distinct -- Sequential does"
+            )
+        raise InvalidShape(
+            f"{name} needs every ({', '.join(fields)}) combination distinct, and {where}.{column} "
+            f"is paired inside each group of {where}.{paired.relation}, which the constraint "
+            "does not name. Partners are kept apart inside a group and never across groups, so "
+            f"one partner falls to rows of different {paired.relation} groups, and two of them "
+            "sharing a combination is a matter of the seed: the load then fails inside COPY at a "
+            "row number that moves when the seed does. What keeps it: "
+            f"{'; '.join([*offers, 'a Projection with columns= and sql='])}."
         )
 
 
@@ -1801,9 +1877,11 @@ def _capacity(
 
 
 def _parents_available(
-    table: Table, column: str, fan_out: FanOut, rows_of: dict[type[Model], int]
+    table: Table, column: str, fan_out: FanOut | Paired, rows_of: dict[type[Model], int]
 ) -> int | None:
     """How many parents this fan-out can actually point at, or None if unknown.
+
+    A ``Paired`` is read the same way, for the partners it can take.
 
     ``parents=`` is the answer where it is given, and it is a **better** answer
     than the parent's row count rather than a substitute for it: it is known

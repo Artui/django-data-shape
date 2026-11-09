@@ -132,6 +132,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A `Paired` whose relation has one parent keeps any uniqueness over it.** Its one
   group gives every row a different partner, and it was refused under a condition
   although it loads.
+- **A uniqueness over a `Paired` that does not name its relation is refused.** `Paired`
+  keeps partners apart only inside each group of its relation, so `unique(owner)` with
+  `owner=Paired("company", ...)` over fifty companies was accepted and loaded 0 times in
+  20, alone, beside a drawn column, and with a null share counted as one group. It stays
+  accepted where the constraint names the relation or the relation has one parent. The
+  refusal offers a flat or capped `FanOut` where the partners can hold every row, the
+  column left out where its NULLs are apart, a `Distinct` column beside it, and a
+  `Projection`, each loaded.
 
 ### Documentation
 

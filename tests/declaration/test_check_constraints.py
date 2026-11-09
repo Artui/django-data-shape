@@ -52,6 +52,7 @@ from tests.declaration.test_a_relation_in_a_condition import (
     _Case,
     _model,
     _named_for_position,
+    _paired,
     _refusal,
     _skew,
     _tree,
@@ -3283,3 +3284,320 @@ def test_holding_null_is_not_offered_for_a_column_that_cannot_be_null() -> None:
 
     assert "is no set of values a PerParent could put" in str(raised.value)
     assert "Constant(None)" not in str(raised.value)
+
+
+_WITHOUT_ITS_RELATION = {"company": FanOut(Zipf()), "owner": _paired()}
+_TIED_SHARE = {"company": FanOut(Zipf(), null=0.1)}
+
+# A Paired under a uniqueness that does not name company, two hundred rows over fifty
+# companies. Each loads 0 of 20 on its own table, every failure an IntegrityError.
+_PAIRED_WITHOUT_ITS_RELATION = (
+    _Case("paired_alone_without_its_relation", ("owner",), None, _WITHOUT_ITS_RELATION, people=300),
+    _Case(
+        "paired_alone_without_its_relation_tied",
+        ("owner",),
+        None,
+        {**_TIED_SHARE, "owner": _paired()},
+        people=300,
+        together=True,
+    ),
+    _Case(
+        "paired_beside_a_draw_without_its_relation_tied",
+        ("owner", "label"),
+        None,
+        {**_TIED_SHARE, "owner": _paired(), "label": _skew()},
+        people=300,
+        together=True,
+    ),
+    _Case(
+        "paired_beside_a_fan_out_without_its_relation",
+        ("other", "owner"),
+        None,
+        {**_WITHOUT_ITS_RELATION, "other": FanOut(Zipf())},
+        people=300,
+    ),
+    # Fewer partners than rows, and room for every row beside the label: 450 combinations.
+    _Case(
+        "paired_beside_a_draw_short_of_partners",
+        ("owner", "label"),
+        None,
+        {**_WITHOUT_ITS_RELATION, "label": _skew()},
+        people=150,
+    ),
+    # As many partners as rows, where a partner each is just room enough.
+    _Case(
+        "paired_beside_a_draw_over_as_many_partners",
+        ("owner", "label"),
+        None,
+        {**_WITHOUT_ITS_RELATION, "label": _skew()},
+        people=200,
+    ),
+    _Case(
+        "paired_alone_on_a_required_column",
+        ("owner",),
+        None,
+        _WITHOUT_ITS_RELATION,
+        people=300,
+        owner_required=True,
+    ),
+)
+
+
+def _without_its_relation(name: str) -> _Case:
+    return next(case for case in _PAIRED_WITHOUT_ITS_RELATION if case.name == name)
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        pytest.param(case, id=case.name, marks=[_NEEDS_DJANGO_5] if case.together else [])
+        for case in _PAIRED_WITHOUT_ITS_RELATION
+    ],
+)
+def test_a_pairing_without_its_relation_is_refused(case: _Case) -> None:
+    message = _refusal(case)
+
+    assert f"uq_{case.name}" in message
+    assert f"{case.name}.owner is paired inside each group of {case.name}.company" in message
+    assert "which the constraint does not name" in message
+
+
+def test_a_pairing_over_parents_this_shape_does_not_build_is_refused() -> None:
+    # One company or fifty, loaded by the caller: nothing here reads which. Fifty load 0 of 20
+    # as paired_alone_without_its_relation.
+    case = _Case("paired_over_parents_left_unbuilt", ("owner",), None, _WITHOUT_ITS_RELATION)
+    with pytest.raises(InvalidShape, match="which the constraint does not name"):
+        Shape(
+            Table(Person, rows=300, name=Constant("pat")),
+            Table(_model(case), rows=200, **case.columns),
+        )
+
+
+_FLAT = FanOut(Constant(1))
+_CAP = FanOut(Zipf(), max_children=1)
+
+
+# Each offer loads 20 of 20 on its own table, and each withheld one 0 of 20 where it is
+# withheld: the flat and capped fan-outs over 150 partners, the column left out where its
+# NULLs are one value.
+@_ON_POSTGRES
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.parametrize(
+    ("refused", "offered", "withheld", "builds"),
+    [
+        pytest.param(
+            "paired_alone_without_its_relation",
+            ("owner=FanOut(Constant(1)), or a FanOut with max_children=1", "owner left out"),
+            ("Distinct",),
+            (
+                ("paired_offer_flat", {"company": FanOut(Zipf()), "owner": _FLAT}),
+                ("paired_offer_cap", {"company": FanOut(Zipf()), "owner": _CAP}),
+                ("paired_offer_left_out", {"company": FanOut(Zipf())}),
+            ),
+            id="alone",
+        ),
+        pytest.param(
+            "paired_alone_without_its_relation_tied",
+            ("owner=FanOut(Constant(1)), or a FanOut with max_children=1",),
+            ("left out", "Distinct"),
+            (
+                ("paired_offer_flat_tied", {**_TIED_SHARE, "owner": _FLAT}),
+                ("paired_offer_cap_tied", {**_TIED_SHARE, "owner": _CAP}),
+            ),
+            id="alone_tied",
+            marks=[_NEEDS_DJANGO_5],
+        ),
+        pytest.param(
+            "paired_beside_a_draw_without_its_relation_tied",
+            ("owner=FanOut(Constant(1)), or a FanOut with max_children=1", "Distinct"),
+            ("left out",),
+            (
+                (
+                    "paired_offer_flat_beside_a_draw_tied",
+                    {**_TIED_SHARE, "owner": _FLAT, "label": _skew()},
+                ),
+                (
+                    "paired_offer_cap_beside_a_draw_tied",
+                    {**_TIED_SHARE, "owner": _CAP, "label": _skew()},
+                ),
+                (
+                    "paired_offer_distinct_beside_it_tied",
+                    {**_TIED_SHARE, "owner": _paired(), "label": Sequential(1, 1)},
+                ),
+            ),
+            id="beside_a_draw_tied",
+            marks=[_NEEDS_DJANGO_5],
+        ),
+        pytest.param(
+            "paired_beside_a_fan_out_without_its_relation",
+            ("owner=FanOut(Constant(1)), or a FanOut with max_children=1", "owner left out"),
+            ("Distinct",),
+            (
+                (
+                    "paired_offer_flat_beside_a_fan_out",
+                    {"company": FanOut(Zipf()), "other": FanOut(Zipf()), "owner": _FLAT},
+                ),
+            ),
+            id="beside_a_fan_out",
+        ),
+        pytest.param(
+            "paired_beside_a_draw_short_of_partners",
+            ("owner left out", "Distinct"),
+            ("FanOut(Constant(1))", "max_children=1"),
+            (
+                (
+                    "paired_offer_left_out_short_of_partners",
+                    {"company": FanOut(Zipf()), "label": _skew()},
+                ),
+            ),
+            id="short_of_partners",
+        ),
+        pytest.param(
+            "paired_beside_a_draw_over_as_many_partners",
+            ("owner=FanOut(Constant(1)), or a FanOut with max_children=1", "Distinct"),
+            (),
+            (
+                (
+                    "paired_offer_flat_over_as_many_partners",
+                    {"company": FanOut(Zipf()), "owner": _FLAT, "label": _skew()},
+                ),
+                (
+                    "paired_offer_cap_over_as_many_partners",
+                    {"company": FanOut(Zipf()), "owner": _CAP, "label": _skew()},
+                ),
+            ),
+            id="as_many_partners",
+        ),
+        pytest.param(
+            "paired_alone_on_a_required_column",
+            ("owner=FanOut(Constant(1)), or a FanOut with max_children=1",),
+            ("left out", "Distinct"),
+            (),
+            id="required",
+        ),
+    ],
+)
+def test_a_pairing_without_its_relation_is_offered_only_what_builds(
+    refused: str,
+    offered: tuple[str, ...],
+    withheld: tuple[str, ...],
+    builds: tuple[tuple[str, dict[str, Any]], ...],
+) -> None:
+    case = _without_its_relation(refused)
+    message = _refusal(case)
+
+    for one in (*offered, "a Projection with columns= and sql="):
+        assert one in message
+    for one in withheld:
+        assert one not in message
+    # Each offer on the refused table's sizes and constraint, the columns changed.
+    for name, columns in builds:
+        _assert_loads(case._replace(name=name, columns=columns))
+
+
+def test_a_fan_out_of_one_row_per_partner_is_offered_where_the_partners_are_unknown() -> None:
+    # People loaded by the caller are however many there are, so the offer stands on the
+    # condition it states, as a cap does over a parent this shape does not build.
+    case = _without_its_relation("paired_alone_without_its_relation")
+    with pytest.raises(InvalidShape) as raised:
+        Shape(_companies(50), Table(_model(case), rows=200, **case.columns))
+
+    assert "owner=FanOut(Constant(1)), or a FanOut with max_children=1" in str(raised.value)
+
+
+# Each loads 20 of 20: the relation in the constraint, and a relation of one parent, pinned
+# by parents= or by one company declared, beside a draw under nulls counted as one as well.
+@_ON_POSTGRES
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.parametrize(
+    "case",
+    [
+        pytest.param(case, id=case.name, marks=[_NEEDS_DJANGO_5] if case.together else [])
+        for case in (
+            _Case(
+                "paired_with_its_relation_unconditional",
+                ("company", "owner"),
+                None,
+                _WITHOUT_ITS_RELATION,
+                people=300,
+            ),
+            _Case(
+                "paired_alone_over_one_parent_unconditional",
+                ("owner",),
+                None,
+                {"company": FanOut(Zipf(), parents=(1,)), "owner": _paired()},
+                people=300,
+            ),
+            _Case(
+                "paired_alone_over_one_declared_parent_unconditional",
+                ("owner",),
+                None,
+                _WITHOUT_ITS_RELATION,
+                companies=1,
+                people=300,
+            ),
+            _Case(
+                "paired_beside_a_draw_over_one_parent_tied",
+                ("owner", "label"),
+                None,
+                {"company": FanOut(Zipf(), parents=(1,)), "owner": _paired(), "label": _skew()},
+                people=300,
+                together=True,
+            ),
+        )
+    ],
+)
+def test_a_pairing_with_its_relation_is_accepted_and_loads(case: _Case) -> None:
+    _assert_loads(case)
+
+
+@_ON_POSTGRES
+@pytest.mark.django_db(transaction=True)
+def test_a_pairing_beside_a_kept_pair_is_accepted_and_loads() -> None:
+    # reviewer is paired over team, which the constraint does not name, and owner over
+    # company, which it does: (company, owner) is distinct already. Loads 20 of 20.
+    with isolate_apps("tests.testapp"):
+        model = cast(
+            "type[models.Model]",
+            type(
+                "cc_paired_beside_a_kept_pair",
+                (models.Model,),
+                {
+                    "__module__": __name__,
+                    "company": models.ForeignKey(
+                        Company, on_delete=models.CASCADE, related_name="+"
+                    ),
+                    "owner": models.ForeignKey(Person, on_delete=models.CASCADE, related_name="+"),
+                    "team": models.ForeignKey(Company, on_delete=models.CASCADE, related_name="+"),
+                    "reviewer": models.ForeignKey(
+                        Person, on_delete=models.CASCADE, related_name="+"
+                    ),
+                    "Meta": type(
+                        "Meta",
+                        (),
+                        {
+                            "app_label": "testapp",
+                            "constraints": [
+                                models.UniqueConstraint(
+                                    fields=["company", "owner", "reviewer"],
+                                    name="u_cc_paired_beside_a_kept_pair",
+                                )
+                            ],
+                        },
+                    ),
+                },
+            ),
+        )
+    _assert_builds(
+        (model,),
+        _companies(50),
+        Table(Person, rows=300, name=Constant("pat")),
+        Table(
+            model,
+            rows=200,
+            company=FanOut(Zipf()),
+            owner=Paired("company", Zipf()),
+            team=FanOut(Zipf()),
+            reviewer=Paired("team", Zipf()),
+        ),
+    )

@@ -409,11 +409,29 @@ how many companies there are.
   is one group, and partners are distinct inside a group, so every row holds a partner
   no other row holds. Pinned by `parents=(1,)` or one company declared, it is accepted
   under any condition, `Q(owner=1)` and a drawn `Q(state="x")` alike, 20 times in 20.
+- **A `Paired` under a uniqueness that does not name its relation is refused.** It keeps
+  partners apart inside each group of its relation and nowhere else, so one partner falls
+  to rows of different groups. `UniqueConstraint(fields=["owner"])` with
+  `owner=Paired("company", Zipf())`, 200 rows over 50 companies and 300 people, loaded 0
+  times in 20, and so did the same beside a drawn `label`, beside a second fan-out, on a
+  column that cannot be NULL, over 150 and over 200 people, and with a null share on
+  `company` counted as one group. A relation this shape does not build is refused too,
+  since its parents may be one or fifty. It stays accepted, 20 times in 20 each, where the
+  constraint names the relation, where the relation has one parent, and beside a second
+  `Paired` whose relation the constraint does name. What the message offers, each 20
+  times in 20 on the refused table's sizes: `owner=FanOut(Constant(1))` or a cap of one,
+  where the partners can hold every row (over 150 people, none); `owner` left out, where
+  it is nullable and each NULL is its own group (where they are one, none); a `Distinct`
+  column of the constraint, where one is drawn; and a `Projection`. The one exception is
+  the `Distinct` offer over 150 people, which loaded 19 times in 20: the twentieth was the
+  build refusing a partner count short of the busiest group, which stays the build's
+  refusal, offer or no offer. Naming the relation in the constraint keeps it too, and is
+  not offered: that changes the rule, not the shape.
 - **A unique column left to one `db_default` is offered what builds for its type.**
   `Sequential(1, 1)` writes 1 to `rows`, which an integer, a float, JSON and a duration
-  take, 20 times in 20 at 200 rows. A small integer, positive or not, takes it up to 32767
-  rows and fails one row past them, out of range. Text takes it where `max_length` holds the digits of
-  `rows`: three characters at 200 rows loaded 20 times and two none, too long. A decimal
+  take, 20 times in 20 at 200 rows. A small integer, positive or not, takes it up to
+  32767 rows and fails one row past them, out of range. Text takes it where `max_length`
+  holds the digits of `rows`: three characters at 200 rows loaded 20 times and two none, too long. A decimal
   takes it where the digits before the point do: `(5, 2)` loaded 20 and `(4, 2)` none, an
   overflow. A time, an IP address, binary and a boolean take it never, and are offered a
   `Projection` alone. A date, a datetime and a UUID keep the offers they had.
