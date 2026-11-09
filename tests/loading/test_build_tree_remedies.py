@@ -26,6 +26,7 @@ from django.db.models import F, Model
 from django_data_shape import (
     Constant,
     FanOut,
+    InvalidShape,
     Projection,
     Sequential,
     Shape,
@@ -207,9 +208,9 @@ def test_a_projection_fills_a_unique_self_key_that_counts_its_nulls_as_one_value
 @pytest.mark.skipif(django.VERSION < (5, 0), reason="nulls_distinct arrived in Django 5.0")
 def test_the_tree_left_out_of_a_self_key_that_ties_its_nulls_is_not_a_remedy() -> None:
     # The refusal does not offer this, and here is why: every row would hold the
-    # one NULL the constraint allows once.
-    with pytest.raises(Exception, match="duplicate key"):  # noqa: B017
-        build_shape(Shape(Table(TiedLink, rows=_ROWS)))
+    # one NULL the constraint allows once. Shape now says so before a row is written.
+    with pytest.raises(InvalidShape, match="one_tied_link_after_each.*can produce 1"):
+        Shape(Table(TiedLink, rows=_ROWS))
 
 
 # A self-key that refuses NULL, which no tree can fill.
