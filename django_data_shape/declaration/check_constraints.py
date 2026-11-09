@@ -5,7 +5,8 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import Any, cast
 
-from django.db.models import Field, Model, Q, UniqueConstraint
+from django.db.models import NOT_PROVIDED, Field, Model, Q, UniqueConstraint, Value
+from django.db.models.functions import Now
 
 from django_data_shape.declaration.invalid_shape import InvalidShape
 from django_data_shape.declaration.projection import Projection
@@ -14,10 +15,32 @@ from django_data_shape.derivations.derivation import Derivation
 from django_data_shape.derivations.per_parent import PerParent
 from django_data_shape.distributions.bounded import Bounded
 from django_data_shape.distributions.categorical import Categorical
+from django_data_shape.distributions.constant import Constant
 from django_data_shape.distributions.distinct import Distinct
+from django_data_shape.relations.count_roots import count_roots
 from django_data_shape.relations.fan_out import FanOut
 from django_data_shape.relations.gives_no_row_two_children import gives_no_row_two_children
 from django_data_shape.relations.tree import Tree
+
+
+class _LeftOut(Constant):
+    """What a column the shape leaves out holds: one value, in every row.
+
+    ``COPY`` does not name the column, so the database fills it: a literal or
+    ``Now()`` ``db_default`` where it has one, and NULL where it has none. A ``Constant``
+    because that is what it amounts to for the arithmetic and for a condition, and
+    a class of its own so that a refusal says where the value came from rather
+    than naming a declaration the caller never wrote.
+    """
+
+    @property
+    def holds_null(self) -> bool:
+        return self._value is None
+
+    def __repr__(self) -> str:
+        if self.holds_null:
+            return "<left out, NULL in every row>"
+        return f"<left out, its db_default {self._value!r} in every row>"
 
 
 def check_constraints(tables: tuple[Table | Projection, ...]) -> None:
@@ -67,20 +90,28 @@ def check_constraints(tables: tuple[Table | Projection, ...]) -> None:
     rather than chosen beside it.
 
     **What this cannot decide, and leaves to the other two nets.** A condition
-    that is not a single equality -- ``Q(status__in=[...])``, a negation, two
-    clauses -- is skipped, because reading it would mean this package deciding
-    what an arbitrary predicate matches. A constraint over ``expressions``
+    that names no set of values for one column -- a negation, two clauses joined
+    by AND, a comparison -- is skipped, because reading it would mean this package
+    deciding what an arbitrary predicate matches. A constraint over ``expressions``
     rather than ``fields`` is skipped for the same reason. A conditional
     constraint whose grouping columns include neither a declared ``FanOut`` nor
     a declared ``Tree`` is skipped because there is no partition here to satisfy
-    it with, so a refusal would name no remedy. A column filled by a distribution
-    that cannot enumerate itself -- anything not
-    :class:`~django_data_shape.distributions.categorical.Categorical` -- is
-    undecidable, and so is a fan-out over a parent this shape does not build,
-    or one carrying a null share, because PostgreSQL counts each NULL as its own
-    group and those rows are exempt from the index. In every one of those cases
-    the declaration is allowed through and the post-load check and the database
-    are what catch it.
+    it with, so a refusal would name no remedy. A column the shape leaves out whose
+    ``db_default`` is an expression other than ``Now()`` is skipped too, because nothing
+    here can read what it writes: ``gen_random_uuid()`` keeps a constraint, and
+    :func:`_held` says why ``Now()`` is the one that can be read.
+    In every one of those cases the declaration is allowed through and the
+    post-load check and the database are what catch it.
+
+    **What this cannot count, and refuses anyway.** A distribution that cannot
+    enumerate itself -- anything not
+    :class:`~django_data_shape.distributions.categorical.Categorical` -- under a
+    condition is read as able to land inside it, so ``Uniform(1, 9)`` under
+    ``Q(status="accepted")`` is refused although it would load: unknown is read as a
+    yes. A fan-out over a parent this shape does not build, or one carrying a null
+    share while each NULL is its own group, leaves only the capacity unknown. The
+    arrangement refusals never needed it, so they stand, and what drops out is the
+    arithmetic in the message.
 
     A :class:`~django_data_shape.declaration.projection.Projection` is skipped entirely. Its
     columns are copied along a join rather than drawn from distributions, so
@@ -110,12 +141,25 @@ def _uniquenesses(model: type[Model]) -> Iterable[tuple[str, tuple[str, ...], Q 
     A ``unique_together`` entry has no name of its own -- Django names its index
     with a hash -- so the tuple is what a refusal names instead, written the way
     the caller wrote it in ``Meta``.
+
+    The columns come back by field name, whichever way they were written.
+    ``fields=["parent_id", "name"]`` is one index with ``fields=["parent", "name"]``,
+    and a shape is keyed on names, so an attname here read as a column the shape
+    left out and the load died inside ``COPY``.
     """
     for constraint in model._meta.constraints:
         if isinstance(constraint, UniqueConstraint) and constraint.fields:
-            yield constraint.name, tuple(constraint.fields), constraint.condition
+            yield constraint.name, _named(model, constraint.fields), constraint.condition
     for together in model._meta.unique_together:
-        yield f"unique_together {tuple(together)!r}", tuple(together), None
+        yield f"unique_together {tuple(together)!r}", _named(model, together), None
+
+
+def _named(model: type[Model], columns: Iterable[str]) -> tuple[str, ...]:
+    """These columns by field name. Django refuses a constraint naming anything else.
+
+    Held by ``test_a_column_named_by_its_attname_is_the_column``.
+    """
+    return tuple(model._meta.get_field(column).name for column in columns)
 
 
 def _check_one(
@@ -125,7 +169,11 @@ def _check_one(
     condition: Q | None,
     rows_of: dict[type[Model], int],
 ) -> None:
-    capacity = _capacity(table, fields, rows_of)
+    # Above the pigeonhole, because a column read here counts as one value there,
+    # and a NULL that keeps rows out of the index must not count as anything.
+    if _a_column_keeps_every_row_apart(table, name, fields):
+        return
+    capacity = _capacity(table, name, fields, rows_of)
     if condition is None:
         # Order is the whole of what keeps the arithmetic reachable. All three
         # can apply to one declaration, and the pigeonhole is the most useful of
@@ -134,6 +182,11 @@ def _check_one(
         # above it would answer the wrong question first and, under a 100%
         # branch gate with no pragma, would take the 0.8.0 message down with it.
         _check_unconditional(table, name, fields, capacity)
+    # A collision takes two rows, and the rest of this is about arranging them. Held by
+    # db_defaults_on_one_row in test_each_exemption_is_accepted_and_loads.
+    if table.rows < 2:
+        return
+    if condition is None:
         _check_a_tree_beside_a_draw(table, name, fields)
         _check_independent_fan_outs(table, name, fields, rows_of)
         # After the two-fan-out check, so a tree beside two fan-outs keeps the
@@ -147,10 +200,27 @@ def _check_one(
     if decoded is None:
         return
     column, values = decoded
-    declared = table.fields.get(column)
+    # By name through the concrete fields rather than _named, because a condition
+    # may say Q(pk=...), which is no field. The attname is held by
+    # test_a_condition_may_name_a_left_out_key_by_its_attname. None is a column nothing
+    # here can read, and the guard is held by
+    # test_a_condition_nothing_can_read_is_left_alone: without it, None reads as the
+    # value NULL and Q(token=None) is refused.
+    declared = _held(table, _attname_to_name(table.model).get(column, column))
     if declared is None:
         return
-    if _a_tree_gives_no_row_two_children(table, name, fields):
+    # A partition with no group of two leaves the condition nothing to count, so what
+    # fills it is not consulted, as with a column that keeps every row apart. Measured at
+    # twenty loads in twenty, and through _no_group_of_two because _cannot_collide would
+    # accept a cap of one whose null share is one group, which loaded none. One fan-out
+    # is enough, the isinstance keeps a column with no cap to read out of it, and
+    # test_a_cap_of_one_under_a_condition_is_no_proof_where_its_nulls_are_one_group and
+    # test_every_constraint_this_cannot_read_is_left_to_the_other_two_nets hold those.
+    if any(
+        isinstance(table.fields.get(field), FanOut)
+        and _no_group_of_two(table, name, field, rows_of)
+        for field in fields
+    ):
         return
     grouping = [table.fields.get(field) for field in fields]
     # A fan-out first, whatever else is grouped beside it: one row per company
@@ -199,7 +269,9 @@ def _check_independent_fan_outs(
     **Unless one of the two partitions has no group of two**, which is the
     exemption below and is a proof rather than a probability: such a fan-out
     never repeats a parent key, so no two rows share that column and the pair is
-    distinct on that half alone. See :func:`_cannot_collide`.
+    distinct on that half alone. See :func:`_no_group_of_two`. A third column can
+    keep the constraint as well, a ``Distinct`` one or a flat tree, and
+    :func:`_a_column_keeps_every_row_apart` has answered for those before this runs.
 
     That is why this is otherwise a refusal and not a wider capacity
     calculation: no arithmetic over the two marginals decides it, because the
@@ -225,12 +297,13 @@ def _check_independent_fan_outs(
     # and the person fan-out cannot possibly satisfy the proof at those numbers.
     # Asking both to satisfy it would refuse that shape, which is the wrongness
     # this exemption exists to remove rather than a stricter version of it.
-    if any(_cannot_collide(table, column, rows_of) for column in fanned):
+    if any(_no_group_of_two(table, name, column, rows_of) for column in fanned):
         return
     where = table.model.__name__
     raise InvalidShape(
         f"{name} needs every ({', '.join(fields)}) combination distinct, and "
-        f"{', '.join(f'{where}.{column}' for column in fanned)} are fan-outs. A fan-out is a "
+        f"{', '.join(f'{where}.{column}' for column in fanned)} are fan-outs. "
+        f"{_a_null_share_counted_together(table, name, fanned)}A fan-out is a "
         "partition of this table's rows over one parent's keys, computed from the row index "
         "alone, so two of them partition the same rows without either seeing the other: which "
         "pairs come out together is an artefact of that index, and two rows sharing a pair is a "
@@ -282,9 +355,10 @@ def _check_a_fan_out_beside_a_draw(
     **Two exemptions, and both are proofs rather than probabilities.**
     ``Distinct`` is the first: a pair is distinct as soon as either half is, so a
     :class:`~django_data_shape.distributions.sequential.Sequential` beside a
-    fan-out keeps the constraint in every row with nothing arranged around it. A
+    fan-out keeps the constraint in every row with nothing arranged around it, and
+    :func:`_a_column_keeps_every_row_apart` has answered for it before this runs. A
     partition that gives no parent two rows is the second -- there is then no
-    group for two draws to collide inside -- and :func:`_cannot_collide` is what
+    group for two draws to collide inside -- and :func:`_no_group_of_two` is what
     establishes it, by a cap of one or by four conditions together. Neither exemption is "this usually works":
     a shape that merely usually works is the case this refusal is for, and the
     measured ones sit at ten and eleven times out of twenty.
@@ -298,26 +372,30 @@ def _check_a_fan_out_beside_a_draw(
     position inside its parent's children and can hand back a value per
     position. Whether a particular ``compute`` actually does is not readable
     here, and refusing on a callable this package cannot read would be the
-    refusal that is wrong. A column the shape leaves undeclared is skipped for
-    the reason PostgreSQL skips it: it is nullable and holds NULL, and each NULL
-    in a unique index is its own group.
+    refusal that is wrong. :func:`_held` says what a column the shape leaves out
+    holds: one value, which is read here as a draw that never moves, or a NULL
+    in every row, which is its own group and has answered before this runs.
+
+    **A fan-out with nothing beside it is the unique column it amounts to**, as a
+    tree alone is. ``UniqueConstraint(fields=["company"])`` writes the index
+    ``unique=True`` writes, and it never reaches
+    :func:`_check_a_fan_out_on_a_unique_column`, which reads the field.
     """
     fanned = [column for column in fields if isinstance(table.fields.get(column), FanOut)]
     others = [column for column in fields if column not in fanned]
-    declared = [table.fields.get(column) for column in others]
+    declared = [_held(table, column) for column in others]
     # One condition rather than three, because it is one question: is this the
     # shape of declaration this refusal is about? Two fan-outs are the check
     # above and answer with a different remedy, none at all is a constraint no
-    # partition groups, and a derivation or an undeclared column is the
-    # exemption the docstring gives.
-    if len(fanned) != 1 or not declared or not all(_is_drawn_per_row(one) for one in declared):
+    # partition groups, and a derivation is the exemption the docstring gives.
+    if len(fanned) != 1 or not all(_is_drawn_per_row(one) for one in declared):
         return
-    if any(isinstance(one, Distinct) and one.is_distinct_per_row() for one in declared):
-        return
-    if _cannot_collide(table, fanned[0], rows_of):
+    if _no_group_of_two(table, name, fanned[0], rows_of):
         return
     where = table.model.__name__
-    drawn = ", ".join(f"{where}.{column}={table.fields[column]!r}" for column in others)
+    if not others:
+        raise InvalidShape(_a_fan_out_alone(table, name, where, fanned[0]))
+    drawn = ", ".join(f"{where}.{column}={_held(table, column)!r}" for column in others)
     room = (
         f"The {capacity} combinations do fit the {table.rows} rows"
         if capacity is not None
@@ -325,7 +403,9 @@ def _check_a_fan_out_beside_a_draw(
     )
     raise InvalidShape(
         f"{name} needs every ({', '.join(fields)}) combination distinct, and {where}."
-        f"{fanned[0]} is a fan-out beside {drawn}. A fan-out is a partition of this table's rows "
+        f"{fanned[0]} is a fan-out beside {drawn}. "
+        f"{_a_null_share_counted_together(table, name, fanned)}A fan-out is a partition of this "
+        "table's rows "
         "over one parent's keys, computed from the row index alone, and a distribution is drawn "
         "from that same index and nothing else -- so neither column can see what the other put "
         "in the row, and nothing enumerates the combinations inside a group. Whether two of one "
@@ -360,10 +440,12 @@ def _check_a_tree_beside_a_draw(table: Table, name: str, fields: tuple[str, ...]
     tree's families are not ranges of rows. So the message names only what a
     tree accepts: a column distinct in every row, or a statement of your own.
 
-    The exemptions that remain are the ones every arrangement check carries,
-    and :func:`_is_drawn_per_row` is what applies two of them: a derivation and
-    an undeclared column are not drawn per row, so either one leaves the
-    constraint to the other two nets. A tree beside a fan-out or a second tree
+    The exemption that remains here is the one every arrangement check carries, and
+    :func:`_is_drawn_per_row` is what applies it: a derivation is not drawn per row,
+    so it leaves the constraint to the other two nets, and so does a column
+    :func:`_held` cannot read. A column that is ``Distinct``, a NULL in every row and
+    a tree that gives no row two children have answered before this runs, in
+    :func:`_a_column_keeps_every_row_apart`. A tree beside a fan-out or a second tree
     is :func:`_check_a_tree_beside_a_partition`, which runs after this and
     relies on ``len(trees) != 1`` here: loosened to ``not trees``, two trees
     come back as one column or as one tree beside a draw, and
@@ -381,26 +463,22 @@ def _check_a_tree_beside_a_draw(table: Table, name: str, fields: tuple[str, ...]
     """
     trees = [column for column in fields if isinstance(table.fields.get(column), Tree)]
     others = [column for column in fields if column not in trees]
-    declared = [table.fields.get(column) for column in others]
+    declared = [_held(table, column) for column in others]
     # One question, as in the fan-out check: is every other column a per-row
     # draw? A tree beside anything that is not a draw is a shape this refusal
     # is not about. A tree with nothing beside it passes this vacuously, and is
     # then the unique column it amounts to.
     if len(trees) != 1 or not all(_is_drawn_per_row(one) for one in declared):
         return
-    if _a_tree_gives_no_row_two_children(table, name, fields):
-        return
     where = table.model.__name__
     if not others:
         raise InvalidShape(_a_tree_alone(table, name, where, trees[0]))
-    if any(isinstance(one, Distinct) and one.is_distinct_per_row() for one in declared):
-        return
-    drawn = ", ".join(f"{where}.{column}={table.fields[column]!r}" for column in others)
+    drawn = ", ".join(f"{where}.{column}={_held(table, column)!r}" for column in others)
     flat = (
         "So does a tree whose sizes hold one value, such as Constant(1), which gives no row two "
         "children. "
         if _each_null_is_its_own_group(table, name)
-        else ""
+        else f"So does {_one_root(table)}. "
     )
     raise InvalidShape(
         f"{name} needs every ({', '.join(fields)}) combination distinct, and {where}."
@@ -418,18 +496,19 @@ def _check_a_tree_beside_a_draw(table: Table, name: str, fields: tuple[str, ...]
 def _a_tree_alone(table: Table, name: str, where: str, column: str) -> str:
     """Why a tree alone under this constraint is refused, and what would fill the column.
 
-    Two different answers, because the second leaves nothing to offer. Under
-    ``nulls_distinct=False`` the flat tree collides as any other does, and leaving
-    the column out loads the same NULL in every row, so neither may be named.
+    Two different answers, because the second has less to offer. Under
+    ``nulls_distinct=False`` a tree of many roots collides however flat it is, and
+    leaving the column out loads the same NULL in every row, so neither may be
+    named. What is left is one root, which is one NULL.
     """
     tree = cast("Tree", table.fields[column])
     if not _each_null_is_its_own_group(table, name):
         return (
             f"{name} permits one row per {where}.{column} and counts every NULL as one value "
             "under nulls_distinct=False. A tree's roots are the rows whose parent is NULL, so "
-            "they collide among themselves whatever the sizes, and a column left out of the "
-            "shape holds that one NULL in every row. A table whose rows have to be a particular "
-            "set is filled by a Projection with columns= and sql=."
+            "two roots collide as two children of one row do, and a column left out of the "
+            f"shape holds that one NULL in every row. What fills it is {_one_root(table)}, or, "
+            "where the rows have to be a particular set, a Projection with columns= and sql=."
         )
     return (
         f"{name} permits one row per {where}.{column}, so each row may be the parent of one row "
@@ -463,12 +542,13 @@ def _check_a_tree_beside_a_partition(
 
     **The exemptions are the ones the arrangement checks carry.** A pair is
     distinct as soon as either half is, so a ``Distinct`` column keeps the
-    constraint, and so does a fan-out :func:`_cannot_collide` proves gives no
-    parent two rows; that function reads a fan-out's cap, childless share and
-    parents, so a tree column must never reach it. A tree's own proof is
-    :func:`_a_tree_gives_no_row_two_children`, and one such tree is enough. A column
-    that is not drawn per row, which is a derivation, an undeclared column or a
-    ``Paired``, is left to the other two nets.
+    constraint, and so does a tree
+    :func:`_a_tree_gives_no_row_two_children` proves, and
+    :func:`_a_column_keeps_every_row_apart` has answered for both before this runs.
+    So does a fan-out :func:`_no_group_of_two` proves gives no parent two rows; that
+    reads a fan-out's cap, childless share and parents, so a tree column must never
+    reach it. A column that is not drawn per row, which is a derivation, a column
+    :func:`_held` cannot read or a ``Paired``, is left to the other two nets.
 
     No tree here is not a separate case. Two fan-outs only get this far when
     :func:`_check_independent_fan_outs` has found one that cannot collide, and
@@ -479,27 +559,23 @@ def _check_a_tree_beside_a_partition(
     if len(trees) + len(fanned) < 2:
         return
     others = [column for column in fields if column not in trees and column not in fanned]
-    declared = [table.fields.get(column) for column in others]
+    declared = [_held(table, column) for column in others]
     if not all(_is_drawn_per_row(one) for one in declared):
         return
-    if any(isinstance(one, Distinct) and one.is_distinct_per_row() for one in declared):
-        return
-    if any(_cannot_collide(table, column, rows_of) for column in fanned):
-        return
-    if _a_tree_gives_no_row_two_children(table, name, fields):
+    if any(_no_group_of_two(table, name, column, rows_of) for column in fanned):
         return
     where = table.model.__name__
     named = [
         *(f"{where}.{column} is a Tree" for column in trees),
         *(f"{where}.{column} is a fan-out" for column in fanned),
-        *(f"{where}.{column}={table.fields[column]!r} is drawn per row" for column in others),
+        *(f"{where}.{column}={_held(table, column)!r} is drawn per row" for column in others),
     ]
     apart = _each_null_is_its_own_group(table, name)
     flat = (
         ", and so does a tree whose sizes hold one value, such as Constant(1), which gives no row "
         "two children"
         if apart
-        else ""
+        else f", and so does {_one_root(table)}"
     )
     left_out = (
         f"Leaving {trees[0]} out of the shape loads NULL, and each NULL in a unique index is its "
@@ -515,6 +591,7 @@ def _check_a_tree_beside_a_partition(
     )
     raise InvalidShape(
         f"{name} needs every ({', '.join(fields)}) combination distinct, and {', '.join(named)}. "
+        f"{_a_null_share_counted_together(table, name, fanned)}"
         "Each of those fills its own column from the row index alone and none can see what "
         "another put in the row, so which combinations come out together is an artefact of that "
         "index and two rows sharing one is a matter of the seed. The load then fails inside COPY "
@@ -532,11 +609,135 @@ def _each_null_is_its_own_group(table: Table, name: str) -> bool:
     ``nulls_distinct=False`` makes them one value. Read with ``getattr`` because
     the attribute arrived in Django 5.0. A ``unique_together`` matches no
     constraint's name here, and its index always keeps the default.
+
+    Everything that rests on the answer: :func:`_a_column_keeps_every_row_apart`,
+    :func:`_a_tree_gives_no_row_two_children`, :func:`_no_group_of_two` and
+    :func:`_capacity`. ``Distinct`` needs no reading, since a column of different
+    values holds one NULL at most, so it keeps the rows apart either way.
     """
     return all(
         getattr(constraint, "nulls_distinct", None) is not False
         for constraint in table.model._meta.constraints
         if constraint.name == name
+    )
+
+
+def _a_column_keeps_every_row_apart(table: Table, name: str, fields: tuple[str, ...]) -> bool:
+    """Whether one column settles this constraint, whatever the others do.
+
+    A combination is distinct as soon as one of its columns is, so three proofs
+    answer for every check at once, and one spelling cannot read a proof another
+    ignores. A ``Distinct`` column, each of whose rows holds a value no other row
+    holds. A NULL in every row, while each NULL is its own group, which keeps every
+    row out of the index. And a tree in which no row has two children.
+
+    It holds under a condition as well, since a group of one row has nothing to
+    count, so a ``PerParent`` is not consulted and may say what it likes.
+
+    .. warning::
+
+       **Conjuncts the coverage gate cannot see.**
+       ``test_a_distinct_column_does_not_excuse_one_that_does_not_move`` holds
+       ``is_distinct_per_row``. ``holds_null`` is held by
+       ``test_a_db_default_is_one_value_in_every_row``, whose literal default keeps no
+       row apart. The NULL reading is held by
+       ``test_nulls_counted_together_are_one_value_where_the_checks_read_them``.
+    """
+    if _a_tree_gives_no_row_two_children(table, name, fields):
+        return True
+    held = [_held(table, column) for column in fields]
+    if any(isinstance(one, Distinct) and one.is_distinct_per_row() for one in held):
+        return True
+    return _each_null_is_its_own_group(table, name) and any(
+        isinstance(one, _LeftOut) and one.holds_null for one in held
+    )
+
+
+def _attname_to_name(model: type[Model]) -> dict[str, str]:
+    """The field name behind each ``_id`` column, which a condition may say either way."""
+    return {field.attname: field.name for field in model._meta.concrete_fields}
+
+
+def _held(table: Table, column: str) -> object:
+    """What this column holds: its declaration, what the load leaves there, or None.
+
+    A column the shape leaves out is not named in ``COPY``, so the database fills
+    it, and that used to be read as a NULL whatever the column was. A literal
+    ``db_default`` is the same value in every row, measured at no loads in twenty
+    beside a tree and beside a fan-out. A column with none holds NULL, since
+    :class:`~django_data_shape.declaration.table.Table` refuses one left out that
+    cannot, and a ``Value(None)`` default is the same NULL.
+
+    ``Now()`` is read as a literal is, and it is the one expression that is. Django
+    compiles it to ``STATEMENT_TIMESTAMP()`` on PostgreSQL, and all of a table's rows
+    arrive in one ``COPY``, so every row holds one instant, which
+    ``test_what_an_expression_db_default_writes_across_one_copy`` reads off the table:
+    no loads in twenty beside a tree and beside a fan-out, and twenty beside a proof
+    about the other column.
+    The portable route inserts by chunks, where the instants may differ, and a shape
+    is checked before any backend is chosen, so it is refused there as well.
+
+    None is what nothing here can read, and it reads as not drawn per row, which
+    leaves the constraint to the other two nets. Any other ``db_default`` that is an
+    expression, since ``gen_random_uuid()`` keeps a constraint and a call this package
+    has not read may do either. A ``GeneratedField``, which the database computes per
+    row. A key, which this package fills itself. And ``pk``, which a condition may say
+    and no field is called.
+
+    .. warning::
+
+       **Conjuncts the coverage gate cannot see**, each of which loads when it is
+       kept and is refused when it is not, in
+       ``test_each_exemption_is_accepted_and_loads``: ``primary_key`` by
+       ``db_default_on_the_key_this_package_fills``, ``generated`` by
+       ``generated_column_counted_together``, ``resolve_expression`` by
+       ``expression_db_default_new_in_every_row``, ``field is None`` by
+       ``condition_on_the_key``. ``test_a_db_default_is_one_value_in_every_row`` holds
+       the ``Now`` reading, on its two ``now_`` parameters, and the ``Value`` unwrap, on
+       ``written_as_a_value``.
+    """
+    if column in table.fields:
+        return table.fields[column]
+    field = next(
+        (one for one in table.model._meta.concrete_fields if one.name == column),
+        None,
+    )
+    if field is None or field.primary_key or getattr(field, "generated", False):
+        return None
+    default = getattr(field, "db_default", NOT_PROVIDED)
+    if default is NOT_PROVIDED:
+        return _LeftOut(None)
+    # Django 5.0 wraps a literal in a Value and later versions keep it bare, and a
+    # caller can write the Value themselves, so both spell one value.
+    literal = default.value if isinstance(default, Value) else default
+    if hasattr(literal, "resolve_expression") and not isinstance(literal, Now):
+        return None
+    return _LeftOut(literal)
+
+
+def _one_root(table: Table) -> str:
+    """The tree a refusal may offer under ``nulls_distinct=False``, in words."""
+    return (
+        f"a tree with one root, roots at most 1/{table.rows}, whose sizes hold one value, since "
+        "one root is one NULL"
+    )
+
+
+def _a_null_share_counted_together(table: Table, name: str, fanned: Iterable[str]) -> str:
+    """The sentence a refusal owes when the NULLs of a fan-out are what collide."""
+    shares = [
+        column
+        for column in fanned
+        if cast("FanOut", table.fields[column]).null
+        and not _each_null_is_its_own_group(table, name)
+    ]
+    if not shares:
+        return ""
+    where = table.model.__name__
+    return (
+        f"{name} counts every NULL as one value under nulls_distinct=False, so the rows a null "
+        f"share leaves in {', '.join(f'{where}.{column}' for column in shares)} are one group "
+        "there, however few each parent is given. "
     )
 
 
@@ -549,17 +750,58 @@ def _a_tree_gives_no_row_two_children(table: Table, name: str, fields: tuple[str
     in which no row has two children cannot collide. That last is
     :func:`~django_data_shape.relations.gives_no_row_two_children.gives_no_row_two_children`.
 
-    **Only where each NULL is its own group.** Under ``nulls_distinct=False`` the
-    roots are one group and can collide among themselves, so nothing here is a
-    proof and every call answers no. That also refuses a tree with a single root,
-    which would load, and that is the price of keeping one proof.
-    ``test_nulls_distinct_spelled_out_is_the_default`` and the
-    ``test_roots_counted_as_one_group_*`` tests hold that reading from both sides.
+    **Or where there is one root.** Under ``nulls_distinct=False`` the roots are one
+    group and collide among themselves, so a second root is what breaks the proof,
+    and with a single root the one NULL is as distinct as every key. A flat tree of
+    many roots stays refused and so does one root over siblings.
+    The ``test_roots_counted_as_one_group_*`` tests hold the NULL reading, and
+    ``db_default_beside_a_flat_tree`` in ``test_each_exemption_is_accepted_and_loads``
+    holds ``apart``. That test holds the root's bound from below, on
+    ``one_root_alone``, and ``test_one_root_is_not_enough_and_nor_is_a_flat_tree``
+    from above.
     """
-    return _each_null_is_its_own_group(table, name) and any(
-        gives_no_row_two_children(tree, table.rows)
+    apart = _each_null_is_its_own_group(table, name)
+    return any(
+        (apart or count_roots(tree, table.rows) <= 1)
+        and gives_no_row_two_children(tree, table.rows)
         for tree in (table.fields.get(column) for column in fields)
         if isinstance(tree, Tree)
+    )
+
+
+def _no_group_of_two(table: Table, name: str, column: str, rows_of: dict[type[Model], int]) -> bool:
+    """Whether this fan-out provably gives no group two rows, under this constraint.
+
+    :func:`_cannot_collide` answers for the parents. A null share is one more group
+    under ``nulls_distinct=False``, and a large one, so the proof stops there: a cap
+    of one with a null share loaded no times in twenty.
+
+    .. warning::
+
+       **Conjuncts the coverage gate cannot see.**
+       ``test_nulls_counted_together_are_one_value_where_the_checks_read_them`` holds
+       the whole of the left side. ``tied_left_out_column_beside_a_cap_of_one`` in
+       ``test_each_exemption_is_accepted_and_loads`` holds ``not fan_out.null``, and
+       ``test_a_null_share_keeps_the_cap_while_each_null_is_its_own_group`` holds the
+       NULL reading. ``test_a_skew_beside_a_fan_out_under_a_partial_constraint_is_refused``
+       holds the right side.
+    """
+    fan_out = cast("FanOut", table.fields[column])
+    return (not fan_out.null or _each_null_is_its_own_group(table, name)) and _cannot_collide(
+        table, column, rows_of
+    )
+
+
+def _a_fan_out_alone(table: Table, name: str, where: str, column: str) -> str:
+    """Why a fan-out alone under this constraint is refused, and what fills the column."""
+    fan_out = cast("FanOut", table.fields[column])
+    return (
+        f"{name} permits one row per {where}.{column}, and {fan_out!r} is a partition that exists "
+        "to give some parents more than one, so the load fails inside COPY at a row number that "
+        f"moves when the seed does. {_a_null_share_counted_together(table, name, [column])}A "
+        "one-to-one is filled by max_children=1, which caps every parent at one row whatever the "
+        "sizes weigh, or by FanOut(Constant(1)) with no childless share over at least as many "
+        "parents as this table has rows."
     )
 
 
@@ -624,10 +866,11 @@ def _check_drawn_columns_only(
     nineteen times in twenty is the one this refusal is for, since the twentieth
     run is somebody else's afternoon.
 
-    The exemption is the one the other two carry, and the same single line:
-    a pair is distinct as soon as either half is, so a column that answers
+    The exemption is the one the other two carry: a pair is distinct as soon as
+    either half is, so a column that answers
     :class:`~django_data_shape.distributions.distinct.Distinct` keeps the
-    constraint on its own. There is deliberately no partition exemption here,
+    constraint on its own, and :func:`_a_column_keeps_every_row_apart` has answered
+    for it before this runs. There is deliberately no partition exemption here,
     because there is no partition -- ``_cannot_collide`` has nothing to read.
 
     Two kinds of column take the refusal away for reasons that are not
@@ -635,16 +878,15 @@ def _check_drawn_columns_only(
     :class:`~django_data_shape.derivations.derivation.Derivation` reads
     something other than its own row index, which is exactly what lets it be
     arranged across rows, and whether a given ``compute=`` is arranged is not
-    readable here. A column the shape leaves undeclared is nullable and loads
-    NULL, and PostgreSQL counts each NULL in a unique index as its own value, so
-    those rows cannot collide with anything.
+    readable here. A column the shape leaves out and holds NULL in is its own group
+    in a unique index, so those rows cannot collide with anything, and that has
+    answered before this runs as well; under ``nulls_distinct=False`` it is one value
+    like any other and :func:`_held` reads it so.
     """
-    declared = [table.fields.get(column) for column in fields]
+    declared = [_held(table, column) for column in fields]
     if any(isinstance(one, FanOut) for one in declared):
         return
     if not all(_is_drawn_per_row(one) for one in declared):
-        return
-    if any(isinstance(one, Distinct) and one.is_distinct_per_row() for one in declared):
         return
     where = table.model.__name__
     room = (
@@ -652,7 +894,7 @@ def _check_drawn_columns_only(
         if capacity is not None
         else "There may be room for every row"
     )
-    drawn = ", ".join(f"{where}.{column}={table.fields[column]!r}" for column in fields)
+    drawn = ", ".join(f"{where}.{column}={_held(table, column)!r}" for column in fields)
     raise InvalidShape(
         f"{name} needs every ({', '.join(fields)}) combination distinct, and {drawn} are all "
         "drawn per row with nothing partitioning any of them. A distribution is a pure function "
@@ -759,6 +1001,10 @@ def _check_conditional(
     several for an ``__in``. Nothing below distinguishes the two, because
     nothing below needs to: a row is inside the condition if its value is any
     of them, and the constraint permits one such row per group either way.
+
+    The exemptions have answered before this runs, in :func:`_check_one`: a column
+    that keeps every row apart, :func:`_a_column_keeps_every_row_apart`, and a fan-out
+    that leaves no group two rows, :func:`_no_group_of_two`.
     """
     where = f"{table.model.__name__}.{column}"
     group = ", ".join(fields)
@@ -834,30 +1080,27 @@ def _check_conditional_over_a_tree(
     is accepted by ``Table`` and keeps a different rule, so it is read by what it
     can put inside the condition and refused if that is anything.
 
-    Two exemptions come first, and they are the ones the arrangement checks carry.
-    A grouping column distinct in every row leaves each group one row, so the
-    condition has nothing to count. A grouping column that is not drawn per row, a
-    derivation or an undeclared one, is left to the other two nets. A derivation
-    filling the condition column is left to them too, because whether its
-    ``compute=`` lands inside the condition is not readable here; ``PerParent`` is
-    the one derivation whose values are.
+    The exemptions are the ones the arrangement checks carry. A grouping column
+    distinct in every row leaves each group one row, so the condition has nothing to
+    count, and :func:`_a_column_keeps_every_row_apart` has answered for that before
+    this runs. A grouping column that is not drawn per row, a derivation or one
+    :func:`_held` cannot read, is left to the other two nets. A derivation filling
+    the condition column is left to them too, because whether its ``compute=`` lands
+    inside the condition is not readable here; ``PerParent`` is the one derivation
+    whose values are.
 
     .. warning::
 
-       **Three conjuncts the coverage gate cannot see.** The ``PerParent`` line is
+       **Two conjuncts the coverage gate cannot see.** The ``PerParent`` line is
        one branch arc: ``test_a_rule_kept_per_a_fan_out_outside_the_constraint_is_refused``
        holds ``special``, and
        ``test_a_rule_kept_per_a_fan_out_whose_rest_lands_inside_the_condition_is_refused``
-       holds ``rest``. In the ``Distinct`` line,
-       ``test_a_tree_beside_a_column_that_does_not_move_in_a_conditional_is_refused``
-       holds ``is_distinct_per_row``.
+       holds ``rest``.
     """
     trees = [field for field in fields if isinstance(table.fields.get(field), Tree)]
     others = [field for field in fields if field not in trees]
-    grouped = [table.fields.get(field) for field in others]
+    grouped = [_held(table, field) for field in others]
     if not all(_is_drawn_per_row(one) for one in grouped):
-        return
-    if any(isinstance(one, Distinct) and one.is_distinct_per_row() for one in grouped):
         return
     if isinstance(declared, PerParent):
         if declared.special not in values and _produces_any(declared.rest, values) is False:
@@ -871,11 +1114,11 @@ def _check_conditional_over_a_tree(
     flat = (
         "sizes that hold one value, such as Constant(1), which give no row two children; "
         if _each_null_is_its_own_group(table, name)
-        else ""
+        else f"{_one_root(table)}; "
     )
     named = [
         *(f"{where}.{field} is a Tree" for field in trees),
-        *(f"{where}.{field}={table.fields[field]!r} is drawn per row" for field in others),
+        *(f"{where}.{field}={_held(table, field)!r} is drawn per row" for field in others),
     ]
     raise InvalidShape(
         f"{name} permits one row with {_matching(column, values)} per ({', '.join(fields)}), and "
@@ -906,26 +1149,33 @@ def _asks(table: Table, declared: object, values: tuple[object, ...]) -> str:
     return f"draws one of ({', '.join(repr(value) for value in values)}) independently per row"
 
 
-def _capacity(table: Table, fields: tuple[str, ...], rows_of: dict[type[Model], int]) -> int | None:
+def _capacity(
+    table: Table, name: str, fields: tuple[str, ...], rows_of: dict[type[Model], int]
+) -> int | None:
     """How many distinct combinations of ``fields`` this declaration can build.
 
     None where any one of them cannot be counted, because a capacity that
     guessed low would refuse a shape that builds perfectly well -- and a refusal
     that is sometimes wrong is worse than the load failure it replaces.
+
+    ``test_a_null_share_counted_together_is_one_more_parent`` holds ``and apart`` and
+    the ``+ 1`` below, which the coverage gate cannot see.
     """
+    apart = _each_null_is_its_own_group(table, name)
     total = 1
-    for name in fields:
-        declared = table.fields.get(name)
+    for column in fields:
+        declared = _held(table, column)
         if isinstance(declared, FanOut):
             # A null share is not a smaller capacity, it is an unbounded one:
             # PostgreSQL treats every NULL in a unique index as distinct, so
-            # those rows are exempt from the constraint entirely.
-            if declared.null:
+            # those rows are exempt from the constraint entirely. Under
+            # nulls_distinct=False they are one more parent instead.
+            if declared.null and apart:
                 return None
-            parent_rows = _parents_available(table, name, declared, rows_of)
+            parent_rows = _parents_available(table, column, declared, rows_of)
             if parent_rows is None:
                 return None
-            total *= parent_rows
+            total *= parent_rows + (1 if declared.null else 0)
         elif isinstance(declared, Bounded):
             total *= declared.distinct_values()
         else:

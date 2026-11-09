@@ -22,7 +22,11 @@ from __future__ import annotations
 import datetime
 from typing import Any, cast
 
+import django
 import pytest
+from django.db import connection, models
+from django.db.models.functions import Now
+from django.test.utils import isolate_apps
 
 from django_data_shape import (
     Constant,
@@ -40,6 +44,7 @@ from django_data_shape import (
     Uniform,
     Zipf,
 )
+from django_data_shape import build as build_shape
 from tests.testapp.models import (
     Approval,
     Assignment,
@@ -1134,3 +1139,1434 @@ def test_a_narrowed_fan_out_cannot_collide_on_the_parents_it_named() -> None:
             role=Constant("r"),
         ),
     )
+
+
+# What a column of a constraint holds, read the way the load fills it. The models below
+# are declared here because a table for each is made and dropped by the test that loads
+# it; both keywords arrived in Django 5.0, and the tests reading them skip below that.
+_NEEDS_DJANGO_5 = pytest.mark.skipif(
+    django.VERSION < (5, 0), reason="db_default and nulls_distinct arrived in Django 5.0"
+)
+_TOGETHER: dict[str, bool] = {"nulls_distinct": False} if django.VERSION >= (5, 0) else {}
+
+
+def _db_default(value: object) -> dict[str, object]:
+    return {"db_default": value} if django.VERSION >= (5, 0) else {}
+
+
+def _self_key() -> models.ForeignKey[Any, Any]:
+    return models.ForeignKey("self", null=True, on_delete=models.CASCADE, related_name="+")
+
+
+def _key(to: type[models.Model]) -> models.ForeignKey[Any, Any]:
+    return models.ForeignKey(to, null=True, on_delete=models.CASCADE, related_name="+")
+
+
+with isolate_apps("tests.testapp"):
+
+    class DefaultedFolder(models.Model):
+        parent = _self_key()
+        name = models.CharField(max_length=50, null=True, **_db_default("same"))
+
+        class Meta:
+            app_label = "testapp"
+            constraints = [
+                models.UniqueConstraint(fields=["parent", "name"], name="one_defaulted_folder"),
+            ]
+
+    class DefaultedSeat(models.Model):
+        company = _key(Company)
+        label = models.CharField(max_length=50, null=True, **_db_default("same"))
+
+        class Meta:
+            app_label = "testapp"
+            constraints = [
+                models.UniqueConstraint(fields=["company", "label"], name="one_defaulted_seat"),
+            ]
+
+    class DefaultedPair(models.Model):
+        first = models.CharField(max_length=50, null=True, **_db_default("same"))
+        second = models.IntegerField(null=True, **_db_default(1))
+
+        class Meta:
+            app_label = "testapp"
+            constraints = [
+                models.UniqueConstraint(fields=["first", "second"], name="one_defaulted_pair"),
+            ]
+
+    class ValueDefaultedSeat(models.Model):
+        """The Value a caller can write, which is also what Django 5.0 makes of a literal."""
+
+        company = _key(Company)
+        label = models.CharField(max_length=50, null=True, **_db_default(models.Value("same")))
+
+        class Meta:
+            app_label = "testapp"
+            constraints = [
+                models.UniqueConstraint(fields=["company", "label"], name="one_value_seat"),
+            ]
+
+    class TokenFolder(models.Model):
+        """A db_default that is an expression, which this one makes new for every row."""
+
+        parent = _self_key()
+        token = models.UUIDField(
+            null=True,
+            **_db_default(models.Func(function="gen_random_uuid", output_field=models.UUIDField())),
+        )
+
+        class Meta:
+            app_label = "testapp"
+            constraints = [
+                models.UniqueConstraint(fields=["parent", "token"], name="one_token_folder"),
+            ]
+
+    class TokenCondition(models.Model):
+        company = _key(Company)
+        token = models.UUIDField(
+            null=True,
+            **_db_default(models.Func(function="gen_random_uuid", output_field=models.UUIDField())),
+        )
+
+        class Meta:
+            app_label = "testapp"
+            constraints = [
+                models.UniqueConstraint(
+                    fields=["company"], condition=models.Q(token=None), name="one_token_condition"
+                ),
+            ]
+
+    class NoneDefaultedFolder(models.Model):
+        parent = _self_key()
+        name = models.CharField(max_length=50, null=True, **_db_default(None))
+
+        class Meta:
+            app_label = "testapp"
+            constraints = [
+                models.UniqueConstraint(fields=["parent", "name"], name="one_none_folder"),
+            ]
+
+    class DefaultedKey(models.Model):
+        """A key this package fills itself, so its db_default is never what the row holds."""
+
+        id = models.IntegerField(primary_key=True, **_db_default(1))
+        company = _key(Company)
+
+        class Meta:
+            app_label = "testapp"
+            constraints = [
+                models.UniqueConstraint(fields=["id", "company"], name="one_defaulted_key"),
+            ]
+
+    class AttnameFolder(models.Model):
+        parent = _self_key()
+        name = models.CharField(max_length=50)
+
+        class Meta:
+            app_label = "testapp"
+            constraints = [
+                models.UniqueConstraint(fields=["parent_id", "name"], name="one_attname_folder"),
+            ]
+
+    class AttnameTogether(models.Model):
+        parent = _self_key()
+        name = models.CharField(max_length=50)
+
+        class Meta:
+            app_label = "testapp"
+            unique_together = [("parent_id", "name")]
+
+    class AttnameGroup(models.Model):
+        company = _key(Company)
+        status = models.CharField(max_length=50)
+
+        class Meta:
+            app_label = "testapp"
+            constraints = [
+                models.UniqueConstraint(
+                    fields=["company_id"],
+                    condition=models.Q(status="on"),
+                    name="one_attname_group",
+                ),
+            ]
+
+    class TiedSeat(models.Model):
+        company = _key(Company)
+        label = models.CharField(max_length=50, null=True)
+
+        class Meta:
+            app_label = "testapp"
+            constraints = [
+                models.UniqueConstraint(
+                    fields=["company", "label"], name="one_tied_seat", **_TOGETHER
+                ),
+            ]
+
+    class TiedColumn(models.Model):
+        company = _key(Company)
+
+        class Meta:
+            app_label = "testapp"
+            constraints = [
+                models.UniqueConstraint(fields=["company"], name="one_tied_column", **_TOGETHER),
+            ]
+
+    class OneColumn(models.Model):
+        company = _key(Company)
+
+        class Meta:
+            app_label = "testapp"
+            constraints = [models.UniqueConstraint(fields=["company"], name="one_per_column")]
+
+    class OneColumnTogether(models.Model):
+        company = _key(Company)
+
+        class Meta:
+            app_label = "testapp"
+            unique_together = [("company",)]
+
+    class TiedEdge(models.Model):
+        company = _key(Company)
+        person = _key(Person)
+
+        class Meta:
+            app_label = "testapp"
+            constraints = [
+                models.UniqueConstraint(
+                    fields=["company", "person"], name="one_tied_edge", **_TOGETHER
+                ),
+            ]
+
+    class CodedRule(models.Model):
+        company = _key(Company)
+        code = models.IntegerField()
+        status = models.CharField(max_length=50)
+
+        class Meta:
+            app_label = "testapp"
+            constraints = [
+                models.UniqueConstraint(
+                    fields=["company", "code"],
+                    condition=models.Q(status="on"),
+                    name="one_coded_rule",
+                ),
+            ]
+
+    class TiedCodedRule(models.Model):
+        company = _key(Company)
+        code = models.IntegerField()
+        status = models.CharField(max_length=50)
+
+        class Meta:
+            app_label = "testapp"
+            constraints = [
+                models.UniqueConstraint(
+                    fields=["company", "code"],
+                    condition=models.Q(status="on"),
+                    name="one_tied_coded_rule",
+                    **_TOGETHER,
+                ),
+            ]
+
+    class LabelledRule(models.Model):
+        company = _key(Company)
+        label = models.CharField(max_length=50, null=True)
+        status = models.CharField(max_length=50)
+
+        class Meta:
+            app_label = "testapp"
+            constraints = [
+                models.UniqueConstraint(
+                    fields=["company", "label"],
+                    condition=models.Q(status="on"),
+                    name="one_labelled_rule",
+                ),
+            ]
+
+    class Triple(models.Model):
+        company = _key(Company)
+        person = _key(Person)
+        code = models.IntegerField(null=True)
+
+        class Meta:
+            app_label = "testapp"
+            constraints = [
+                models.UniqueConstraint(fields=["company", "person", "code"], name="one_triple"),
+            ]
+
+    class TiedTriple(models.Model):
+        company = _key(Company)
+        person = _key(Person)
+        code = models.IntegerField()
+
+        class Meta:
+            app_label = "testapp"
+            constraints = [
+                models.UniqueConstraint(
+                    fields=["company", "person", "code"], name="one_tied_triple", **_TOGETHER
+                ),
+            ]
+
+    class TreeTriple(models.Model):
+        parent = _self_key()
+        company = _key(Company)
+        person = _key(Person)
+
+        class Meta:
+            app_label = "testapp"
+            constraints = [
+                models.UniqueConstraint(
+                    fields=["parent", "company", "person"], name="one_tree_triple"
+                ),
+            ]
+
+    class TiedTreeTriple(models.Model):
+        parent = _self_key()
+        company = _key(Company)
+        person = _key(Person)
+
+        class Meta:
+            app_label = "testapp"
+            constraints = [
+                models.UniqueConstraint(
+                    fields=["parent", "company", "person"], name="one_tied_tree_triple", **_TOGETHER
+                ),
+            ]
+
+    class TiedChain(models.Model):
+        previous = _self_key()
+
+        class Meta:
+            app_label = "testapp"
+            constraints = [
+                models.UniqueConstraint(fields=["previous"], name="one_tied_chain", **_TOGETHER),
+            ]
+
+    class TiedNamed(models.Model):
+        parent = _self_key()
+        name = models.CharField(max_length=50, null=True)
+
+        class Meta:
+            app_label = "testapp"
+            constraints = [
+                models.UniqueConstraint(
+                    fields=["parent", "name"], name="one_tied_named", **_TOGETHER
+                ),
+            ]
+
+    class TiedAnswer(models.Model):
+        parent = _self_key()
+        status = models.CharField(max_length=50)
+
+        class Meta:
+            app_label = "testapp"
+            constraints = [
+                models.UniqueConstraint(
+                    fields=["parent"],
+                    condition=models.Q(status="accepted"),
+                    name="one_tied_answer",
+                    **_TOGETHER,
+                ),
+            ]
+
+    class NullRule(models.Model):
+        company = _key(Company)
+        status = models.CharField(max_length=50, null=True)
+
+        class Meta:
+            app_label = "testapp"
+            constraints = [
+                models.UniqueConstraint(
+                    fields=["company"], condition=models.Q(status=None), name="one_null_rule"
+                ),
+            ]
+
+    class NullRuleOverATree(models.Model):
+        parent = _self_key()
+        status = models.CharField(max_length=50, null=True)
+
+        class Meta:
+            app_label = "testapp"
+            constraints = [
+                models.UniqueConstraint(
+                    fields=["parent"], condition=models.Q(status=None), name="one_null_tree_rule"
+                ),
+            ]
+
+    class DefaultOnRule(models.Model):
+        company = _key(Company)
+        status = models.CharField(max_length=50, null=True, **_db_default("on"))
+
+        class Meta:
+            app_label = "testapp"
+            constraints = [
+                models.UniqueConstraint(
+                    fields=["company"], condition=models.Q(status="on"), name="one_default_on_rule"
+                ),
+            ]
+
+    class DefaultOffRule(models.Model):
+        company = _key(Company)
+        status = models.CharField(max_length=50, null=True, **_db_default("off"))
+
+        class Meta:
+            app_label = "testapp"
+            constraints = [
+                models.UniqueConstraint(
+                    fields=["company"], condition=models.Q(status="on"), name="one_default_off_rule"
+                ),
+            ]
+
+    class StampedFolder(models.Model):
+        """Now() as a db_default, which every row of one COPY reads alike."""
+
+        parent = _self_key()
+        at = models.DateTimeField(null=True, **_db_default(Now()))
+
+        class Meta:
+            app_label = "testapp"
+            constraints = [
+                models.UniqueConstraint(fields=["parent", "at"], name="one_stamped_folder"),
+            ]
+
+    class StampedSeat(models.Model):
+        company = _key(Company)
+        at = models.DateTimeField(null=True, **_db_default(Now()))
+
+        class Meta:
+            app_label = "testapp"
+            constraints = [
+                models.UniqueConstraint(fields=["company", "at"], name="one_stamped_seat"),
+            ]
+
+    class StampedOnly(models.Model):
+        at = models.DateTimeField(null=True, **_db_default(Now()))
+
+        class Meta:
+            app_label = "testapp"
+            constraints = [
+                models.UniqueConstraint(fields=["at"], name="one_stamped_only"),
+            ]
+
+    class UnstampedRule(models.Model):
+        company = _key(Company)
+        at = models.DateTimeField(null=True, **_db_default(Now()))
+
+        class Meta:
+            app_label = "testapp"
+            constraints = [
+                models.UniqueConstraint(
+                    fields=["company"], condition=models.Q(at=None), name="one_unstamped_rule"
+                ),
+            ]
+
+    class OnRule(models.Model):
+        """One row inside the condition per company, with the status drawn per row."""
+
+        company = _key(Company)
+        status = models.CharField(max_length=50)
+
+        class Meta:
+            app_label = "testapp"
+            constraints = [
+                models.UniqueConstraint(
+                    fields=["company"], condition=models.Q(status="on"), name="one_on_rule"
+                ),
+            ]
+
+    class TiedOnRule(models.Model):
+        company = _key(Company)
+        status = models.CharField(max_length=50)
+
+        class Meta:
+            app_label = "testapp"
+            constraints = [
+                models.UniqueConstraint(
+                    fields=["company"],
+                    condition=models.Q(status="on"),
+                    name="one_tied_on_rule",
+                    **_TOGETHER,
+                ),
+            ]
+
+    class OnRuleBetweenTwo(models.Model):
+        company = _key(Company)
+        person = _key(Person)
+        status = models.CharField(max_length=50)
+
+        class Meta:
+            app_label = "testapp"
+            constraints = [
+                models.UniqueConstraint(
+                    fields=["company", "person"],
+                    condition=models.Q(status="on"),
+                    name="one_on_rule_between_two",
+                ),
+            ]
+
+    class BranchOnRule(models.Model):
+        parent = _self_key()
+        company = _key(Company)
+        status = models.CharField(max_length=50)
+
+        class Meta:
+            app_label = "testapp"
+            constraints = [
+                models.UniqueConstraint(
+                    fields=["parent", "company"],
+                    condition=models.Q(status="on"),
+                    name="one_on_rule_on_a_branch",
+                ),
+            ]
+
+    class UnownedRule(models.Model):
+        company = _key(Company)
+        owner = _key(Person)
+
+        class Meta:
+            app_label = "testapp"
+            constraints = [
+                models.UniqueConstraint(
+                    fields=["company"], condition=models.Q(owner_id=None), name="one_unowned_rule"
+                ),
+            ]
+
+    class KeyRule(models.Model):
+        company = _key(Company)
+
+        class Meta:
+            app_label = "testapp"
+            constraints = [
+                models.UniqueConstraint(
+                    fields=["company"], condition=models.Q(pk=None), name="one_key_rule"
+                ),
+            ]
+
+    class GeneratedSeat(models.Model):
+        """A column the database computes per row, which the load also leaves out."""
+
+        company = _key(Company)
+        number = models.IntegerField()
+        if django.VERSION >= (5, 0):
+            doubled = models.GeneratedField(
+                expression=models.F("number") * 2,
+                output_field=models.IntegerField(),
+                db_persist=True,
+                null=True,
+            )
+
+        class Meta:
+            app_label = "testapp"
+            constraints = (
+                [
+                    models.UniqueConstraint(
+                        fields=["company", "doubled"], name="one_generated_seat", **_TOGETHER
+                    ),
+                ]
+                if django.VERSION >= (5, 0)
+                else []
+            )
+
+
+def _people(rows: int = 50) -> Table:
+    return Table(Person, rows=rows, name=Constant("ada"))
+
+
+def _one_root_chain(rows: int = 200) -> Tree:
+    """A root share that comes to one row, so every other row has a parent of its own."""
+    return Tree(roots=1 / rows, sizes=Constant(1))
+
+
+def _assert_builds(owned: tuple[type[models.Model], ...], *tables: Table) -> None:
+    """Accepted at declaration, and it loads at several seeds on a real unique index."""
+    with connection.schema_editor() as editor:
+        for model in owned:
+            editor.create_model(model)
+    try:
+        for seed in (0, 1, 7, 42, 1000):
+            build_shape(Shape(*tables, seed=seed))
+            names = ", ".join(
+                connection.ops.quote_name(table.model._meta.db_table) for table in tables
+            )
+            with connection.cursor() as cursor:
+                cursor.execute(f"TRUNCATE {names} CASCADE")
+    finally:
+        with connection.schema_editor() as editor:
+            for model in owned:
+                editor.delete_model(model)
+
+
+_ON_POSTGRES = pytest.mark.skipif(
+    connection.vendor != "postgresql",
+    reason="the uniqueness is enforced by a PostgreSQL index under COPY",
+)
+
+
+@_NEEDS_DJANGO_5
+@pytest.mark.parametrize(
+    ("tables", "constraint", "holds"),
+    [
+        pytest.param(
+            lambda: [Table(DefaultedFolder, rows=200, parent=Tree(roots=0.05, sizes=Zipf()))],
+            "one_defaulted_folder",
+            "'same'",
+            id="beside_a_tree",
+        ),
+        pytest.param(
+            lambda: [_companies(), Table(DefaultedSeat, rows=20, company=FanOut(Zipf()))],
+            "one_defaulted_seat",
+            "'same'",
+            id="beside_a_fan_out",
+        ),
+        pytest.param(
+            lambda: [_companies(), Table(ValueDefaultedSeat, rows=20, company=FanOut(Zipf()))],
+            "one_value_seat",
+            "'same'",
+            id="written_as_a_value",
+        ),
+        # Measured at 0 of 20 on each, past the checks: Now() is STATEMENT_TIMESTAMP() on
+        # PostgreSQL, and one table's rows arrive in one COPY statement.
+        pytest.param(
+            lambda: [Table(StampedFolder, rows=200, parent=Tree(roots=0.05, sizes=Zipf()))],
+            "one_stamped_folder",
+            "Now()",
+            id="now_beside_a_tree",
+        ),
+        pytest.param(
+            lambda: [_companies(), Table(StampedSeat, rows=20, company=FanOut(Zipf()))],
+            "one_stamped_seat",
+            "Now()",
+            id="now_beside_a_fan_out",
+        ),
+    ],
+)
+def test_a_db_default_is_one_value_in_every_row(tables: Any, constraint: str, holds: str) -> None:
+    # Measured at 0 of 20 on both. The column is left out of COPY, so the database
+    # writes the default in every row: it was read as a NULL, which keeps rows apart.
+    with pytest.raises(InvalidShape) as raised:
+        Shape(*tables())
+
+    message = str(raised.value)
+    assert constraint in message
+    assert "db_default" in message
+    assert holds in message
+
+
+@_NEEDS_DJANGO_5
+def test_db_defaults_alone_count_as_one_combination() -> None:
+    with pytest.raises(InvalidShape) as raised:
+        Shape(Table(DefaultedPair, rows=5))
+
+    assert "one_defaulted_pair" in str(raised.value)
+    assert "can produce 1" in str(raised.value)
+
+
+@_NEEDS_DJANGO_5
+def test_a_db_default_counts_toward_the_room_a_fan_out_has() -> None:
+    with pytest.raises(InvalidShape) as raised:
+        Shape(_companies(5), Table(DefaultedSeat, rows=6, company=FanOut(Zipf())))
+
+    assert "can produce 5" in str(raised.value)
+
+
+@pytest.mark.parametrize(
+    ("tables", "constraint"),
+    [
+        pytest.param(
+            lambda: [
+                Table(
+                    AttnameFolder,
+                    rows=200,
+                    parent=Tree(roots=0.05, sizes=Zipf()),
+                    name=Skew({"a": 1, "b": 1}),
+                )
+            ],
+            "one_attname_folder",
+            id="constraint",
+        ),
+        pytest.param(
+            lambda: [
+                Table(
+                    AttnameTogether,
+                    rows=200,
+                    parent=Tree(roots=0.05, sizes=Zipf()),
+                    name=Skew({"a": 1, "b": 1}),
+                )
+            ],
+            "unique_together ('parent_id', 'name')",
+            id="unique_together",
+        ),
+        pytest.param(
+            lambda: [
+                _companies(),
+                Table(
+                    AttnameGroup,
+                    rows=200,
+                    company=FanOut(Zipf()),
+                    status=Skew({"on": 1, "off": 1}),
+                ),
+            ],
+            "one_attname_group",
+            id="conditional",
+        ),
+    ],
+)
+def test_a_column_named_by_its_attname_is_the_column(tables: Any, constraint: str) -> None:
+    # Django accepts either spelling in a constraint and builds one index, and each of
+    # these loaded 0 of 20 while table.fields, keyed on names, missed the attname.
+    with pytest.raises(InvalidShape) as raised:
+        Shape(*tables())
+
+    assert constraint in str(raised.value)
+
+
+@_NEEDS_DJANGO_5
+@pytest.mark.parametrize(
+    ("tables", "constraint"),
+    [
+        pytest.param(
+            lambda: [_companies(), Table(TiedSeat, rows=20, company=FanOut(Zipf()))],
+            "one_tied_seat",
+            id="beside_a_left_out_column",
+        ),
+        pytest.param(
+            lambda: [_companies(), Table(TiedColumn, rows=20, company=FanOut(Zipf()))],
+            "one_tied_column",
+            id="alone",
+        ),
+        pytest.param(
+            lambda: [
+                _companies(),
+                Table(TiedSeat, rows=20, company=FanOut(Zipf(), max_children=1, null=0.5)),
+            ],
+            "one_tied_seat",
+            id="capped_with_a_null_share_beside_a_left_out_column",
+        ),
+        pytest.param(
+            lambda: [
+                _companies(),
+                Table(
+                    TiedSeat,
+                    rows=20,
+                    company=FanOut(Zipf(), max_children=1, null=0.5),
+                    label=Skew({"a": 1, "b": 1}),
+                ),
+            ],
+            "one_tied_seat",
+            id="capped_with_a_null_share_beside_a_draw",
+        ),
+        pytest.param(
+            lambda: [
+                _companies(),
+                Table(TiedColumn, rows=20, company=FanOut(Zipf(), max_children=1, null=0.5)),
+            ],
+            "one_tied_column",
+            id="capped_with_a_null_share_alone",
+        ),
+        pytest.param(
+            lambda: [
+                _companies(),
+                _people(),
+                Table(
+                    TiedEdge,
+                    rows=20,
+                    company=FanOut(Zipf(), max_children=1, null=0.5),
+                    person=FanOut(Zipf()),
+                ),
+            ],
+            "one_tied_edge",
+            id="capped_with_a_null_share_beside_a_fan_out",
+        ),
+        pytest.param(
+            lambda: [Table(TiedNamed, rows=200, parent=Tree(roots=0.05, sizes=Constant(1)))],
+            "one_tied_named",
+            id="flat_tree_of_many_roots_beside_a_left_out_column",
+        ),
+        pytest.param(
+            lambda: [Table(TiedNamed, rows=200, parent=Tree(roots=0.05, sizes=Zipf()))],
+            "one_tied_named",
+            id="tree_beside_a_left_out_column",
+        ),
+    ],
+)
+def test_nulls_counted_together_are_one_value_where_the_checks_read_them(
+    tables: Any, constraint: str
+) -> None:
+    # Every one of these rested on "each NULL is its own group" and died in COPY.
+    with pytest.raises(InvalidShape) as raised:
+        Shape(*tables())
+
+    assert constraint in str(raised.value)
+
+
+@_NEEDS_DJANGO_5
+def test_a_null_share_counted_together_is_one_more_parent() -> None:
+    # Unbounded while each NULL is its own group, and one value here: five companies,
+    # the NULL and two labels are twelve combinations for five hundred rows.
+    with pytest.raises(InvalidShape) as raised:
+        Shape(
+            _companies(5),
+            Table(
+                TiedSeat,
+                rows=500,
+                company=FanOut(Zipf(), null=0.1),
+                label=Skew({"a": 1, "b": 1}),
+            ),
+        )
+
+    assert "can produce 12" in str(raised.value)
+
+
+@pytest.mark.parametrize(
+    ("model", "named"),
+    [(OneColumn, "one_per_column"), (OneColumnTogether, "unique_together ('company',)")],
+)
+def test_a_fan_out_alone_under_a_uniqueness_is_the_unique_column_it_amounts_to(
+    model: type[models.Model], named: str
+) -> None:
+    # Measured at 0 of 20. A unique=True is read off the field and refused; this spelling
+    # writes the same index and no check read it.
+    with pytest.raises(InvalidShape) as raised:
+        Shape(_companies(), Table(model, rows=20, company=FanOut(Zipf())))
+
+    message = str(raised.value)
+    assert named in message
+    assert "max_children=1" in message
+    assert "nulls_distinct" not in message
+
+
+@_NEEDS_DJANGO_5
+def test_a_fan_out_alone_says_when_the_null_share_is_what_collides() -> None:
+    with pytest.raises(InvalidShape) as raised:
+        Shape(
+            _companies(),
+            Table(TiedColumn, rows=20, company=FanOut(Zipf(), max_children=1, null=0.5)),
+        )
+
+    assert "nulls_distinct=False" in str(raised.value)
+
+
+def test_a_null_share_keeps_the_cap_while_each_null_is_its_own_group() -> None:
+    Shape(_companies(), Table(OneColumn, rows=20, company=FanOut(Zipf(), max_children=1, null=0.5)))
+    Shape(
+        _companies(),
+        Table(
+            Seat,
+            rows=20,
+            company=FanOut(Zipf(), max_children=1, null=0.5),
+            label=Skew({"a": 1, "b": 1}),
+        ),
+    )
+
+
+@_NEEDS_DJANGO_5
+def test_a_condition_nothing_can_read_is_left_alone() -> None:
+    # Q(token=None) over a column the database fills with an expression: nothing here
+    # can say what it holds, so this is accepted, and a load of it is in
+    # test_each_exemption_is_accepted_and_loads.
+    Shape(_companies(), Table(TokenCondition, rows=200, company=FanOut(Zipf())))
+
+
+def test_a_condition_may_name_a_left_out_key_by_its_attname() -> None:
+    # Q(owner_id=None) over a key the shape leaves out puts every row inside the
+    # condition, measured at 0 of 20. No field is called owner_id, so without the
+    # attname's name this read as a column nothing can read and was accepted.
+    with pytest.raises(InvalidShape) as raised:
+        Shape(_companies(), Table(UnownedRule, rows=200, company=FanOut(Zipf())))
+
+    assert "one_unowned_rule" in str(raised.value)
+    assert "NULL in every row" in str(raised.value)
+
+
+@_NEEDS_DJANGO_5
+def test_now_alone_counts_as_one_combination() -> None:
+    with pytest.raises(InvalidShape) as raised:
+        Shape(Table(StampedOnly, rows=20))
+
+    assert "one_stamped_only" in str(raised.value)
+    assert "can produce 1" in str(raised.value)
+
+
+@_NEEDS_DJANGO_5
+def test_a_cap_of_one_under_a_condition_is_no_proof_where_its_nulls_are_one_group() -> None:
+    # Loads 0 of 20: the rows of the null share are one group under nulls_distinct=False,
+    # and every one of them is inside the condition. _cannot_collide alone says yes here.
+    with pytest.raises(InvalidShape) as raised:
+        Shape(
+            _companies(),
+            Table(
+                TiedOnRule,
+                rows=20,
+                company=FanOut(Zipf(), max_children=1, null=0.5),
+                status=Constant("on"),
+            ),
+        )
+
+    assert "one_tied_on_rule" in str(raised.value)
+
+
+def test_a_condition_every_left_out_row_lands_inside_is_refused() -> None:
+    # Q(status=None) is IS NULL, and a column the shape leaves out holds NULL, so every
+    # row is inside the condition. Measured at 0 of 20: the guard this replaces read
+    # the same column as saying nothing.
+    with pytest.raises(InvalidShape) as raised:
+        Shape(_companies(), Table(NullRule, rows=200, company=FanOut(Zipf())))
+
+    assert "one_null_rule" in str(raised.value)
+    assert "NULL in every row" in str(raised.value)
+
+
+def test_a_condition_every_left_out_row_lands_inside_is_refused_over_a_tree() -> None:
+    with pytest.raises(InvalidShape) as raised:
+        Shape(Table(NullRuleOverATree, rows=200, parent=Tree(roots=0.05, sizes=Zipf())))
+
+    assert "one_null_tree_rule" in str(raised.value)
+
+
+@_NEEDS_DJANGO_5
+def test_a_db_default_inside_the_condition_is_refused() -> None:
+    with pytest.raises(InvalidShape) as raised:
+        Shape(_companies(), Table(DefaultOnRule, rows=200, company=FanOut(Zipf())))
+
+    assert "one_default_on_rule" in str(raised.value)
+    assert "db_default" in str(raised.value)
+
+
+def test_a_distinct_column_does_not_excuse_one_that_does_not_move() -> None:
+    # Sequential is the class and the step is the answer: the is_distinct_per_row half of
+    # the proof. Measured at 0 of 20 at a step of zero.
+    with pytest.raises(InvalidShape) as raised:
+        Shape(
+            _companies(),
+            Table(
+                CodedRule,
+                rows=200,
+                company=FanOut(Zipf()),
+                code=Sequential(1, 0),
+                status=Skew({"on": 1, "off": 1}),
+            ),
+        )
+
+    assert "one_coded_rule" in str(raised.value)
+
+
+def test_a_tree_of_many_children_beside_two_fan_outs_stays_refused() -> None:
+    with pytest.raises(InvalidShape) as raised:
+        Shape(
+            _companies(5),
+            _people(5),
+            Table(
+                TreeTriple,
+                rows=200,
+                parent=Tree(roots=0.05, sizes=Zipf()),
+                company=FanOut(Zipf()),
+                person=FanOut(Zipf()),
+            ),
+        )
+
+    assert "one_tree_triple" in str(raised.value)
+
+
+@_NEEDS_DJANGO_5
+@pytest.mark.parametrize(
+    ("tree", "rows"),
+    [
+        pytest.param(Tree(roots=0.01, sizes=Constant(1)), 200, id="two_roots_flat"),
+        pytest.param(Tree(roots=0.005, sizes=Zipf()), 200, id="one_root_with_siblings"),
+    ],
+)
+def test_one_root_is_not_enough_and_nor_is_a_flat_tree(tree: Tree, rows: int) -> None:
+    # The two halves of the proof under nulls_distinct=False. Both measured at 0 of 20.
+    with pytest.raises(InvalidShape) as raised:
+        Shape(Table(TiedChain, rows=rows, previous=tree))
+
+    message = str(raised.value)
+    assert "one_tied_chain" in message
+    assert "one root" in message
+    assert f"1/{rows}" in message
+
+
+@_NEEDS_DJANGO_5
+def test_a_flat_tree_of_many_roots_counted_together_stays_refused_beside_two_fan_outs() -> None:
+    with pytest.raises(InvalidShape) as raised:
+        Shape(
+            _companies(5),
+            _people(5),
+            Table(
+                TiedTreeTriple,
+                rows=200,
+                parent=Tree(roots=0.5, sizes=Constant(1)),
+                company=FanOut(Zipf()),
+                person=FanOut(Zipf()),
+            ),
+        )
+
+    assert "one_tied_tree_triple" in str(raised.value)
+
+
+@_NEEDS_DJANGO_5
+def test_one_root_is_offered_beside_a_draw_and_in_a_conditional_when_it_would_hold() -> None:
+    for message in (
+        str(
+            pytest.raises(
+                InvalidShape,
+                Shape,
+                Table(
+                    TiedNamed,
+                    rows=200,
+                    parent=Tree(roots=0.05, sizes=Constant(1)),
+                    name=Skew({"a": 1, "b": 1}),
+                ),
+            ).value
+        ),
+        str(
+            pytest.raises(
+                InvalidShape,
+                Shape,
+                Table(
+                    TiedAnswer,
+                    rows=200,
+                    parent=Tree(roots=0.05, sizes=Constant(1)),
+                    status=Constant("accepted"),
+                ),
+            ).value
+        ),
+    ):
+        assert "one root" in message
+        assert "1/200" in message
+
+
+@_ON_POSTGRES
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.parametrize(
+    ("owned", "tables"),
+    [
+        # A proof that keeps the constraint whatever the db_default is.
+        pytest.param(
+            (DefaultedFolder,),
+            lambda: [Table(DefaultedFolder, rows=200, parent=Tree(roots=0.05, sizes=Constant(1)))],
+            id="db_default_beside_a_flat_tree",
+            marks=_NEEDS_DJANGO_5,
+        ),
+        pytest.param(
+            (DefaultedSeat,),
+            lambda: [
+                _companies(),
+                Table(DefaultedSeat, rows=20, company=FanOut(Zipf(), max_children=1)),
+            ],
+            id="db_default_beside_a_cap_of_one",
+            marks=_NEEDS_DJANGO_5,
+        ),
+        pytest.param(
+            (DefaultedPair,),
+            lambda: [Table(DefaultedPair, rows=1)],
+            id="db_defaults_on_one_row",
+            marks=_NEEDS_DJANGO_5,
+        ),
+        # What a db_default leaves readable as something other than one value.
+        pytest.param(
+            (TokenFolder,),
+            lambda: [Table(TokenFolder, rows=200, parent=Tree(roots=0.05, sizes=Zipf()))],
+            id="expression_db_default_new_in_every_row",
+            marks=_NEEDS_DJANGO_5,
+        ),
+        pytest.param(
+            (NoneDefaultedFolder,),
+            lambda: [Table(NoneDefaultedFolder, rows=200, parent=Tree(roots=0.05, sizes=Zipf()))],
+            id="db_default_of_none",
+            marks=_NEEDS_DJANGO_5,
+        ),
+        pytest.param(
+            (DefaultedKey,),
+            lambda: [_companies(), Table(DefaultedKey, rows=20, company=FanOut(Zipf()))],
+            id="db_default_on_the_key_this_package_fills",
+            marks=_NEEDS_DJANGO_5,
+        ),
+        pytest.param(
+            (GeneratedSeat,),
+            lambda: [
+                _companies(),
+                Table(GeneratedSeat, rows=20, company=FanOut(Zipf()), number=Sequential(1, 1)),
+            ],
+            id="generated_column_counted_together",
+            marks=_NEEDS_DJANGO_5,
+        ),
+        # Conditions a left-out column stays outside, or that nothing can read.
+        pytest.param(
+            (DefaultOffRule,),
+            lambda: [_companies(), Table(DefaultOffRule, rows=200, company=FanOut(Zipf()))],
+            id="db_default_outside_the_condition",
+            marks=_NEEDS_DJANGO_5,
+        ),
+        pytest.param(
+            (TokenCondition,),
+            lambda: [_companies(), Table(TokenCondition, rows=200, company=FanOut(Zipf()))],
+            id="expression_db_default_under_is_null",
+            marks=_NEEDS_DJANGO_5,
+        ),
+        pytest.param(
+            (KeyRule,),
+            lambda: [_companies(), Table(KeyRule, rows=200, company=FanOut(Zipf()))],
+            id="condition_on_the_key",
+        ),
+        # Now() is one value and no more than that: a proof about the other column holds,
+        # one row cannot collide, and a value that is never NULL stays outside IS NULL.
+        pytest.param(
+            (StampedFolder,),
+            lambda: [Table(StampedFolder, rows=200, parent=Tree(roots=0.05, sizes=Constant(1)))],
+            id="now_beside_a_flat_tree",
+            marks=_NEEDS_DJANGO_5,
+        ),
+        pytest.param(
+            (StampedSeat,),
+            lambda: [
+                _companies(),
+                Table(StampedSeat, rows=20, company=FanOut(Zipf(), max_children=1)),
+            ],
+            id="now_beside_a_cap_of_one",
+            marks=_NEEDS_DJANGO_5,
+        ),
+        pytest.param(
+            (StampedOnly,),
+            lambda: [Table(StampedOnly, rows=1)],
+            id="now_on_one_row",
+            marks=_NEEDS_DJANGO_5,
+        ),
+        pytest.param(
+            (UnstampedRule,),
+            lambda: [_companies(), Table(UnstampedRule, rows=200, company=FanOut(Zipf()))],
+            id="now_outside_a_condition_on_null",
+            marks=_NEEDS_DJANGO_5,
+        ),
+        # A partition with no group of two leaves a condition nothing to count.
+        pytest.param(
+            (OnRule,),
+            lambda: [
+                _companies(),
+                Table(
+                    OnRule,
+                    rows=20,
+                    company=FanOut(Zipf(), max_children=1),
+                    status=Skew({"on": 1, "off": 1}),
+                ),
+            ],
+            id="cap_of_one_under_a_condition_drawn_per_row",
+        ),
+        pytest.param(
+            (OnRule,),
+            lambda: [
+                _companies(),
+                Table(
+                    OnRule, rows=50, company=FanOut(Zipf(), max_children=1), status=Constant("on")
+                ),
+            ],
+            id="cap_of_one_with_every_row_inside_the_condition",
+        ),
+        pytest.param(
+            (OnRule,),
+            lambda: [
+                _companies(),
+                Table(
+                    OnRule,
+                    rows=20,
+                    company=FanOut(Zipf(), max_children=1, null=0.5),
+                    status=Constant("on"),
+                ),
+            ],
+            id="cap_of_one_with_a_null_share_under_a_condition",
+        ),
+        pytest.param(
+            (OnRule,),
+            lambda: [
+                _companies(),
+                Table(OnRule, rows=50, company=FanOut(Constant(1)), status=Constant("on")),
+            ],
+            id="flat_sizes_under_a_condition",
+        ),
+        pytest.param(
+            (OnRuleBetweenTwo,),
+            lambda: [
+                _companies(),
+                Table(Person, rows=50, name=Constant("ada")),
+                Table(
+                    OnRuleBetweenTwo,
+                    rows=20,
+                    company=FanOut(Zipf(), max_children=1),
+                    person=FanOut(Zipf()),
+                    status=Constant("on"),
+                ),
+            ],
+            id="cap_of_one_beside_a_second_fan_out_under_a_condition",
+        ),
+        pytest.param(
+            (BranchOnRule,),
+            lambda: [
+                _companies(),
+                Table(
+                    BranchOnRule,
+                    rows=20,
+                    parent=Tree(roots=0.05, sizes=Zipf()),
+                    company=FanOut(Zipf(), max_children=1),
+                    status=Constant("on"),
+                ),
+            ],
+            id="cap_of_one_beside_a_tree_under_a_condition",
+        ),
+        pytest.param(
+            (TiedOnRule,),
+            lambda: [
+                _companies(),
+                Table(
+                    TiedOnRule,
+                    rows=20,
+                    company=FanOut(Zipf(), max_children=1),
+                    status=Constant("on"),
+                ),
+            ],
+            id="cap_of_one_with_no_null_to_tie_under_a_condition",
+            marks=_NEEDS_DJANGO_5,
+        ),
+        # The nulls reading: a cap of one still holds with nothing NULL to tie.
+        pytest.param(
+            (TiedSeat,),
+            lambda: [
+                _companies(),
+                Table(TiedSeat, rows=20, company=FanOut(Zipf(), max_children=1)),
+            ],
+            id="tied_left_out_column_beside_a_cap_of_one",
+            marks=_NEEDS_DJANGO_5,
+        ),
+        pytest.param(
+            (OneColumn,),
+            lambda: [
+                _companies(),
+                Table(OneColumn, rows=20, company=FanOut(Zipf(), max_children=1)),
+            ],
+            id="cap_of_one_alone",
+        ),
+        pytest.param(
+            (TiedSeat,),
+            lambda: [
+                _companies(),
+                Table(
+                    TiedSeat,
+                    rows=20,
+                    company=FanOut(Zipf(), null=0.5),
+                    label=Sequential(1, 1),
+                ),
+            ],
+            id="distinct_beside_a_tied_null_share",
+            marks=_NEEDS_DJANGO_5,
+        ),
+        # A Distinct column leaves each group one row.
+        pytest.param(
+            (CodedRule,),
+            lambda: [
+                _companies(),
+                Table(
+                    CodedRule,
+                    rows=200,
+                    company=FanOut(Zipf()),
+                    code=Sequential(1, 1),
+                    status=Skew({"on": 1, "off": 1}),
+                ),
+            ],
+            id="distinct_under_a_condition",
+        ),
+        pytest.param(
+            (CodedRule,),
+            lambda: [
+                _companies(),
+                Table(
+                    CodedRule,
+                    rows=200,
+                    company=FanOut(Zipf()),
+                    code=Sequential(1, 1),
+                    status=PerParent("company", last="on", rest="on"),
+                ),
+            ],
+            id="distinct_under_a_condition_whatever_the_per_parent_says",
+        ),
+        pytest.param(
+            (TiedCodedRule,),
+            lambda: [
+                _companies(),
+                Table(
+                    TiedCodedRule,
+                    rows=200,
+                    company=FanOut(Zipf(), null=0.3),
+                    code=Sequential(1, 1),
+                    status=Skew({"on": 1, "off": 1}),
+                ),
+            ],
+            id="distinct_under_a_tied_condition_with_a_null_share",
+            marks=_NEEDS_DJANGO_5,
+        ),
+        pytest.param(
+            (Triple,),
+            lambda: [
+                _companies(),
+                _people(),
+                Table(
+                    Triple,
+                    rows=200,
+                    company=FanOut(Zipf()),
+                    person=FanOut(Zipf()),
+                    code=Sequential(1, 1),
+                ),
+            ],
+            id="distinct_beside_two_fan_outs",
+        ),
+        pytest.param(
+            (TiedTriple,),
+            lambda: [
+                _companies(),
+                _people(),
+                Table(
+                    TiedTriple,
+                    rows=200,
+                    company=FanOut(Zipf(), null=0.3),
+                    person=FanOut(Zipf(), null=0.3),
+                    code=Sequential(1, 1),
+                ),
+            ],
+            id="distinct_beside_two_tied_null_shares",
+            marks=_NEEDS_DJANGO_5,
+        ),
+        # A NULL in every row keeps every row out of the index, whichever check asks.
+        pytest.param(
+            (Triple,),
+            lambda: [
+                _companies(5),
+                _people(5),
+                Table(Triple, rows=200, company=FanOut(Zipf()), person=FanOut(Zipf())),
+            ],
+            id="null_in_every_row_beside_two_fan_outs",
+        ),
+        pytest.param(
+            (LabelledRule,),
+            lambda: [
+                _companies(),
+                Table(
+                    LabelledRule,
+                    rows=200,
+                    company=FanOut(Zipf()),
+                    status=Skew({"on": 1, "off": 1}),
+                ),
+            ],
+            id="null_in_every_row_under_a_condition",
+        ),
+        # A flat tree keeps the constraint on its own.
+        pytest.param(
+            (TreeTriple,),
+            lambda: [
+                _companies(5),
+                _people(5),
+                Table(
+                    TreeTriple,
+                    rows=200,
+                    parent=Tree(roots=0.05, sizes=Constant(1)),
+                    company=FanOut(Zipf()),
+                    person=FanOut(Zipf()),
+                ),
+            ],
+            id="flat_tree_beside_two_fan_outs",
+        ),
+        # One root leaves one NULL, so nothing ties under nulls_distinct=False.
+        pytest.param(
+            (TiedTreeTriple,),
+            lambda: [
+                _companies(5),
+                _people(5),
+                Table(
+                    TiedTreeTriple,
+                    rows=200,
+                    parent=_one_root_chain(),
+                    company=FanOut(Zipf()),
+                    person=FanOut(Zipf()),
+                ),
+            ],
+            id="one_root_beside_two_fan_outs",
+            marks=_NEEDS_DJANGO_5,
+        ),
+        pytest.param(
+            (TiedChain,),
+            lambda: [Table(TiedChain, rows=200, previous=_one_root_chain())],
+            id="one_root_alone",
+            marks=_NEEDS_DJANGO_5,
+        ),
+        pytest.param(
+            (TiedChain,),
+            lambda: [Table(TiedChain, rows=2, previous=Tree(roots=0.5, sizes=Zipf()))],
+            id="one_root_and_one_child_whatever_the_sizes",
+            marks=_NEEDS_DJANGO_5,
+        ),
+        pytest.param(
+            (TiedNamed,),
+            lambda: [Table(TiedNamed, rows=200, parent=_one_root_chain(), name=Constant("same"))],
+            id="one_root_beside_a_draw",
+            marks=_NEEDS_DJANGO_5,
+        ),
+        pytest.param(
+            (TiedNamed,),
+            lambda: [Table(TiedNamed, rows=200, parent=_one_root_chain())],
+            id="one_root_beside_a_left_out_column",
+            marks=_NEEDS_DJANGO_5,
+        ),
+        pytest.param(
+            (TiedAnswer,),
+            lambda: [
+                Table(TiedAnswer, rows=200, parent=_one_root_chain(), status=Constant("accepted"))
+            ],
+            id="one_root_in_a_conditional",
+            marks=_NEEDS_DJANGO_5,
+        ),
+    ],
+)
+def test_each_exemption_is_accepted_and_loads(owned: Any, tables: Any) -> None:
+    _assert_builds(owned, *tables())
+
+
+@_ON_POSTGRES
+@_NEEDS_DJANGO_5
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.parametrize(
+    ("model", "column", "table", "distinct"),
+    [
+        pytest.param(
+            StampedFolder,
+            "at",
+            lambda: Table(StampedFolder, rows=200, parent=Tree(roots=0.05, sizes=Constant(1))),
+            1,
+            id="now_is_one_instant",
+        ),
+        pytest.param(
+            TokenFolder,
+            "token",
+            lambda: Table(TokenFolder, rows=200, parent=Tree(roots=0.05, sizes=Zipf())),
+            200,
+            id="gen_random_uuid_is_new_in_every_row",
+        ),
+    ],
+)
+def test_what_an_expression_db_default_writes_across_one_copy(
+    model: type[models.Model], column: str, table: Any, distinct: int
+) -> None:
+    # The premise under the Now reading, read off the table rather than off a collision.
+    quote = connection.ops.quote_name
+    with connection.schema_editor() as editor:
+        editor.create_model(model)
+    try:
+        build_shape(Shape(table()))
+        with connection.cursor() as cursor:
+            cursor.execute(
+                f"SELECT COUNT(DISTINCT {quote(column)}) FROM {quote(model._meta.db_table)}"
+            )
+            assert cursor.fetchone()[0] == distinct
+    finally:
+        with connection.schema_editor() as editor:
+            editor.delete_model(model)
+
+
+def test_one_row_cannot_collide_with_anything() -> None:
+    Shape(Table(Coupon, rows=1, batch=Skew({"a": 1, "b": 1}), code=Skew({"a": 1, "b": 1})))
