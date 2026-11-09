@@ -18,11 +18,15 @@ from django_data_shape import InvalidShape, Table, Tree, shape_from_factory
 from tests.testapp.models import (
     Category,
     Chain,
+    Checked,
     Company,
+    Exclusive,
+    Folder,
     Project,
     Relay,
     RootlessNode,
     Session,
+    Sibling,
     Successor,
 )
 
@@ -398,6 +402,45 @@ def test_a_self_key_no_shape_can_fill_is_a_comment_and_a_finding_not_a_tree(
     assert f"{field}=" not in report
 
 
+def _report_over_a_self_key_no_shape_can_fill(model: type[Model]) -> str:
+    """The report for a factory over one of the self-keyed models whose key gets a comment."""
+
+    def factory() -> Model:
+        if model is RootlessNode:
+            # Never committed: the call is rolled back and the constraint deferred.
+            return model.objects.create(parent_id=1)  # type: ignore[attr-defined]
+        previous = model.objects.last()  # type: ignore[attr-defined]
+        return model.objects.create(previous=previous)  # type: ignore[attr-defined]
+
+    return shape_from_factory(factory, samples=10)
+
+
+def test_a_self_key_that_refuses_null_is_not_told_to_be_left_out() -> None:
+    """``Table`` refuses ``RootlessNode`` when ``parent`` is left out, so that remedy is false.
+
+    The remedy has to be one ``Table`` accepts: the column made ``null=True`` (after
+    which leaving it out, or a ``Tree``, is a shape), or the table filled by a
+    ``Projection`` with ``columns=`` and ``sql=``.
+    """
+    report = _report_over_a_self_key_no_shape_can_fill(RootlessNode)
+
+    assert "Leave it out and fill it after the build" not in report
+    assert "Make the column null=True, or fill the table with a Projection" in report
+    # The sentence is read against what Table does, not taken on trust.
+    with pytest.raises(InvalidShape, match="RootlessNode.parent cannot be null"):
+        _built(report, RootlessNode)
+
+
+@pytest.mark.parametrize("model", [Successor, Chain, Relay])
+def test_a_nullable_unique_self_key_is_still_told_to_be_left_out(model: type[Model]) -> None:
+    # Leaving a nullable column out is a shape, so for these the remedy is true.
+    report = _report_over_a_self_key_no_shape_can_fill(model)
+
+    assert "Leave it out and fill it after the build." in report
+    assert "null=True" not in report
+    assert "Projection" not in report
+
+
 @pytest.mark.parametrize("model", [Successor, Chain, Relay])
 def test_a_report_with_a_comment_where_the_self_key_was_is_source_table_accepts(
     model: type[Model],
@@ -411,6 +454,58 @@ def test_a_report_with_a_comment_where_the_self_key_was_is_source_table_accepts(
     report = shape_from_factory(factory, samples=10)
 
     assert isinstance(_built(report, model), Table)
+
+
+def _chain_with_roots(n: int) -> int | None:
+    """Every fourth call is a root and the rest point at the call before, so no parent has two."""
+    return None if n % 4 == 1 else n - 2
+
+
+def test_a_key_in_a_composite_unique_constraint_is_not_unique_on_its_own() -> None:
+    """Fails without the whole-tuple match in ``_is_unique``: ``name in constraint.fields``.
+
+    ``Folder`` is unique on ``(parent, name)``, which lets a parent have many
+    children so long as their names differ, so ``parent`` alone is a tree's column.
+    The factory repeats names; distinct ones would be written as a ``Sequential``
+    that does not build, which is a separate defect.
+    """
+    report = shape_from_factory(_tree_factory(Folder, _chain_with_roots), samples=20)
+
+    assert "parent=Tree(roots=0.25, sizes=Zipf())" in report
+    assert "no shape can fill" not in report
+
+
+def test_a_conditional_unique_constraint_does_not_make_the_key_unique() -> None:
+    """Fails without ``constraint.condition is None`` in ``_is_unique``."""
+    report = shape_from_factory(_tree_factory(Sibling, _chain_with_roots), samples=20)
+
+    assert "parent=Tree(roots=0.25, sizes=Zipf())" in report
+    assert isinstance(_built(report, Sibling).fields["parent"], Tree)
+
+
+def test_a_check_constraint_is_not_read_as_a_unique_one() -> None:
+    """A check constraint has no ``fields``: reading it as a unique one raises.
+
+    From Django 5.1 its predicate is its ``condition``, which is never ``None``,
+    so ``condition is None`` short-circuits first there and this alone does not
+    need ``isinstance``; the test below is the one that does.
+    """
+    report = shape_from_factory(_tree_factory(Checked, _chain_with_roots), samples=20)
+
+    assert "parent=Tree(roots=0.25, sizes=Zipf())" in report
+    assert isinstance(_built(report, Checked).fields["parent"], Tree)
+
+
+def test_a_constraint_that_is_not_a_unique_one_is_not_read_as_one() -> None:
+    """Fails without ``isinstance(constraint, UniqueConstraint)`` in ``_is_unique``.
+
+    It has no ``fields`` and its ``condition`` is ``None``, so on every Django the
+    unguarded read raises ``AttributeError``.
+    """
+    report = shape_from_factory(_tree_factory(Exclusive, _chain_with_roots), samples=20)
+
+    assert "parent=Tree(roots=0.25, sizes=Zipf())" in report
+    assert isinstance(_built(report, Exclusive).fields["parent"], Tree)
 
 
 def test_a_relation_to_another_table_is_reported_exactly_as_before() -> None:

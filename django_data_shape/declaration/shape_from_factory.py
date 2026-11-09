@@ -223,10 +223,16 @@ def _self_key(
     if _is_unique(model, field):
         reasons.append("a unique key cannot give a row several children")
     if reasons:
+        # Leaving a column out is a shape only where it may be NULL: ``Table`` refuses
+        # the undeclared required one, so the remedy differs by ``field.null``.
+        remedy = (
+            "Leave it out and fill it after the build."
+            if field.null
+            else "Make the column null=True, or fill the table with a Projection."
+        )
         return None, (
             f"{' and '.join(reasons)}, so no shape can fill it: a Tree is refused on this "
-            "column and a FanOut reads keys from a table still empty at load time. Leave it "
-            "out and fill it after the build."
+            f"column and a FanOut reads keys from a table still empty at load time. {remedy}"
         )
     roots = sum(value is None for value in values)
     if roots in (0, rows):
