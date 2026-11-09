@@ -18,7 +18,7 @@ from typing import Any, NamedTuple, cast
 import django
 import pytest
 from django.db import connection, models
-from django.db.models import Q, UniqueConstraint
+from django.db.models import F, Q, UniqueConstraint, Value
 from django.test.utils import isolate_apps
 
 from django_data_shape import (
@@ -1488,3 +1488,253 @@ def test_leaving_it_out_is_not_offered_where_another_column_reads_it(reader: Any
     )
 
     assert "left out of the shape" not in message
+
+
+# A condition the decoder used to read as never met: isnull was skipped, and a Value or an F()
+# was compared to a value as though it were one. Each was accepted and loads as its comment
+# says. An expression is now read as possibly met by any value but NULL, and never as one key.
+_READ_AS_POSSIBLY_MET = (
+    # Loads 0 of 20.
+    _Case("isnull_true_left_out", ("company",), Q(state__isnull=True), {"company": FanOut(Zipf())}),
+    # Loads 5 of 20.
+    _Case(
+        "isnull_true_over_a_tree",
+        ("company",),
+        Q(prev__isnull=True),
+        {"company": FanOut(Zipf()), "prev": _tree()},
+    ),
+    # Loads 0 of 20.
+    _Case(
+        "isnull_false_drawn",
+        ("company",),
+        Q(label__isnull=False),
+        {"company": FanOut(Zipf()), "label": _skew()},
+    ),
+    # Loads 0 of 20. Not NULL is every key, which parents= leaves in.
+    _Case(
+        "not_null_key_over_narrowed_parents",
+        ("company",),
+        Q(owner__isnull=False),
+        {"company": FanOut(Zipf()), "owner": FanOut(Zipf(), parents=(2, 3))},
+    ),
+    # Loads 0 of 20. A cap of one gives each key one row, and an F() is no one key.
+    _Case(
+        "key_equal_to_another_key_under_a_cap",
+        ("owner",),
+        Q(company=F("other")),
+        {
+            "company": FanOut(Zipf(), max_children=1),
+            "other": _flat(),
+            "owner": FanOut(Zipf()),
+        },
+        rows=30,
+        companies=30,
+        people=3,
+    ),
+    # Loads 18 of 20.
+    _Case(
+        "key_is_an_expression_under_a_cap",
+        ("company",),
+        Q(owner=F("other")),
+        {
+            "company": FanOut(Zipf()),
+            "owner": FanOut(Zipf(), max_children=1),
+            "other": FanOut(Zipf()),
+        },
+        people=300,
+    ),
+    # Loads 0 of 20.
+    _Case(
+        "drawn_equal_to_an_expression",
+        ("company",),
+        Q(state=F("label")),
+        {"company": FanOut(Zipf()), "state": _skew(), "label": _skew()},
+    ),
+    # Loads 0 of 20.
+    _Case(
+        "constant_equal_to_an_expression",
+        ("company",),
+        Q(state=F("label")),
+        {"company": FanOut(Zipf()), "state": Constant("a"), "label": _skew()},
+    ),
+    # Loads 0 of 20.
+    _Case(
+        "value_wrapped_condition",
+        ("company",),
+        Q(state=Value("x")),
+        {"company": FanOut(Zipf()), "state": Skew({"x": 0.1, "y": 0.9})},
+    ),
+    # Each of these two loads 20 of 20 and is refused: the values never meet, and nothing here
+    # reads what an F() compares a row to.
+    _Case(
+        "drawn_apart_from_an_expression",
+        ("company",),
+        Q(state=F("label")),
+        {"company": FanOut(Zipf()), "state": Skew({"x": 1, "y": 1}), "label": _skew()},
+    ),
+    _Case(
+        "key_is_an_expression_its_other_side_left_out",
+        ("company",),
+        Q(owner=F("other")),
+        {"company": FanOut(Zipf()), "owner": FanOut(Zipf(), max_children=1)},
+        people=300,
+    ),
+)
+
+
+@pytest.mark.parametrize("case", _params(_READ_AS_POSSIBLY_MET))
+def test_a_condition_the_decoder_read_as_never_met_is_refused(case: _Case) -> None:
+    message = _refusal(case)
+
+    assert f"uq_{case.name}"[:60] in message
+    assert "matter of the seed" in message or "cannot be kept by a draw" in message
+
+
+def test_a_special_value_on_two_rows_meets_a_not_null_condition() -> None:
+    # Loads 0 of 20. rest=None is outside the condition, and two of each group's rows are not.
+    message = _refusal(
+        _Case(
+            "two_special_rows_not_null",
+            ("company",),
+            Q(state__isnull=False),
+            {
+                "company": FanOut(Zipf()),
+                "state": PerParent("company", last="x", rest=None, count=2),
+            },
+        )
+    )
+
+    assert "puts 'x' on 2 rows of every group" in message
+
+
+# Each loads 20 of 20: nothing they hold meets the condition.
+_PROVABLY_OUTSIDE = (
+    _Case(
+        "isnull_true_never_inside",
+        ("company",),
+        Q(label__isnull=True),
+        {"company": FanOut(Zipf()), "label": _skew()},
+    ),
+    _Case(
+        "isnull_false_left_out", ("company",), Q(state__isnull=False), {"company": FanOut(Zipf())}
+    ),
+    _Case(
+        "key_is_an_expression_left_out",
+        ("company",),
+        Q(owner=F("other")),
+        {"company": FanOut(Zipf()), "other": FanOut(Zipf())},
+        people=300,
+    ),
+    _Case(
+        "null_equal_to_an_expression",
+        ("company",),
+        Q(state=F("label")),
+        {"company": FanOut(Zipf()), "state": Constant(None), "label": _skew()},
+    ),
+    _Case(
+        "left_out_equal_to_an_expression",
+        ("company",),
+        Q(state=F("label")),
+        {"company": FanOut(Zipf()), "label": _skew()},
+    ),
+    _Case(
+        "value_wrapped_condition_outside",
+        ("company",),
+        Q(state=Value("z")),
+        {"company": FanOut(Zipf()), "state": Skew({"x": 0.1, "y": 0.9})},
+    ),
+    _Case(
+        "value_wrapped_key",
+        ("company",),
+        Q(owner=Value(1)),
+        {"company": FanOut(Zipf()), "owner": FanOut(Zipf(), parents=(2, 3, 4))},
+    ),
+    # Value(None) compiles to = NULL, which no row meets, so it is not IS NULL.
+    _Case(
+        "value_none_meets_no_row",
+        ("company",),
+        Q(state__in=[Value(None), Value("z")]),
+        {"company": FanOut(Zipf()), "state": Constant(None)},
+    ),
+)
+
+
+@_ON_POSTGRES
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.parametrize("case", _params(_PROVABLY_OUTSIDE))
+def test_a_condition_nothing_held_can_meet_is_accepted_and_loads(case: _Case) -> None:
+    _assert_loads(case)
+
+
+def _decoded(name: str) -> _Case:
+    return next(case for case in _READ_AS_POSSIBLY_MET if case.name == name)
+
+
+@_ON_POSTGRES
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.parametrize(
+    ("refused", "offered", "withheld", "builds"),
+    [
+        pytest.param(
+            _decoded("key_is_an_expression_under_a_cap"),
+            ("left out of the shape", "Projection"),
+            ("parents= naming", "max_children=1, which", "no null share"),
+            (
+                next(
+                    case
+                    for case in _PROVABLY_OUTSIDE
+                    if case.name == "key_is_an_expression_left_out"
+                ),
+            ),
+            id="expression_key",
+        ),
+        pytest.param(
+            _decoded("not_null_key_over_narrowed_parents"),
+            ("left out of the shape", "Projection"),
+            ("parents= naming", "max_children=1, which", "no null share"),
+            (
+                _decoded("not_null_key_over_narrowed_parents")._replace(
+                    name="not_null_key_left_out", columns={"company": FanOut(Zipf())}
+                ),
+            ),
+            id="not_null_key",
+        ),
+        pytest.param(
+            _decoded("drawn_equal_to_an_expression"),
+            ("state=Constant(None)", "state left out of the shape", "Projection"),
+            ("PerParent(",),
+            tuple(
+                case
+                for case in _PROVABLY_OUTSIDE
+                if case.name in ("null_equal_to_an_expression", "left_out_equal_to_an_expression")
+            ),
+            id="drawn_expression",
+        ),
+        pytest.param(
+            _decoded("isnull_false_drawn"),
+            ("label=Constant(None)", "Projection"),
+            ("PerParent(",),
+            (
+                _decoded("isnull_false_drawn")._replace(
+                    name="not_null_label_held_null",
+                    columns={"company": FanOut(Zipf()), "label": Constant(None)},
+                ),
+            ),
+            id="not_null_draw",
+        ),
+    ],
+)
+def test_a_condition_that_is_no_set_of_values_is_offered_only_what_builds(
+    refused: _Case,
+    offered: tuple[str, ...],
+    withheld: tuple[str, ...],
+    builds: tuple[_Case, ...],
+) -> None:
+    message = _refusal(refused)
+
+    for one in offered:
+        assert one in message
+    for one in withheld:
+        assert one not in message
+    for one in builds:
+        _assert_loads(one)

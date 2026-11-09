@@ -57,6 +57,31 @@ class _LeftOut(Constant):
         return f"<left out, its db_default {self._value!r} in every row>"
 
 
+class _NotNull:
+    """What ``__isnull=False`` asks of a row: any value at all, which a NULL is not."""
+
+    def __repr__(self) -> str:
+        return "NOT NULL"
+
+
+_NOT_NULL = _NotNull()
+
+
+class _Unread:
+    """A condition's member this module cannot evaluate: an ``F()`` or another expression.
+
+    It names another column, or something the database computes, so whether a row meets it
+    depends on what else the row holds. It is read as possibly met by any value but NULL,
+    since a comparison with NULL is never true, and never as one key.
+    """
+
+    def __init__(self, expression: object) -> None:
+        self.expression = expression
+
+    def __repr__(self) -> str:
+        return repr(self.expression)
+
+
 def check_constraints(tables: tuple[Table | Projection, ...]) -> None:
     """Refuse a shape whose row counts contradict the models' own constraints.
 
@@ -1113,7 +1138,7 @@ def _check_conditional(
                 f"many rows with {matching} a ({group}) ends up with. Group the "
                 f"PerParent by one of the constraint's own fan-outs, such as {fanned!r}."
             )
-        if declared.special in values and declared.count > 1:
+        if _produces_any(declared.special, values) is not False and declared.count > 1:
             raise InvalidShape(
                 f"{where} puts {declared.special!r} on {declared.count} rows of every group, and "
                 f"{name} permits one. count= is what N-winners-per-contest is for, and a unique "
@@ -1141,11 +1166,38 @@ def _check_conditional(
     raise InvalidShape(
         f"{name} permits {permits}; {where} is filled by {declared!r}, which {asks}. A rule about "
         "a group cannot be kept by a draw made per row, at any weight -- a smaller share only "
-        "moves the collision later into the load. Declare the column with "
-        f"PerParent({fanned!r}, last={values[0]!r}, rest=...), which puts it on one row of "
-        "each group and makes the count derived from the fan-out rather than chosen beside it. "
-        "rest= has to sit outside the condition, which is the whole of what makes the group's "
-        "other rows invisible to it."
+        f"moves the collision later into the load. {_what_keeps_a_draw_out(table, column, fanned, values)}"
+    )
+
+
+def _what_keeps_a_draw_out(
+    table: Table, column: str, fanned: str, values: tuple[object, ...]
+) -> str:
+    """The remedy for a draw under a condition, which a ``PerParent`` is where it can name one.
+
+    It names the value it puts on one row of each group, so it needs a member to name. A
+    condition that is not a set of values leaves the column holding NULL, which meets none
+    of it: ``isnull_false_left_out`` and ``left_out_equal_to_an_expression`` loaded twenty
+    times in twenty, and so did ``null_equal_to_an_expression``, declared.
+    """
+    if all(_is_literal(value) for value in values):
+        return (
+            f"Declare the column with PerParent({fanned!r}, last={values[0]!r}, rest=...), which "
+            "puts it on one row of each group and makes the count derived from the fan-out rather "
+            "than chosen beside it. rest= has to sit outside the condition, which is the whole of "
+            "what makes the group's other rows invisible to it."
+        )
+    field = cast("Field[Any, Any]", table.model._meta.get_field(column))
+    held_null = (
+        f"{column}=Constant(None) holds NULL, which meets none of it, and so does {column} left "
+        "out of the shape where nothing else fills it. "
+        if field.null
+        else ""
+    )
+    return (
+        f"The condition is no set of values a PerParent could put on one row of each group. "
+        f"{held_null}A table whose rows have to be a particular set is filled by a Projection "
+        "with columns= and sql=."
     )
 
 
@@ -1196,7 +1248,10 @@ def _check_conditional_over_a_tree(
     if not all(_is_drawn_per_row(one) for one in grouped):
         return
     if isinstance(declared, PerParent):
-        if declared.special not in values and _produces_any(declared.rest, values) is False:
+        if (
+            _produces_any(declared.special, values) is False
+            and _produces_any(declared.rest, values) is False
+        ):
             return
         asks = f"is decided per {declared.relation}, which is no group of this constraint"
     elif isinstance(declared, Derivation) or _produces_any(declared, values) is False:
@@ -1316,6 +1371,9 @@ def _can_land_inside(
         if column in fields and _each_null_is_its_own_group(table, name):
             return False
         return bool(declared.null) if isinstance(declared, FanOut) else isinstance(declared, Tree)
+    # A key, which parents= may leave out. Anything else is every key or perhaps any.
+    if not _is_literal(value):
+        return True
     parents = None if isinstance(declared, Tree) else declared.parents
     return parents is None or str(value) in {str(key) for key in parents}
 
@@ -1362,7 +1420,7 @@ def _keeps_one_row_inside_per_group(
        ``isinstance`` apart from that: a derivation also has a ``relation``, and one in the
        constraint is left to the other two nets whichever way this answers.
     """
-    if len(inside) != 1:
+    if len(inside) != 1 or not _is_literal(inside[0]):
         return False
     if isinstance(declared, Tree):
         if inside[0] is None:
@@ -1428,7 +1486,7 @@ def _what_keeps_a_relation_out(
     offers: list[str] = []
     if isinstance(declared, FanOut):
         offers.extend(_what_keeps_a_fan_out_out(table, column, inside, declared, rows_of))
-    elif isinstance(declared, Tree) and len(inside) == 1:
+    elif isinstance(declared, Tree) and len(inside) == 1 and _is_literal(inside[0]):
         offers.append(
             f"{column}=Tree(roots=1/{table.rows + 1}, sizes=...), since one root is one row with NULL"
             if inside[0] is None
@@ -1458,6 +1516,9 @@ def _what_keeps_a_fan_out_out(
     offered only where the parent's row count says so. ``key_over_the_only_parent`` and
     ``key_over_unknown_parents`` are what fail otherwise.
     """
+    # Every key, or any: no parents= leaves those out, and no cap leaves them one row.
+    if not all(_is_literal(value) for value in inside):
+        return []
     keys = [value for value in inside if value is not None]
     parent_rows = _parents_available(table, column, declared, rows_of)
     offers: list[str] = []
@@ -1495,6 +1556,8 @@ def _asks(table: Table, declared: object, values: tuple[object, ...]) -> str:
     understate the ask, and understating it in a refusal is how a caller
     concludes the refusal is wrong.
     """
+    if not all(_is_literal(value) for value in values):
+        return "may meet the condition in any row, which nothing here can rule out"
     if isinstance(declared, Constant):
         # Not through shares(), which keys the value and raises on a dict: a JSONField left
         # out under a dict db_default. test_a_dict_db_default_is_compared_to_a_condition_not_hashed
@@ -1574,10 +1637,7 @@ def _produces_any(declared: object, values: tuple[object, ...]) -> bool | None:
     able to land inside the condition. Unknown stays unknown and is read as a
     yes by the caller, which is the direction a refusal must never get wrong.
     """
-    answers = [_produces(declared, value) for value in values]
-    if any(answer is True for answer in answers):
-        return True
-    return False if all(answer is False for answer in answers) else None
+    return _any_of(_produces(declared, value) for value in values)
 
 
 def _produces(declared: object, value: object) -> bool | None:
@@ -1598,10 +1658,36 @@ def _produces(declared: object, value: object) -> bool | None:
     """
     if isinstance(declared, Constant):
         # Compared, not hashed: shares() keys the value, and a dict db_default is no key.
-        return bool(declared.value(0, 0.0) == value)
+        return _meets(declared.value(0, 0.0), value)
     if isinstance(declared, Categorical):
-        return any(candidate == value for candidate in declared.shares())
-    return None if _is_declaration(declared) else bool(declared == value)
+        return _any_of(_meets(candidate, value) for candidate in declared.shares())
+    return None if _is_declaration(declared) else _meets(declared, value)
+
+
+def _meets(held: object, member: object) -> bool | None:
+    """Whether a row holding ``held`` meets one member of a condition: yes, no, or unknown.
+
+    A member :func:`_members` could not read is met by no NULL, since a comparison with NULL
+    is never true, and by anything else perhaps. ``_NOT_NULL`` is met by anything else.
+    """
+    if isinstance(member, _Unread):
+        return None if held is not None else False
+    if member is _NOT_NULL:
+        return held is not None
+    return bool(held == member)
+
+
+def _any_of(answers: Iterable[bool | None]) -> bool | None:
+    """One provable yes is a yes, every no is a no, and anything else is unknown."""
+    seen = list(answers)
+    if any(answer is True for answer in seen):
+        return True
+    return False if all(answer is False for answer in seen) else None
+
+
+def _is_literal(member: object) -> bool:
+    """Whether a condition's member is one value, which a key or a share can be compared to."""
+    return not isinstance(member, (_NotNull, _Unread))
 
 
 def _is_drawn_per_row(declared: object) -> bool:
@@ -1688,16 +1774,39 @@ def _decode(child: object) -> tuple[str, tuple[object, ...]] | None:
         return None
     lookup, value = child
     column, _, suffix = str(lookup).partition("__")
+    # isnull asks for a NULL or for anything else, which is how Q(column=None) already reads.
+    # Skipping it read every such condition as never met. Django refuses a value that is not
+    # a bool before any index is built.
+    if suffix == "isnull":
+        return column, (None,) if value else (_NOT_NULL,)
     if suffix in ("", "exact"):
-        return column, (value,)
+        return column, _members((value,))
     if suffix != "in" or not isinstance(value, (list, tuple, set, frozenset)):
         return None
     # A set has no order of its own, and this tuple reaches the caller's screen
     # in a refusal message. Ordering it by repr keeps that message the same
     # between runs, which a test asserting on it has to be able to rely on.
-    return column, (
+    return column, _members(
         tuple(value) if isinstance(value, (list, tuple)) else tuple(sorted(value, key=repr))
     )
+
+
+def _members(written: tuple[object, ...]) -> tuple[object, ...]:
+    """The values a condition names, read as what the database compares.
+
+    A ``Value`` is the literal it wraps, and ``Value(None)`` compiles to ``= NULL``, which no
+    row meets, so it names nothing. Any other expression is an :class:`_Unread` member.
+    """
+    members: list[object] = []
+    for one in written:
+        if isinstance(one, Value):
+            if one.value is not None:
+                members.append(one.value)
+        elif hasattr(one, "resolve_expression"):
+            members.append(_Unread(one))
+        else:
+            members.append(one)
+    return tuple(members)
 
 
 def _union(
@@ -1729,6 +1838,8 @@ def _union(
 
 def _matching(column: str, values: tuple[object, ...]) -> str:
     """The condition written the way the caller wrote it, for the message."""
+    if values == (_NOT_NULL,):
+        return f"{column} not NULL"
     if len(values) == 1:
         return f"{column}={values[0]!r}"
     return f"{column} in ({', '.join(repr(value) for value in values)})"
