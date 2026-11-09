@@ -96,8 +96,8 @@ def check_constraints(tables: tuple[Table | Projection, ...]) -> None:
     deciding what an arbitrary predicate matches. A constraint over ``expressions``
     rather than ``fields`` is skipped for the same reason. A conditional
     constraint whose grouping columns include neither a declared ``FanOut`` nor
-    a declared ``Tree`` is skipped because there is no partition here to satisfy
-    it with, so a refusal would name no remedy. A column the shape leaves out whose
+    a declared ``Tree`` is skipped unless a relation fills its condition, because there
+    is no partition here to offer a ``PerParent`` over. A column the shape leaves out whose
     ``db_default`` is an expression other than ``Now()`` is skipped too, because nothing
     here can read what it writes: ``gen_random_uuid()`` keeps a constraint, and
     :func:`_held` says why ``Now()`` is the one that can be read.
@@ -114,8 +114,9 @@ def check_constraints(tables: tuple[Table | Projection, ...]) -> None:
     arrangement refusals never needed it, so they stand, and what drops out is the
     arithmetic in the message. A key under a condition is read the same way where
     ``parents=`` does not settle it, since this runs before any parent's keys are read, so
-    ``Q(owner=99)`` over five people is refused although it would load. See
-    :func:`_check_a_relation_in_a_condition`.
+    ``Q(owner=99)`` over five people is refused although it would load, over a fan-out and
+    over draws alone. So is ``Q(owner=1)`` over a ``Uniform(1, 10**9)``, since a wide draw
+    is not ``Distinct``. See :func:`_check_a_relation_in_a_condition`.
 
     A :class:`~django_data_shape.declaration.projection.Projection` is skipped entirely. Its
     columns are copied along a join rather than drawn from distributions, so
@@ -230,17 +231,24 @@ def _check_one(
         for field in fields
     ):
         return
-    grouping = [table.fields.get(field) for field in fields]
-    if not any(isinstance(one, (FanOut, Tree)) for one in grouping):
-        return
-    # Ahead of the two below, because a relation takes no PerParent and neither of their
-    # readings of what fills the condition can read one.
+    # Ahead of the gate and the two below it. A relation takes no PerParent, so a constraint
+    # with no partition to offer one over loses nothing here, and what this refusal offers
+    # builds over draws alone: test_the_refusal_offers_only_what_builds loads each. The
+    # return is for the reader and no test can hold it, since _produces reads every relation
+    # as False, so the two below would pass one through anyway.
     if isinstance(declared, (FanOut, Paired, Tree)):
         _check_a_relation_in_a_condition(table, name, fields, named, values, declared, rows_of)
+        return
+    grouping = [table.fields.get(field) for field in fields]
+    # Accepted though it fails in COPY, as docs/invariants.md counts. The two below offer a
+    # PerParent or read a family, and there is neither here.
+    # test_what_no_relation_decides_over_draws_is_left_to_the_other_two_nets holds the line.
+    if not any(isinstance(one, (FanOut, Tree)) for one in grouping):
+        return
     # A fan-out first, whatever else is grouped beside it: one row per company
     # is enough to keep (parent, company), so its PerParent stays the remedy
     # even with a tree in the constraint.
-    elif any(isinstance(one, FanOut) for one in grouping):
+    if any(isinstance(one, FanOut) for one in grouping):
         _check_conditional(table, name, fields, capacity, column, values, declared)
     else:
         _check_conditional_over_a_tree(table, name, fields, column, values, declared)
@@ -1208,6 +1216,10 @@ def _check_a_relation_in_a_condition(
     tree in the constraint and a fan-out that leaves no group two rows have answered before
     this runs, and so has a ``Paired`` beside its own relation.
 
+    **No partition in the constraint changes nothing here.** ``Q(owner=1)`` over a drawn
+    ``label`` is the same defect: every row inside draws its label without seeing another,
+    and it loaded 0 times in 20. Every remedy below loads there as well.
+
     **A key the parent does not have is read as able to land inside.** ``Q(owner=99)``
     over five people loads every time and is refused, as ``Uniform(1, 9)`` is under
     ``Q(status="accepted")``: unknown is read as a yes, and this package does not read a
@@ -1294,6 +1306,13 @@ def _keeps_one_row_inside_per_group(
     ``Paired`` grouped by its own relation has one row per group, since partners are
     distinct inside a group, unless NULLs of that relation are one group.
 
+    **The same pairing from its other end.** ``Q(company=1)`` over ``(person)``, with
+    ``person=Paired("company", ...)``, puts many rows inside, all of one company, so every
+    one holds a different person. It loaded twenty times in twenty at four rows of every
+    company over four people. A key holds none of the relation's NULLs, so a null share is
+    no matter, and the rows that hold NULL are the ones refused, since they had no group to
+    keep their partners apart in.
+
     .. warning::
 
        **Conjuncts the coverage gate cannot see.** ``set_under_a_cap`` holds the one value,
@@ -1301,6 +1320,11 @@ def _keeps_one_row_inside_per_group(
        ``cap_of_one_with_nulls_together`` keeps :func:`_no_group_of_two` from standing in.
        ``roots_of_a_flat_tree`` and ``key_over_one_root`` hold the two tree readings apart.
        ``paired_under_another_fan_out`` holds the relation being in the constraint.
+       ``relation_set_over_its_pairing`` holds the one value for the pairing from its other
+       end, ``relation_null_over_its_pairing`` holds ``is not None`` for it, and
+       ``another_key_over_a_pairing`` holds its ``relation == column``. No test holds its
+       ``isinstance`` apart from that: a derivation also has a ``relation``, and one in the
+       constraint is left to the other two nets whichever way this answers.
     """
     if len(inside) != 1:
         return False
@@ -1309,7 +1333,13 @@ def _keeps_one_row_inside_per_group(
             return count_roots(declared, table.rows) <= 1
         return gives_no_row_two_children(declared, table.rows)
     if isinstance(declared, FanOut):
-        return inside[0] is not None and _cannot_collide(table, column, rows_of)
+        return inside[0] is not None and (
+            _cannot_collide(table, column, rows_of)
+            or any(
+                isinstance(paired, Paired) and paired.relation == column
+                for paired in (table.fields.get(field) for field in fields)
+            )
+        )
     return declared.relation in fields and _its_relation_keeps_the_groups(table, name, declared)
 
 

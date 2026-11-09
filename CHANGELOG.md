@@ -35,6 +35,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   key under `max_children=1` or flat sizes, a single key on a tree that gives no row two
   children, and `Q(prev=None)` on one root. A key the parent does not have is refused
   although it loads, since nothing reads a parent's keys before the build.
+- **A relation in a condition is read whatever groups the constraint.** The check above
+  stopped at a constraint with no `FanOut` and no `Tree` in it, so `Q(owner=1)` over a
+  drawn `label`, `Q(prev=1)` over one, and `Q(person=1)` over `(person)` with `person` a
+  `Paired` were accepted and the load failed in `COPY` at some seeds. They are refused
+  now, and everything the message offers loads over draws alone. `Q(company=1)` over
+  `(person)` with `person` paired on `company` is accepted wherever it stands, since one
+  company's partners are distinct, and that takes back a refusal beside another `FanOut`.
+  `Q(owner=99)`, a key over a `Uniform(1, 10**9)` and a key on a `Paired` whose relation
+  has one parent are refused although each loads. A condition no relation fills over
+  draws alone stays accepted, and the invariants page counts how often it loads.
 - **A `Paired` beside its own relation keeps a conditional uniqueness.** Its partners are
   distinct inside each group, so `(company, person)` holds under any condition, and
   `Q(status="on")` over that pair is no longer refused. `Q(person=1)` over `company` holds
