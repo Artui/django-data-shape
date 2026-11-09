@@ -707,7 +707,10 @@ def _a_flat_tree(table: Table, name: str) -> str:
     """The tree a refusal may offer to keep this constraint on its own, in words.
 
     One that gives no row two children, and under ``nulls_distinct=False`` one with a
-    single root as well, since the roots' NULLs are then one group.
+    single root as well, since the roots' NULLs are then one group. The three tree
+    refusals share this one reading: ``test_roots_counted_as_one_group_collide_beside_a_fan_out``
+    fails if the root clause is never offered, and ``test_a_tree_beside_a_fan_out_is_refused``
+    if it is always offered.
     **1/(rows + 1), not 1/rows**: :func:`count_roots` reads a share through its decimal
     spelling, and ``repr(1/11)`` is a hair above the fraction, so ``1/rows`` is two roots
     at rows 11, 13, 15, 22, 26 and on. ``test_the_one_root_a_refusal_offers_is_one_root_at_any_row_count``
