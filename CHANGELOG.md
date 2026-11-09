@@ -14,8 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a `UniqueConstraint` and `unique_together` over the one column, though the proof that
   keeps a uniqueness beside other columns holds for it alone, as `FanOut(max_children=1)`
   holds on a unique key to another table. It now builds on Postgres under each spelling.
-  Any other sizes stay refused, and the refusal names the flat `Tree`. A self-key that
-  refuses NULL stays refused, and so does a tree of many roots under
+  A tree whose sizes can give a row two children stays refused, and the refusal names
+  the flat `Tree`; one with at most one child is accepted whatever its sizes weigh. A
+  self-key that refuses NULL stays refused, and so does a tree of many roots under
   `nulls_distinct=False`, whose roots collide among themselves.
 - **`shape_from_factory` writes that `Tree` for a nullable unique self-key,** with the
   root share it measured, instead of a comment and a finding. A self-key that refuses
@@ -50,7 +51,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Q(status="on")` over that pair is no longer refused. `Q(person=1)` over `company` holds
   for the same reason. Under `nulls_distinct=False` with a null share on the relation the
   proof does not hold, and those are refused.
-
 - **`shape_from_factory` writes source that compiles beside a commented column.** A
   column reported as `name=Sequential(...)  # every value distinct,` put the comma
   inside the comment, so any column after it was a `SyntaxError`; the same held for a
@@ -59,7 +59,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   columns it draws.** `Folder`, unique on `(parent, name)`, with repeated names got
   `parent=Tree(...)` and `name=Skew(...)` and no finding, and `Shape` then refused it.
   A finding now names the constraint (or the `unique_together`) and the remedy: a
-  column distinct in every row, or a `Projection`.
+  column distinct in every row, `max_children=1` on a key to another table, or a
+  `Projection`. A unique self-key gets none, since its flat tree keeps the constraint.
 - **A `UniqueConstraint` or `unique_together` that spells the attname is read.**
   `fields=["parent_id"]` was not the column `parent`, so `shape_from_factory` wrote
   `sizes=Zipf()` for a unique self-key, which `Shape` refuses. `fields=["parent_id",
@@ -79,7 +80,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `gen_random_uuid()` loads.
 - **A `unique=True` column left to a `db_default` of one value is refused.** No check
   read that spelling, so a literal and `Now()` were accepted and died in `COPY` at the
-  second row.
+  second row. The refusal names a `Sequential` for the field's type.
 - **A condition reads a column left out too.** `Q(status=None)` over one puts every
   row inside the condition, and so does `Q(status="on")` over a `db_default` of
   `"on"`. Both were accepted and died in `COPY`; both are refused.
@@ -88,8 +89,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   has one more group, so its cap of one is no proof and the pigeonhole counts the
   NULL as one more parent. Shapes resting on either died in `COPY` and are refused.
 - **A `FanOut` alone under a `UniqueConstraint` or a `unique_together` is refused**
-  as it is on a `unique=True` column, naming `max_children=1`. No check read that
-  spelling, and `FanOut(Zipf())` died in `COPY`.
+  as it is on a `unique=True` column, naming `max_children=1`, and no null share under
+  `nulls_distinct=False`. No check read that spelling, and `FanOut(Zipf())` died in
+  `COPY`.
 - **A `Distinct` column keeps a constraint whatever else is in it.**
   `(company, code)` under a condition and `(company, person, code)` were refused
   with `code=Sequential(1, 1)`, and both load.
@@ -97,8 +99,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the two fan-outs, which did not read the proof the others read, and it loads.
 - **One root is a proof under `nulls_distinct=False`.** A `Tree` with one root and
   sizes of one value holds one NULL and no repeated key, and it was refused whatever
-  it was beside. It loads, and a refusal there now names it. A tree of many roots
-  stays refused.
+  it was beside. It loads, and a refusal there now names it as `roots=1/(rows + 1)`,
+  since `1/rows` reads as two roots at some counts, 11 and 13 among them. A tree of many
+  roots stays refused.
 - **A fan-out that gives no group two rows keeps a conditional constraint.**
   `FanOut(Zipf(), max_children=1)` and flat sizes were refused under a condition with a
   drawn or constant column, and both load. A `null` share under `nulls_distinct=False`

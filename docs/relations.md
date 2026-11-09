@@ -540,7 +540,8 @@ either. Under `nulls_distinct=False` two roots do, so what is accepted there is 
 root, with `roots` at most `1 / (rows + 1)`, and sizes of one value. `1 / rows` is two
 roots at some row counts, 11 and 13 among them, because a share is read through its
 decimal spelling and `repr(1 / 11)` is a hair above the fraction.
-`shape_from_factory` writes this tree for a unique self-key.
+`shape_from_factory` writes the flat tree for a unique self-key where each NULL is its
+own group, and names the one-root tree in a finding under `nulls_distinct=False`.
 
 A `Tree` has no `childless`, `null` or `max_children` either, and no depth of
 its own. It needs no other table, so it adds
