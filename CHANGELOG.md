@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`shape_from_factory` writes a `Tree` for a key to the model's own table.** It
+  suggested `FanOut(Zipf())` for every relation, which `Table` has refused on a
+  self-referential key since 0.25.0, so the report for a category's parent could
+  not be built. It now writes `Tree(roots=<measured NULL share>, sizes=Zipf())`,
+  the share counted from the rows left without a parent rather than as one more
+  parent. A key the factory never left NULL, or always did, has no share a
+  `Tree` takes, and gets `roots=0.05` -- the figure `Table`'s own refusal offers
+  -- with a finding that it was not measured. A key no shape can fill, one that
+  refuses NULL or is unique by `unique=True`, a `UniqueConstraint` or
+  `unique_together`, gets a comment where the declaration would be and a finding
+  saying why, instead of a `Tree` that `Table` refuses. A key to another table is
+  reported exactly as before.
+
 ## [0.25.0] — 2026-11-07
 
 ### Added

@@ -1321,3 +1321,17 @@ class Chain(models.Model):
         constraints = [
             models.UniqueConstraint(fields=["previous"], name="one_link_after_each"),
         ]
+
+
+class Relay(models.Model):
+    """A self-reference unique through ``Meta.unique_together`` on the column alone.
+
+    The third spelling of the same fact, after ``unique=True`` and a
+    ``UniqueConstraint``: Django keeps it on ``_meta.unique_together``, where
+    neither of the others looks.
+    """
+
+    previous = models.ForeignKey("self", null=True, on_delete=models.CASCADE, related_name="+")
+
+    class Meta:
+        unique_together = [("previous",)]
