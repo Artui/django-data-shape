@@ -11,15 +11,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **A `Tree` beside a `FanOut` or a second `Tree` under one uniqueness is refused
   at declaration.** Both were accepted and left to `COPY`: `(parent, company)` over
-  `FanOut(Zipf())` loaded in 0 of 20 seeds at 200 rows over 50 companies, and two
-  self-keys in 0 of 20. A `Distinct` column keeps the constraint, and so does a
-  fan-out that gives no parent two rows; a `Projection` fills the rest.
+  `FanOut(Zipf())` loaded in 0 of 20 seeds at 200 rows over 50 companies on a table
+  named `testapp_branch`, and two self-keys in 0 of 20 on `testapp_edge`. A `Distinct`
+  column keeps the constraint, and so do a fan-out that gives no parent two rows and a
+  tree that gives no row two children; a `Projection` fills the rest.
 - **A `Tree` in a conditional `UniqueConstraint` is refused at declaration** when a
-  row can land inside the condition; a 10% share loaded in 3 of 20 seeds. The
-  refusal names what a tree accepts rather than `PerParent`, which `Table` refuses
-  over one. A constraint grouping a `Tree` with a `FanOut` keeps the `PerParent`
+  row can land inside the condition; a 10% share loaded in 3 of 20 seeds on a table
+  named `testapp_reply`. The refusal names what a tree accepts rather than
+  `PerParent`, which `Table` refuses over one. A constraint grouping a `Tree` with a `FanOut` keeps the `PerParent`
   remedy, and its message now names the fan-out wherever it sits in the constraint,
   where it used to name the first field.
+- **A `Tree` that gives no row two children is accepted beside drawn columns,** where
+  0.25.0 refused it. Sizes of one value, such as `Constant(1)`, give each parent one
+  child, and at most one non-root row has no sibling at all, so `(parent, name)` over
+  such a tree cannot collide whatever the seed. A `Tree` alone under a uniqueness is
+  still refused.
 - **The `Tree` measurements in `docs/relations.md` name their table and field,**
   because draw streams are keyed on those names and the same declaration on another
   column is a different tree. The share of children that fall back to choosing by

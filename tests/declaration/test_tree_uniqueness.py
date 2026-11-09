@@ -1,8 +1,8 @@
 """A tree under a uniqueness that nothing arranges, refused when the shape is declared.
 
 The models are declared here under ``isolate_apps`` rather than in the test app,
-because every test below stops at ``Shape()`` and none needs a table. It also
-keeps this module importable against a tree without the refusals, where each
+because every test below stops at ``Shape()`` or at the plan and none needs a
+table. It also keeps this module importable against a tree without the refusals, where each
 refusal test fails on its assertion rather than dying at import.
 """
 
@@ -26,7 +26,8 @@ from django_data_shape import (
     Tree,
     Zipf,
 )
-from tests.testapp.models import Company, Person
+from django_data_shape.relations.resolve_tree import resolve_tree
+from tests.testapp.models import Company, Folder, Person
 
 with isolate_apps("tests.testapp"):
 
@@ -183,6 +184,158 @@ def _assert_names_only_what_a_tree_accepts(message: str) -> None:
     assert "Projection" in message
 
 
+# A tree that provably gives no row two children.
+
+
+def _flat() -> Tree:
+    return Tree(roots=0.05, sizes=Constant(1))
+
+
+def _folders(parent: Tree, rows: int) -> Table:
+    return Table(Folder, rows=rows, parent=parent, name=Skew({"a": 1, "b": 1}), code=Constant("c"))
+
+
+@pytest.mark.parametrize("rows", [1, 2, 3, 20, 21, 199, 200, 1000])
+@pytest.mark.parametrize("roots", [0.01, 0.05, 0.5, 0.95])
+@pytest.mark.parametrize("seed", [0, 7])
+@pytest.mark.parametrize(
+    ("table", "field"),
+    [("testapp_branch", "parent"), ("testapp_edge", "left"), ("testapp_folder", "parent")],
+)
+def test_a_flat_tree_gives_no_row_two_children(
+    rows: int, roots: float, seed: int, table: str, field: str
+) -> None:
+    # What the exemptions below stand on, read from what the build uses. The
+    # table and field are varied because every other tree figure moves with them.
+    plan = resolve_tree(Tree(roots=roots, sizes=Constant(1)), rows, seed, table, field)
+    parents = [plan.parent_for(row) for row in range(rows)]
+    children = [parent for parent in parents if parent is not None]
+
+    assert len(children) == len(set(children))
+
+
+def test_a_flat_tree_of_no_weight_is_refused_when_it_is_resolved() -> None:
+    # Reads as one value, so no constraint refuses it, and it has no children to
+    # share out: the refusal is the build's, before any row reaches COPY.
+    Shape(_folders(Tree(roots=0.05, sizes=Constant(0)), rows=20))
+
+    with pytest.raises(InvalidShape, match="sum to 0.0"):
+        resolve_tree(Tree(roots=0.05, sizes=Constant(0)), 20, 0, "testapp_folder", "parent")
+
+
+def test_a_flat_tree_beside_a_fan_out_is_accepted() -> None:
+    # Five parents cannot make the fan-out's own proof at 500 rows, so the tree
+    # is the only thing keeping this constraint.
+    Shape(_companies(5), Table(Branch, rows=500, parent=_flat(), company=FanOut(Zipf())))
+
+
+def test_a_flat_tree_beside_a_second_tree_is_accepted_in_either_position() -> None:
+    Shape(Table(Edge, rows=500, left=_flat(), right=_tree()))
+    Shape(Table(Edge, rows=500, left=_tree(), right=_flat()))
+
+
+def test_a_flat_tree_beside_a_fan_out_and_a_draw_is_accepted() -> None:
+    Shape(
+        _companies(5),
+        Table(
+            Unit,
+            rows=500,
+            parent=_flat(),
+            company=FanOut(Zipf()),
+            label=Skew({"a": 1, "b": 1}),
+        ),
+    )
+
+
+def test_a_flat_tree_beside_a_draw_is_accepted() -> None:
+    Shape(_folders(_flat(), rows=500))
+
+
+def test_a_skew_of_one_value_is_as_flat_as_a_constant() -> None:
+    Shape(_folders(Tree(roots=0.05, sizes=Skew({3: 1})), rows=500))
+
+
+def test_a_flat_tree_in_a_conditional_uniqueness_is_accepted() -> None:
+    Shape(Table(Reply, rows=500, parent=_flat(), status=Constant("accepted")))
+    Shape(Table(Reply, rows=500, parent=_flat(), status=Skew({"accepted": 1, "open": 1})))
+
+
+def test_a_flat_tree_beside_a_fan_out_in_a_conditional_uniqueness_is_accepted() -> None:
+    # This constraint has a fan-out in it, so it would go to the fan-out's
+    # conditional check, and the tree answers it before that.
+    Shape(
+        _companies(),
+        Table(
+            Grouped,
+            rows=200,
+            parent=_flat(),
+            company=FanOut(Zipf()),
+            status=Skew({"live": 1, "dead": 1}),
+        ),
+    )
+
+
+def test_a_flat_tree_alone_under_a_uniqueness_stays_refused() -> None:
+    # A unique self-key is refused whatever fills it, on the field and spelled
+    # as a constraint alike, so the proof is not read for a tree with nothing
+    # beside it.
+    with isolate_apps("tests.testapp"):
+
+        class Alone(models.Model):
+            previous = models.ForeignKey(
+                "self", null=True, on_delete=models.CASCADE, related_name="+"
+            )
+
+            class Meta:
+                app_label = "testapp"
+                constraints = [
+                    models.UniqueConstraint(fields=["previous"], name="one_link_alone"),
+                ]
+
+        message = _refusal(Table(Alone, rows=50, previous=_flat()))
+
+    assert "one_link_alone" in message
+
+
+def test_a_tree_of_two_sizes_is_not_flat() -> None:
+    # Enumerable is not enough: the proof needs every row to weigh the same.
+    tree = Tree(roots=0.05, sizes=Skew({1: 1, 50: 1}))
+
+    for message in (
+        _refusal(_companies(), Table(Branch, rows=500, parent=tree, company=FanOut(Zipf()))),
+        _refusal(_folders(tree, rows=500)),
+        _refusal(Table(Reply, rows=500, parent=tree, status=Constant("accepted"))),
+    ):
+        assert "Constant(1)" in message
+
+
+def test_a_tree_with_one_child_has_no_siblings_to_collide() -> None:
+    # 19 roots of 20 leave one child, whatever the sizes weigh.
+    tree = Tree(roots=0.95, sizes=Zipf())
+
+    Shape(_companies(), Table(Branch, rows=20, parent=tree, company=FanOut(Zipf())))
+    Shape(_folders(tree, rows=20))
+    Shape(Table(Reply, rows=20, parent=tree, status=Constant("accepted")))
+
+
+@pytest.mark.parametrize("rows", [1, 2])
+def test_a_table_too_small_for_siblings_is_accepted(rows: int) -> None:
+    Shape(
+        _companies(),
+        Table(Branch, rows=rows, parent=_tree(), company=FanOut(Zipf())),
+    )
+
+
+def test_a_tree_with_two_children_can_give_them_one_parent() -> None:
+    # 18 roots of 20 leave two, and that is where the arithmetic stops proving it.
+    message = _refusal(
+        _companies(),
+        Table(Branch, rows=20, parent=Tree(roots=0.9, sizes=Zipf()), company=FanOut(Zipf())),
+    )
+
+    assert "one_branch_per_pair" in message
+
+
 # A tree beside a fan-out.
 
 
@@ -195,6 +348,7 @@ def test_a_tree_beside_a_fan_out_is_refused() -> None:
     assert "Branch.parent is a Tree" in message
     assert "Branch.company is a fan-out" in message
     assert "max_children=1" in message
+    assert "Constant(1)" in message
     _assert_names_only_what_a_tree_accepts(message)
 
 
@@ -397,6 +551,7 @@ def test_a_tree_in_a_conditional_uniqueness_is_refused() -> None:
     assert "Reply.parent is a Tree" in message
     assert "Reply.status=" in message
     assert "asks for 20 of them" in message
+    assert "Constant(1)" in message
     _assert_names_only_what_a_tree_accepts(message)
 
 

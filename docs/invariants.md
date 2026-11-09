@@ -175,25 +175,37 @@ how many companies there are.
 - **A `Tree` beside drawn columns is refused the same way**, as in names
   unique among siblings: a tree gives a row several children whenever its sizes
   say so, and a drawn value cannot see its siblings. A tree's families are not
-  ranges of rows, so no derivation is decided per family; the exemption is
-  `Distinct`, and a `Tree` alone under a `UniqueConstraint` is refused as a
-  unique column is.
+  ranges of rows, so no derivation is decided per family. The exemptions are
+  `Distinct` and a tree that provably gives no row two children (below), and a
+  `Tree` alone under a `UniqueConstraint` is refused as a unique column is,
+  whatever its sizes.
 - **A `Tree` beside a `FanOut`, or two `Tree`s, under one constraint are refused**
   for the reason two fan-outs are: each column is computed from the row index
-  and neither sees the other. Measured over twenty seeds, a tree beside
-  `FanOut(Zipf())` loaded 0 times at 200 rows over 50 companies and 10 times at
-  50 rows over 1,000; two trees loaded 0 times at 200 rows. `Paired` is refused
-  over a tree, so what keeps the constraint is a `Distinct` column, a fan-out
-  that gives no parent two rows (`max_children=1`, or the proof flat sizes make),
-  leaving the tree out, or a `Projection` with `columns=` and `sql=`.
+  and neither sees the other. Measured over twenty seeds on tables named
+  `testapp_branch` and `testapp_edge`, a tree beside `FanOut(Zipf())` loaded 0
+  times at 200 rows over 50 companies and 10 times at 50 rows over 1,000; two
+  trees loaded 0 times at 200 rows. The draws are keyed on the names, so another
+  table's 10 is another number. `Paired` is refused over a tree, so what keeps the
+  constraint is a `Distinct` column, a fan-out that gives no parent two rows
+  (`max_children=1`, or the proof flat sizes make), a tree that gives no row two
+  children, leaving the tree out, or a `Projection` with `columns=` and `sql=`.
 - **A `Tree` in a conditional `UniqueConstraint` is refused** when a row can land
   inside the condition, as in one accepted reply per parent. A per-row draw
-  cannot keep a rule about a family at any weight: a 10% share loaded 3 times in
-  20 at 200 rows and a 2.5% share 14. `PerParent` is refused over a tree, so what
-  keeps the constraint is a filling of the column that stays outside the
-  condition, a `Distinct` column in the constraint, or a `Projection`. A `Tree`
-  beside a `FanOut` keeps the `PerParent` remedy over that fan-out, because one
-  row per company is enough to keep `(parent, company)`.
+  cannot keep a rule about a family at any weight: on a table named
+  `testapp_reply`, a 10% share loaded 3 times in 20 at 200 rows and a 2.5% share
+  14, and another name moves those too. `PerParent` is refused over a tree, so
+  what keeps the constraint is a filling of the column that stays outside the
+  condition, a `Distinct` column in the constraint, a tree that gives no row two
+  children, or a `Projection`. A `Tree` beside a `FanOut` keeps the `PerParent`
+  remedy over that fan-out, because one row per company is enough to keep
+  `(parent, company)`.
+- **A tree that gives no row two children keeps all three of those constraints**,
+  and it is a proof rather than a probability. Sizes holding one value, such as
+  `Constant(1)`, weigh every row the same, so the largest remainder gives the
+  first rows one child each and room lasts until the last child is placed. At most
+  one non-root row, by arithmetic on `roots`, has no sibling whatever the sizes
+  weigh. Neither depends on the seed or the table's name, and a load test holds
+  the first of them on a real table.
 - **Enough room is not a way to fill it.** An unconditional constraint over
   **two fan-outs** — the through table of a many-to-many — passes the pigeonhole
   comfortably, because the product of two parent counts dwarfs the row count,
