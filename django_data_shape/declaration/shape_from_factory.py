@@ -237,7 +237,7 @@ def _self_key(
         # them as ``rows=...``, so it can name this tree and cannot write it down.
         return None, (
             "a constraint counting every NULL as one value has room for one root, so a Tree "
-            "fills it only with one root and sizes of one value, Tree(roots=1/rows, "
+            "fills it only with one root and sizes of one value, Tree(roots=1/(rows + 1), "
             "sizes=Constant(1)) at the rows you build, and the share a factory measures is no "
             "use. Leaving it out holds one NULL many times. Write that tree, or fill the table "
             "with a Projection."
@@ -363,19 +363,48 @@ def _composite_finding(
     uniqueness on its own and ``Sequential`` is written for it. Where none is, the
     others are drawn per row from a distribution, and siblings of one parent cannot
     see what each other drew.
+
+    **A key to another table is not a column to make distinct.** It is written as a
+    fan-out, which ``Sequential`` cannot fill, so the remedy for it is a cap of one,
+    which gives no parent two rows, and a ``Projection`` for either kind.
     """
     findings = []
     for label, names in _composite_uniqueness(model, field):
         others = [name for name in names if name != field.name]
         if any(_is_distinct(*columns[name]) for name in others):
             continue
-        drawn = ", ".join(others)
+        keys = [name for name in others if columns[name][0].is_relation]
+        plain = [name for name in others if not columns[name][0].is_relation]
+        why = [
+            *([f"{', '.join(keys)} is a fan-out, which draws its parent per row"] if keys else []),
+            *(
+                [
+                    f"{', '.join(plain)} is declared as a draw rather than as a column distinct "
+                    "in every row"
+                ]
+                if plain
+                else []
+            ),
+        ]
+        remedies = [
+            *(
+                [f"give {', '.join(keys)} max_children=1, which gives no parent two rows"]
+                if keys
+                else []
+            ),
+            *(
+                [f"make {', '.join(plain)} distinct in every row (Sequential does)"]
+                if plain
+                else []
+            ),
+        ]
+        advice = "; ".join(
+            [*remedies, "or fill the table with a Projection with columns= and sql="]
+        )
         findings.append(
-            f"{label} makes ({', '.join(names)}) unique together, and {drawn} is declared as a "
-            "draw rather than as a column distinct in every row. Table refuses a Tree beside a "
-            "draw under it, because siblings of one parent cannot see what each other drew. "
-            f"Make {drawn} distinct in every row -- Sequential does -- or fill the table with "
-            "a Projection with columns= and sql=."
+            f"{label} makes ({', '.join(names)}) unique together, and {' and '.join(why)}. "
+            "Shape refuses a Tree beside a draw under it, because siblings of one parent cannot "
+            f"see what each other drew. {advice[0].upper()}{advice[1:]}"
         )
     return findings
 
@@ -419,7 +448,9 @@ def _render(
         extra: list[str] = []
         if field.is_relation and field.related_model is model:
             declaration, finding = _self_key(model, field, values, len(made))
-            if declaration is not None:
+            # A unique key is written with sizes of one value, a flat tree, which gives no
+            # row two children and so keeps any uniqueness that includes the key itself.
+            if declaration is not None and not _is_unique(model, field):
                 extra = _composite_finding(model, field, columns)
         elif field.is_relation:
             declaration, finding = _relation(values, len(made))

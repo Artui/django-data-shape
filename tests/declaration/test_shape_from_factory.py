@@ -25,6 +25,8 @@ from tests.testapp.models import (
     Exclusive,
     Folder,
     Mirror,
+    NamedMirror,
+    OnlyChild,
     Project,
     Relay,
     RootlessLink,
@@ -498,7 +500,7 @@ def test_a_self_key_whose_nulls_count_as_one_is_still_a_comment_and_a_finding() 
     assert "previous=" not in report
     assert "    # previous: nothing written here" in report
     assert "TiedLink.previous: a constraint counting every NULL as one value" in report
-    assert "Tree(roots=1/rows, sizes=Constant(1))" in report
+    assert "Tree(roots=1/(rows + 1), sizes=Constant(1))" in report
     assert "Projection" in report
     assert "no shape can fill" not in report
     assert "null=True" not in report
@@ -506,9 +508,12 @@ def test_a_self_key_whose_nulls_count_as_one_is_still_a_comment_and_a_finding() 
 
 @_NEEDS_NULLS_DISTINCT
 def test_the_tree_the_finding_names_under_nulls_counted_as_one_is_accepted() -> None:
-    # The finding is true at the rows it describes, and false one root later.
-    rows = 50
-    Shape(Table(TiedLink, rows=rows, previous=Tree(roots=1 / rows, sizes=Constant(1))))
+    # The finding is true at the rows it describes, and false one root later. Rows 11 is
+    # where roots=1/rows is already two roots, so the finding writes 1/(rows + 1).
+    rows = 11
+    Shape(Table(TiedLink, rows=rows, previous=Tree(roots=1 / (rows + 1), sizes=Constant(1))))
+    with pytest.raises(InvalidShape):
+        Shape(Table(TiedLink, rows=rows, previous=Tree(roots=1 / rows, sizes=Constant(1))))
     with pytest.raises(InvalidShape):
         Shape(Table(TiedLink, rows=rows, previous=Tree(roots=2 / rows, sizes=Constant(1))))
 
@@ -624,6 +629,12 @@ def _named_factory(
     return factory
 
 
+def _the_finding_about(report: str, column: str) -> str:
+    """The one finding line the report wrote about ``Model.column``."""
+    (line,) = (one for one in report.splitlines() if one.startswith(f"#   - {column}:"))
+    return line
+
+
 def _compiles(report: str) -> None:
     """The report is source: it has to parse, whatever it says."""
     compile(report, "<report>", "exec")
@@ -727,7 +738,60 @@ def test_a_self_key_beside_a_relation_in_the_uniqueness_is_still_a_finding() -> 
     report = shape_from_factory(factory, samples=20)
 
     assert "company=FanOut(Zipf())" in report
-    assert "company is declared as a draw" in report
+    finding = _the_finding_about(report, "Mirror.parent")
+    # A key to another table is a fan-out, which Table refuses to fill with Sequential, so
+    # the remedy is a cap of one that gives no parent two rows, and a Projection.
+    assert "company is a fan-out" in finding
+    assert "company is declared as a draw" not in finding
+    assert "max_children=1" in finding
+    assert "Sequential" not in finding
+    assert "Projection" in finding
+    assert "Shape refuses" in finding
+    assert "Table refuses" not in finding
+    # The finding is true: the source as written is refused, and with the cap it is not.
+    companies = Table(Company, rows=100, name=Constant("c"))
+    with pytest.raises(InvalidShape):
+        Shape(companies, _built(report, Mirror))
+    capped = report.replace("company=FanOut(Zipf())", "company=FanOut(Zipf(), max_children=1)")
+    Shape(companies, _built(capped, Mirror))
+
+
+def test_a_self_key_beside_a_key_and_a_plain_column_in_the_uniqueness_gets_both_remedies() -> None:
+    made: list[NamedMirror] = []
+
+    def factory() -> NamedMirror:
+        row = NamedMirror.objects.create(
+            company=Company.objects.create(name="c"),
+            parent=made[-1] if made else None,
+            name="same",
+        )
+        made.append(row)
+        return row
+
+    report = shape_from_factory(factory, samples=20)
+
+    finding = _the_finding_about(report, "NamedMirror.parent")
+    assert "company is a fan-out" in finding
+    assert "name is declared as a draw" in finding
+    assert "company max_children=1" in finding
+    assert "make name distinct in every row (Sequential does)" in finding
+
+
+def test_a_unique_self_key_needs_no_finding_about_a_composite_uniqueness() -> None:
+    """The flat tree it writes gives no row two children, so ``(parent, name)`` holds.
+
+    Fails without ``not _is_unique`` at the call in ``_render``: the names repeat, so the
+    finding told the caller to make them distinct on a source ``Shape`` accepts.
+    """
+    report = shape_from_factory(
+        _named_factory(OnlyChild, lambda n: f"n{n % 3}", code=_one_code), samples=20
+    )
+
+    assert "parent=Tree(roots=" in report
+    assert "sizes=Constant(1)" in report
+    assert "unique together" not in report
+    assert "one_name_per_only_child" not in report
+    Shape(_built(report, OnlyChild))
 
 
 @pytest.mark.parametrize("model", [SpelledChain, SpelledRelay])

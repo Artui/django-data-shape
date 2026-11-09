@@ -2,10 +2,21 @@
 
 from __future__ import annotations
 
+import datetime
 from collections.abc import Iterable
 from typing import Any, cast
 
-from django.db.models import NOT_PROVIDED, Field, Model, Q, UniqueConstraint, Value
+from django.db.models import (
+    NOT_PROVIDED,
+    DateField,
+    DateTimeField,
+    Field,
+    Model,
+    Q,
+    UniqueConstraint,
+    UUIDField,
+    Value,
+)
 from django.db.models.functions import Now
 
 from django_data_shape.declaration.invalid_shape import InvalidShape
@@ -17,6 +28,7 @@ from django_data_shape.distributions.bounded import Bounded
 from django_data_shape.distributions.categorical import Categorical
 from django_data_shape.distributions.constant import Constant
 from django_data_shape.distributions.distinct import Distinct
+from django_data_shape.distributions.sequential import Sequential
 from django_data_shape.relations.count_roots import count_roots
 from django_data_shape.relations.fan_out import FanOut
 from django_data_shape.relations.gives_no_row_two_children import gives_no_row_two_children
@@ -738,10 +750,16 @@ def _held(table: Table, column: str) -> object:
 
 
 def _one_root(table: Table) -> str:
-    """The tree a refusal may offer under ``nulls_distinct=False``, in words."""
+    """The tree a refusal may offer under ``nulls_distinct=False``, in words.
+
+    **1/(rows + 1), not 1/rows**: :func:`count_roots` reads a share through its decimal
+    spelling, and ``repr(1/11)`` is a hair above the fraction, so ``1/rows`` is two roots
+    at rows 11, 13, 15, 22, 26 and on. ``test_the_one_root_a_refusal_offers_is_one_root_at_any_row_count``
+    and ``test_the_tree_the_finding_names_under_nulls_counted_as_one_is_accepted`` hold it.
+    """
     return (
-        f"a tree with one root, roots at most 1/{table.rows}, whose sizes hold one value, since "
-        "one root is one NULL"
+        f"a tree with one root, roots at most 1/{table.rows + 1}, whose sizes hold one value, "
+        "since one root is one NULL"
     )
 
 
@@ -817,13 +835,16 @@ def _no_group_of_two(table: Table, name: str, column: str, rows_of: dict[type[Mo
 def _a_fan_out_alone(table: Table, name: str, where: str, column: str) -> str:
     """Why a fan-out alone under this constraint is refused, and what fills the column."""
     fan_out = cast("FanOut", table.fields[column])
+    tied = _a_null_share_counted_together(table, name, [column])
+    # The sentence above says the null share's rows are one group, so an offer that keeps the
+    # share is refused again: test_a_fan_out_alone_offers_what_loads_once_the_null_share_is_gone.
+    no_null = " and no null share" if tied else ""
     return (
         f"{name} permits one row per {where}.{column}, and {fan_out!r} is a partition that exists "
         "to give some parents more than one, so the load fails inside COPY at a row number that "
-        f"moves when the seed does. {_a_null_share_counted_together(table, name, [column])}A "
-        "one-to-one is filled by max_children=1, which caps every parent at one row whatever the "
-        "sizes weigh, or by FanOut(Constant(1)) with no childless share over at least as many "
-        "parents as this table has rows."
+        f"moves when the seed does. {tied}A one-to-one is filled by max_children=1{no_null}, "
+        "which caps every parent at one row whatever the sizes weigh, or by FanOut(Constant(1)) "
+        f"with no childless share{no_null} over at least as many parents as this table has rows."
     )
 
 
@@ -866,6 +887,36 @@ def _check_a_fan_out_on_a_unique_column(table: Table, rows_of: dict[type[Model],
         )
 
 
+def _what_makes_a_unique_column_new(field: Field[Any, Any]) -> str:
+    """The remedy for a unique left-out column, named for the field and loaded at several seeds.
+
+    **A distribution, because a db_default new in every row has one true instance.** A
+    ``DateTimeField`` under ``Now()`` has none: ``clock_timestamp()`` loaded 0 of 3, and
+    the reading of a left-out column in :func:`_held` takes it as one value anyway. A
+    ``UUIDField`` has ``gen_random_uuid()``, and no ``Distinct`` distribution to name.
+    ``DateTimeField`` is a ``DateField``, so it is asked first.
+    ``test_the_distribution_a_unique_left_out_column_is_offered_loads`` builds the three
+    distributions, and ``test_a_unique_uuid_left_out_is_offered_the_db_default_that_is_new_in_every_row``
+    holds the fourth.
+    """
+    if isinstance(field, UUIDField):
+        return (
+            "Give it a db_default the database makes new in every row, such as "
+            "Func(function='gen_random_uuid', output_field=UUIDField())."
+        )
+    if isinstance(field, DateTimeField):
+        start = datetime.datetime(2020, 1, 1, tzinfo=datetime.timezone.utc)
+        offered = Sequential(start, datetime.timedelta(seconds=1))
+    elif isinstance(field, DateField):
+        offered = Sequential(datetime.date(2020, 1, 1), datetime.timedelta(days=1))
+    else:
+        offered = Sequential(1, 1)
+    return (
+        f"Declare the column with a distribution that is Distinct, such as {field.name}={offered!r} "
+        "(Sequential implements Distinct)."
+    )
+
+
 def _check_a_unique_column_left_to_one_value(table: Table) -> None:
     """A ``unique=True`` column the shape leaves to a ``db_default`` of one value.
 
@@ -892,8 +943,7 @@ def _check_a_unique_column_left_to_one_value(table: Table) -> None:
         if field.unique and isinstance(held, _LeftOut) and not held.holds_null:
             raise InvalidShape(
                 f"{table.model.__name__}.{field.name} is unique and holds {held!r}, so "
-                f"{table.rows} rows cannot load. Declare the column with a distribution that is "
-                "Distinct, or give it a db_default the database makes new in every row."
+                f"{table.rows} rows cannot load. {_what_makes_a_unique_column_new(field)}"
             )
 
 
@@ -1394,7 +1444,7 @@ def _what_keeps_a_relation_out(
         offers.extend(_what_keeps_a_fan_out_out(table, column, inside, declared, rows_of))
     elif isinstance(declared, Tree) and len(inside) == 1:
         offers.append(
-            f"{column}=Tree(roots=1/{table.rows}, sizes=...), since one root is one row with NULL"
+            f"{column}=Tree(roots=1/{table.rows + 1}, sizes=...), since one root is one row with NULL"
             if inside[0] is None
             else "a tree with sizes that hold one value, such as Constant(1), which give that row "
             "one child at most"
@@ -1459,6 +1509,11 @@ def _asks(table: Table, declared: object, values: tuple[object, ...]) -> str:
     understate the ask, and understating it in a refusal is how a caller
     concludes the refusal is wrong.
     """
+    if isinstance(declared, Constant):
+        # Not through shares(), which keys the value and raises on a dict: a JSONField left
+        # out under a dict db_default. test_a_dict_db_default_is_compared_to_a_condition_not_hashed
+        # holds it, by a condition the column meets.
+        return f"asks for {table.rows if declared.value(0, 0.0) in values else 0} of them"
     if isinstance(declared, Categorical):
         shares = declared.shares()
         share = sum(weight for value, weight in shares.items() if value in values)
@@ -1555,6 +1610,9 @@ def _produces(declared: object, value: object) -> bool | None:
     A relation never does: comparing its declaration to a key is false for every key,
     so :func:`_check_a_relation_in_a_condition` answers for it instead.
     """
+    if isinstance(declared, Constant):
+        # Compared, not hashed: shares() keys the value, and a dict db_default is no key.
+        return bool(declared.value(0, 0.0) == value)
     if isinstance(declared, Categorical):
         return any(candidate == value for candidate in declared.shares())
     return None if _is_declaration(declared) else bool(declared == value)

@@ -537,7 +537,9 @@ Shape(Table(Link, rows=50_000, previous=Tree(roots=0.05, sizes=Constant(1))))
 
 Each root's NULL is its own group in the unique index, so the roots do not collide
 either. Under `nulls_distinct=False` two roots do, so what is accepted there is one
-root, with `roots` at most `1 / rows`, and sizes of one value.
+root, with `roots` at most `1 / (rows + 1)`, and sizes of one value. `1 / rows` is two
+roots at some row counts, 11 and 13 among them, because a share is read through its
+decimal spelling and `repr(1 / 11)` is a hair above the fraction.
 `shape_from_factory` writes this tree for a unique self-key.
 
 A `Tree` has no `childless`, `null` or `max_children` either, and no depth of

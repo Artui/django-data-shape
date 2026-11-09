@@ -1414,6 +1414,34 @@ class Mirror(models.Model):
         ]
 
 
+class NamedMirror(models.Model):
+    """``Mirror`` with a plain column in the uniqueness beside the key to another table."""
+
+    parent = models.ForeignKey("self", null=True, on_delete=models.CASCADE, related_name="+")
+    company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name="+")
+    name = models.CharField(max_length=50)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["parent", "company", "name"], name="one_named_company_per_mirror"
+            ),
+        ]
+
+
+class OnlyChild(models.Model):
+    """A one-to-one self-key unique together with a name: the key alone keeps it."""
+
+    parent = models.OneToOneField("self", null=True, on_delete=models.CASCADE, related_name="+")
+    name = models.CharField(max_length=50)
+    code = models.CharField(max_length=50)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["parent", "name"], name="one_name_per_only_child"),
+        ]
+
+
 class Coded(models.Model):
     """A self-key beside a uniqueness that does not include it, by constraint and by tuple."""
 

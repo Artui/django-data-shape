@@ -20,6 +20,7 @@ The boundary tests below carry that reasoning inline where they depend on it.
 from __future__ import annotations
 
 import datetime
+import uuid
 from typing import Any, cast
 
 import django
@@ -1560,6 +1561,18 @@ with isolate_apps("tests.testapp"):
         class Meta:
             app_label = "testapp"
 
+    class DatedUnique(models.Model):
+        day = models.DateField(unique=True, **_db_default(datetime.date(2020, 1, 1)))
+
+        class Meta:
+            app_label = "testapp"
+
+    class UuidCodedUnique(models.Model):
+        token = models.UUIDField(unique=True, **_db_default(uuid.UUID(int=1)))
+
+        class Meta:
+            app_label = "testapp"
+
     class TokenedUnique(models.Model):
         token = models.UUIDField(
             null=True,
@@ -1581,6 +1594,32 @@ with isolate_apps("tests.testapp"):
 
         class Meta:
             app_label = "testapp"
+
+    class JsonRule(models.Model):
+        """A JSON column left out under a dict db_default, beside a condition on another dict."""
+
+        company = _key(Company)
+        meta = models.JSONField(**_db_default(models.Value({"a": 1}, models.JSONField())))
+
+        class Meta:
+            app_label = "testapp"
+            constraints = [
+                models.UniqueConstraint(
+                    fields=["company"], condition=models.Q(meta={"b": 2}), name="one_json_rule"
+                ),
+            ]
+
+    class JsonMetRule(models.Model):
+        company = _key(Company)
+        meta = models.JSONField(**_db_default(models.Value({"a": 1}, models.JSONField())))
+
+        class Meta:
+            app_label = "testapp"
+            constraints = [
+                models.UniqueConstraint(
+                    fields=["company"], condition=models.Q(meta={"a": 1}), name="one_json_met_rule"
+                ),
+            ]
 
     class UnstampedRule(models.Model):
         company = _key(Company)
@@ -1708,7 +1747,7 @@ def _people(rows: int = 50) -> Table:
 
 def _one_root_chain(rows: int = 200) -> Tree:
     """A root share that comes to one row, so every other row has a parent of its own."""
-    return Tree(roots=1 / rows, sizes=Constant(1))
+    return Tree(roots=1 / (rows + 1), sizes=Constant(1))
 
 
 def _assert_builds(owned: tuple[type[models.Model], ...], *tables: Table) -> None:
@@ -1980,6 +2019,37 @@ def test_a_fan_out_alone_says_when_the_null_share_is_what_collides() -> None:
     assert "nulls_distinct=False" in str(raised.value)
 
 
+@_ON_POSTGRES
+@_NEEDS_DJANGO_5
+@pytest.mark.django_db(transaction=True)
+def test_a_fan_out_alone_offers_what_loads_once_the_null_share_is_gone() -> None:
+    # Both offers, applied with the null share kept, are refused again: its rows are one
+    # group, and they are enough rows to collide.
+    for kept in (
+        FanOut(Zipf(), max_children=1, null=0.3),
+        FanOut(Constant(1), null=0.3),
+    ):
+        with pytest.raises(InvalidShape):
+            Shape(_companies(), Table(TiedColumn, rows=20, company=kept))
+    with pytest.raises(InvalidShape) as raised:
+        Shape(_companies(), Table(TiedColumn, rows=20, company=FanOut(Zipf(), null=0.3)))
+
+    message = str(raised.value)
+    assert "max_children=1 and no null share" in message
+    assert "FanOut(Constant(1)) with no childless share and no null share" in message
+    # Each offer as written, with the null share dropped, at several seeds.
+    for offered in (FanOut(Zipf(), max_children=1), FanOut(Constant(1))):
+        _assert_builds((TiedColumn,), _companies(), Table(TiedColumn, rows=20, company=offered))
+
+
+def test_a_fan_out_alone_names_no_null_share_where_there_is_none() -> None:
+    with pytest.raises(InvalidShape) as raised:
+        Shape(_companies(), Table(TiedColumn, rows=20, company=FanOut(Zipf())))
+
+    assert "no null share" not in str(raised.value)
+    assert "max_children=1, which caps every parent" in str(raised.value)
+
+
 def test_a_null_share_keeps_the_cap_while_each_null_is_its_own_group() -> None:
     Shape(_companies(), Table(OneColumn, rows=20, company=FanOut(Zipf(), max_children=1, null=0.5)))
     Shape(
@@ -1999,6 +2069,20 @@ def test_a_condition_nothing_can_read_is_left_alone() -> None:
     # can say what it holds, so this is accepted, and a load of it is in
     # test_each_exemption_is_accepted_and_loads.
     Shape(_companies(), Table(TokenCondition, rows=200, company=FanOut(Zipf())))
+
+
+@_NEEDS_DJANGO_5
+def test_a_dict_db_default_is_compared_to_a_condition_not_hashed() -> None:
+    # Constant.shares() keys a dict by the dict, so reading a left-out JSONField through it
+    # raised a TypeError at Shape(). A condition the column never meets leaves the
+    # constraint nothing to count, so it is accepted; one it meets is a refusal.
+    Shape(_companies(), Table(JsonRule, rows=200, company=FanOut(Zipf())))
+
+    with pytest.raises(InvalidShape) as raised:
+        Shape(_companies(), Table(JsonMetRule, rows=200, company=FanOut(Zipf())))
+
+    assert "one_json_met_rule" in str(raised.value)
+    assert "asks for 200 of them" in str(raised.value)
 
 
 def test_a_condition_may_name_a_left_out_key_by_its_attname() -> None:
@@ -2033,6 +2117,55 @@ def test_a_unique_column_left_to_a_db_default_of_one_value_is_refused(
     assert "is unique" in message
     assert f"its db_default {held} in every row" in message
     assert "20 rows" in message
+
+
+@_ON_POSTGRES
+@_NEEDS_DJANGO_5
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.parametrize(
+    ("model", "column", "offered"),
+    [
+        pytest.param(
+            StampedUnique,
+            "at",
+            Sequential(_START, datetime.timedelta(seconds=1)),
+            id="datetime",
+        ),
+        pytest.param(CodedUnique, "code", Sequential(1, 1), id="char"),
+        pytest.param(
+            DatedUnique,
+            "day",
+            Sequential(datetime.date(2020, 1, 1), datetime.timedelta(days=1)),
+            id="date",
+        ),
+    ],
+)
+def test_the_distribution_a_unique_left_out_column_is_offered_loads(
+    model: type[models.Model], column: str, offered: Sequential
+) -> None:
+    # The old offer, a db_default the database makes new in every row, has no true
+    # instance for a DateTimeField: Func(function="clock_timestamp") loaded 0 of 3.
+    with pytest.raises(InvalidShape) as raised:
+        Shape(Table(model, rows=20))
+
+    message = str(raised.value)
+    assert f"{column}={offered!r}" in message
+    assert "db_default the database makes new" not in message
+    # What the message names, built as written, at several seeds.
+    _assert_builds((model,), Table(model, rows=20, **{column: offered}))
+
+
+@_NEEDS_DJANGO_5
+def test_a_unique_uuid_left_out_is_offered_the_db_default_that_is_new_in_every_row() -> None:
+    # A UUID has no Distinct distribution to name, and gen_random_uuid() is the one
+    # db_default that is new in every row, which test_each_exemption_is_accepted_and_loads
+    # builds as TokenedUnique.
+    with pytest.raises(InvalidShape) as raised:
+        Shape(Table(UuidCodedUnique, rows=20))
+
+    message = str(raised.value)
+    assert "gen_random_uuid" in message
+    assert "Sequential" not in message
 
 
 @_NEEDS_DJANGO_5
@@ -2140,7 +2273,23 @@ def test_one_root_is_not_enough_and_nor_is_a_flat_tree(tree: Tree, rows: int) ->
     message = str(raised.value)
     assert "one_tied_chain" in message
     assert "one root" in message
-    assert f"1/{rows}" in message
+    assert f"1/{rows + 1}" in message
+
+
+@_ON_POSTGRES
+@_NEEDS_DJANGO_5
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.parametrize("rows", [11, 13])
+def test_the_one_root_a_refusal_offers_is_one_root_at_any_row_count(rows: int) -> None:
+    # roots=1/rows is two roots at rows 11 and 13 among others: the share is read through
+    # its decimal spelling and repr(1/11) is a hair above the fraction. The offer is
+    # 1/(rows + 1), and it is accepted and loads.
+    with pytest.raises(InvalidShape) as raised:
+        Shape(Table(TiedChain, rows=rows, previous=Tree(roots=0.3, sizes=Constant(1))))
+
+    assert f"roots at most 1/{rows + 1}" in str(raised.value)
+    one_root = Tree(roots=1 / (rows + 1), sizes=Constant(1))
+    _assert_builds((TiedChain,), Table(TiedChain, rows=rows, previous=one_root))
 
 
 @_NEEDS_DJANGO_5
@@ -2190,7 +2339,7 @@ def test_one_root_is_offered_beside_a_draw_and_in_a_conditional_when_it_would_ho
         ),
     ):
         assert "one root" in message
-        assert "1/200" in message
+        assert "1/201" in message
 
 
 @_ON_POSTGRES
@@ -2323,6 +2472,12 @@ def test_one_root_is_offered_beside_a_draw_and_in_a_conditional_when_it_would_ho
             (StampedOnly,),
             lambda: [Table(StampedOnly, rows=1)],
             id="now_on_one_row",
+            marks=_NEEDS_DJANGO_5,
+        ),
+        pytest.param(
+            (JsonRule,),
+            lambda: [_companies(), Table(JsonRule, rows=200, company=FanOut(Zipf()))],
+            id="a_dict_db_default_outside_a_condition",
             marks=_NEEDS_DJANGO_5,
         ),
         pytest.param(
