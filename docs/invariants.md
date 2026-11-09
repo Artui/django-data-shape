@@ -172,6 +172,25 @@ how many companies there are.
   `unique=True` writes no entry in `_meta.constraints`, and a single table
   cannot see how many parents there are. The exemption is the same proof the
   others carry: flat sizes, no `childless` share, and rows no more than parents.
+  `UniqueConstraint(fields=["company"])` and `unique_together = [("company",)]`
+  write the same index and are decided the same way.
+- **A column the shape leaves out is read as what the load leaves in it.** `COPY`
+  does not name the column, so the database fills it. A literal `db_default` is
+  one value in every row: the pigeonhole counts it as one, and beside a tree or a
+  `FanOut(Zipf())` it loaded 0 times in 20 and is refused. A nullable column with
+  none holds NULL, and each NULL in a unique index is its own group, so every row
+  is out of the index and the constraint holds whatever the other columns do. A
+  condition reads the same value: `Q(status=None)` over a column left out puts
+  every row inside it, 0 in 20, and `Q(status="on")` over a `db_default` of `"off"`
+  puts none.
+- **A column may be named by its attname.** `fields=["parent_id", "name"]` is the
+  index `fields=["parent", "name"]` is, and it is read as that one.
+- **Under `nulls_distinct=False` a NULL is one value**, which takes away what
+  rests on each being its own group. A column left out holds that one value in
+  every row, and refusals read it so. A `FanOut` with a `null` share has one more
+  group, as large as the share, so its cap of one proves nothing: `max_children=1`
+  with `null=0.5` loaded 0 times in 20, and the pigeonhole counts the NULL as one
+  more parent. The attribute arrived in Django 5.0 and is read with `getattr`.
 - **A `Tree` beside drawn columns is refused the same way**, as in names
   unique among siblings: a tree gives a row several children whenever its sizes
   say so, and a drawn value cannot see its siblings. A tree's families are not
@@ -182,9 +201,9 @@ how many companies there are.
   `UniqueConstraint` and `unique_together`. Sizes of one value, such as
   `Constant(1)`, fill it, as `FanOut(max_children=1)` fills a unique key to another
   table, and the refusal of any other sizes names that tree. A column that refuses
-  NULL keeps no tree at all, and under `nulls_distinct=False` the roots collide
-  among themselves, so that is refused whatever the sizes, and a `Projection` with
-  `columns=` and `sql=` fills it.
+  NULL keeps no tree at all. Under `nulls_distinct=False` two roots collide, so what
+  fills it there is one root, with `roots` at most `1 / rows`, and sizes of one value,
+  or a `Projection` with `columns=` and `sql=`.
 - **A `Tree` beside a `FanOut`, or two `Tree`s, under one constraint are refused**
   for the reason two fan-outs are: each column is computed from the row index
   and neither sees the other. Measured over twenty seeds on tables named
@@ -206,14 +225,16 @@ how many companies there are.
   remedy over that fan-out, because one row per company is enough to keep
   `(parent, company)`.
 - **A tree that gives no row two children keeps all three of those constraints**,
-  and it is a proof rather than a probability. Sizes holding one value, such as
+  beside any number of fan-outs, and it is a proof rather than a probability. Sizes
+  holding one value, such as
   `Constant(1)`, weigh every row the same, so the largest remainder gives the
   first rows one child each and room lasts until the last child is placed. At most
   one non-root row, by arithmetic on `roots`, has no sibling whatever the sizes
   weigh. Neither depends on the seed or the table's name, and a load test holds
   the first of them on a real table. Both stand on each root's NULL being its own
-  group, so under `nulls_distinct=False`, where the roots are one group and collide
-  among themselves, the constraint is refused and no such tree exempts it.
+  group, so under `nulls_distinct=False`, where two roots collide, such a tree also
+  needs one root, which is one NULL as distinct as every key. A flat tree of many
+  roots loaded 0 times in 20 there, and so did one root over siblings.
 - **Enough room is not a way to fill it.** An unconditional constraint over
   **two fan-outs** — the through table of a many-to-many — passes the pigeonhole
   comfortably, because the product of two parent counts dwarfs the row count,
@@ -262,7 +283,11 @@ how many companies there are.
   so `(company, invoice_number)` builds. A distribution that does not implement
   the protocol is read as not distinct, which is the safe direction: that costs
   a refusal answered by adding one method, where the other reading costs a load
-  that fails at a row number which moves when the seed does.
+  that fails at a row number which moves when the seed does. It holds whatever
+  else is in the constraint: beside two fan-outs, and under a condition, where it
+  leaves each group one row and the condition nothing to count. It holds under
+  `nulls_distinct=False` too, since a column of different values holds one NULL at
+  most, and `(company, person, code)` over two `null` shares builds.
 - **A conditional `UniqueConstraint` is categorical.** A per-row draw cannot
   keep a per-group rule *at any weight* -- 2.5% is as broken as 10%, just later
   in the load -- so the refusal does not depend on the arithmetic, only the
@@ -301,15 +326,9 @@ how many companies there are.
 - A conditional constraint whose grouping columns include neither a declared
   `FanOut` nor a declared `Tree`, because there is no partition here to satisfy
   it with and a refusal would name no remedy.
-- A column filled by a distribution that cannot enumerate itself, and a fan-out
-  over a parent this shape does not build. Both make the *capacity* unknown, so
-  a conditional refusal drops its arithmetic and an unconditional one falls back
-  to the structural sentence — neither stops the refusal itself.
-- A fan-out with a `null` share, for the capacity in the same way: PostgreSQL
-  counts each NULL in a unique index as distinct, so those rows are exempt from
-  the constraint and a number computed as though they were not would not be true
-  of this shape. The rows that do have a parent are unarranged exactly as
-  before.
+- A column the shape leaves out whose `db_default` is an expression. Nothing here
+  can read what it writes: `gen_random_uuid()` is new in every row and loads, and
+  `Now()` is one value across a `COPY` and does not.
 - A column filled by a `Derivation` under an unconditional constraint. A
   derivation reads something other than its own row index, so it is the one kind
   of declaration that *can* be arranged around a group — and whether a
@@ -320,6 +339,23 @@ how many companies there are.
 
 In every one of those the declaration is allowed through, and net 2 and net 3
 are what catch it.
+
+### What it cannot count, and refuses anyway
+
+Not knowing a number is not the same as not knowing the answer, so these stay
+refused, and the arithmetic is what drops out of the message.
+
+- A distribution that cannot enumerate itself, under a condition. Unknown is read
+  as able to land inside it, so `Uniform(1, 9)` under `Q(status="accepted")` is
+  refused although it never writes that value and loads 20 times in 20. The remedy
+  is a declaration that says what it writes, such as a `Skew`.
+- A distribution that cannot enumerate itself and a fan-out over a parent this
+  shape does not build, under an unconditional constraint. Both make the *capacity*
+  unknown, so the refusal falls back to the structural sentence.
+- A fan-out with a `null` share, while each NULL is its own group: those rows are
+  exempt from the index, so a number computed as though they were not would not be
+  true of this shape. The rows that do have a parent are unarranged exactly as
+  before.
 
 Whether to refuse is decidable without the parent's row count; only the
 numbers in the message need it. A project that builds its fifty companies with

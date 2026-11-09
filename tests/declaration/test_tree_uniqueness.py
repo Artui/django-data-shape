@@ -555,7 +555,13 @@ def test_roots_counted_as_one_group_collide_beside_a_fan_out_in_a_conditional() 
 def test_nulls_counted_together_under_another_constraint_change_nothing_here() -> None:
     # The reading is per constraint, because the NULLs of one index say nothing
     # about another's.
-    Shape(Table(TwoRules, rows=300, parent=_flat(), name=Skew({"a": 1, "b": 1})))
+    # The second is declared because a column left out of it holds one NULL in every
+    # row, which no load survives.
+    Shape(
+        Table(
+            TwoRules, rows=300, parent=_flat(), name=Skew({"a": 1, "b": 1}), code=Sequential(1, 1)
+        )
+    )
 
 
 @_NEEDS_NULLS_DISTINCT

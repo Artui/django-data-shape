@@ -22,6 +22,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   NULL keeps both, and a self-key under `nulls_distinct=False` now gets them too, naming
   a `Projection`, rather than a `Tree` a shape would refuse.
 
+### Fixed
+
+- **A column the shape leaves out is read as what the load leaves in it.** A literal
+  `db_default` holds one value in every row, and was read as a NULL that keeps rows
+  apart, so beside a `Tree` or a `FanOut` it was accepted and died in `COPY`. It now
+  counts as one value in every check, and is refused by name. A `db_default` that is
+  an expression stays with the other two nets, since `gen_random_uuid()` loads and
+  `Now()` does not.
+- **A condition reads a column left out too.** `Q(status=None)` over one puts every
+  row inside the condition, and so does `Q(status="on")` over a `db_default` of
+  `"on"`. Both were accepted and died in `COPY`; both are refused.
+- **A constraint may name a column by its attname.** `fields=["parent_id", "name"]`
+  and the same `unique_together` were read as columns the shape left out, and died
+  in `COPY`. They are read as the fields they name.
+- **`nulls_distinct=False` is read wherever a check assumed each NULL is its own
+  group.** A column left out holds one value there. A `FanOut` with a `null` share
+  has one more group, so its cap of one is no proof and the pigeonhole counts the
+  NULL as one more parent. Shapes resting on either died in `COPY` and are refused.
+- **A `FanOut` alone under a `UniqueConstraint` or a `unique_together` is refused**
+  as it is on a `unique=True` column, naming `max_children=1`. No check read that
+  spelling, and `FanOut(Zipf())` died in `COPY`.
+- **A `Distinct` column keeps a constraint whatever else is in it.**
+  `(company, code)` under a condition and `(company, person, code)` were refused
+  with `code=Sequential(1, 1)`, and both load.
+- **A flat `Tree` beside two fan-outs is accepted.** It was refused by the check for
+  the two fan-outs, which did not read the proof the others read, and it loads.
+- **One root is a proof under `nulls_distinct=False`.** A `Tree` with one root and
+  sizes of one value holds one NULL and no repeated key, and it was refused whatever
+  it was beside. It loads, and a refusal there now names it. A tree of many roots
+  stays refused.
+- **A shape of one row is accepted under any uniqueness that has room for it.** Two
+  rows are what a collision takes, and a drawn pair was refused at one row.
+
+### Documentation
+
+- **What the constraint checks allow through and what they refuse without counting
+  are told apart**, in `docs/invariants.md` and the `check_constraints` docstring.
+  Both said every listed case was allowed through, and `Uniform(1, 9)` under
+  `Q(status="accepted")` is refused, because unknown is read as a yes.
+
 ## [0.25.1] — 2026-11-09
 
 ### Fixed

@@ -536,7 +536,8 @@ Shape(Table(Link, rows=50_000, previous=Tree(roots=0.05, sizes=Constant(1))))
 ```
 
 Each root's NULL is its own group in the unique index, so the roots do not collide
-either. Under `nulls_distinct=False` they do, and no tree is accepted there.
+either. Under `nulls_distinct=False` two roots do, so what is accepted there is one
+root, with `roots` at most `1 / rows`, and sizes of one value.
 `shape_from_factory` writes this tree for a unique self-key.
 
 A `Tree` has no `childless`, `null` or `max_children` either, and no depth of
@@ -603,8 +604,7 @@ filled first is decided by the declarations and needs no connection to answer.
   every row, such as `Sequential`, keeps the constraint, and so does a tree with
   sizes of one value, such as `Constant(1)`, which gives no row two children. A
   `Tree` alone under a `UniqueConstraint` is decided as a unique column is, and
-  under `nulls_distinct=False` it is refused whatever its sizes, since the roots
-  then collide among themselves.
+  under `nulls_distinct=False` it also needs one root, since two roots then collide.
 - A `Tree` under a uniqueness beside a **`FanOut` or a second `Tree`**. Each column
   is computed from the row index without seeing the other, so two rows sharing a
   combination is a matter of the seed. A `Distinct` column keeps the constraint,
@@ -617,7 +617,7 @@ filled first is decided by the declarations and needs no connection to answer.
   stays outside the condition, a `Distinct` column in the constraint, a tree that
   gives no row two children, or a `Projection`. Beside a `FanOut`, `PerParent` over
   that fan-out is the remedy. A tree's exemption needs each root's NULL to be its own
-  group, so it does not apply under `nulls_distinct=False`.
+  group, so under `nulls_distinct=False` it also needs one root, which is one NULL.
 - A required relation **left undeclared**, which would fail the load on a
   not-null violation rather than at declaration time. The message names the
   column and the fan-out that fills it: forgetting one foreign key is the
