@@ -22,6 +22,7 @@ from django_data_shape import (
     drop_database,
     template_database,
 )
+from django_data_shape.databases.derive_template import _key as _derived_key
 from django_data_shape.utils import FINISHED_TEMPLATE, PARTIAL_SUFFIX, TEMPLATE_PREFIX
 from tests.testapp.models import Catalogue, Company
 
@@ -117,12 +118,17 @@ def _database(name: str) -> tuple[int, bool] | None:
     return None if row is None else (int(row[0]), bool(row[1]))
 
 
-def _partials() -> list[str]:
+def _partials(parent: str, key: str = "replay-1") -> list[str]:
+    """The working copy a derivation of ``parent`` under ``key`` would leave, if one is there.
+
+    Named from the parent and the key rather than listed from the server: every
+    suite on a server shares the prefix, and a list of all partials failed
+    whenever another suite had a build in flight, which says nothing about this
+    package. A partial any process left under this derivation's name is found.
+    """
+    partial = f"{TEMPLATE_PREFIX}{_derived_key(parent, key)}{PARTIAL_SUFFIX}"
     with connection.cursor() as cursor:
-        cursor.execute(
-            "SELECT datname FROM pg_database WHERE datname LIKE %s",
-            [f"{TEMPLATE_PREFIX}%\\_\\_partial"],
-        )
+        cursor.execute("SELECT datname FROM pg_database WHERE datname = %s", [partial])
         return [row[0] for row in cursor.fetchall()]
 
 
@@ -247,7 +253,7 @@ def test_a_step_that_raises_leaves_nothing_and_names_the_key(made: list[str]) ->
         made.append(derive_template(parent, broken, key="replay-1"))
 
     assert isinstance(raised.value.__cause__, LookupError)
-    assert _partials() == []
+    assert _partials(parent) == []
     assert connection.settings_dict["NAME"] == original
     assert _names_in(made, parent) == [("placeholder", 400)]
 
@@ -277,7 +283,7 @@ def test_an_interrupt_is_not_wrapped_and_leaves_nothing(made: list[str]) -> None
     with pytest.raises(_Interrupted):
         made.append(derive_template(parent, interrupted, key="replay-1"))
 
-    assert _partials() == []
+    assert _partials(parent) == []
 
 
 def test_a_hit_needs_no_parent(made: list[str]) -> None:
@@ -301,7 +307,7 @@ def test_a_partial_left_by_a_killed_process_is_replaced(made: list[str]) -> None
         cursor.execute(f"CREATE DATABASE {connection.ops.quote_name(partial)}")
 
     assert _derive(made, parent, _replay, key="replay-1") == derived
-    assert _partials() == []
+    assert _partials(parent) == []
 
 
 def test_it_can_copy_with_the_servers_own_strategy(made: list[str]) -> None:
@@ -340,7 +346,7 @@ def test_a_parent_that_does_not_exist_is_refused_by_name(made: list[str]) -> Non
 
     with pytest.raises(ValueError, match="does not exist"):
         made.append(derive_template(parent, never, key="replay-1"))
-    assert _partials() == []
+    assert _partials(parent) == []
 
 
 def test_a_strategy_it_cannot_take_is_refused_before_anything_is_looked_up(

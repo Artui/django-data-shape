@@ -37,6 +37,7 @@ from django_data_shape import (
     drop_database,
     template_database,
 )
+from django_data_shape.databases import template_database as template_module
 from django_data_shape.databases.template_database import (
     _ahead_of_disk,
     _base_context,
@@ -45,7 +46,7 @@ from django_data_shape.databases.template_database import (
     _schema_digest,
     _stranded_squashes,
 )
-from django_data_shape.utils import TEMPLATE_PREFIX
+from django_data_shape.utils import PARTIAL_SUFFIX, TEMPLATE_PREFIX
 from django_data_shape.version import __version__
 from tests.testapp.models import (
     Award,
@@ -175,10 +176,31 @@ def _migrate(database: str, *arguments: str) -> None:
         connection.settings_dict["NAME"] = original
 
 
-def _templates_on_the_server() -> set[str]:
+def _left_by(shape: Shape, base: str | None = None) -> set[str]:
+    """The databases a build of ``shape`` would leave: its template and its working copy.
+
+    Named from the key rather than listed from the server, because the server's
+    list is every suite's. Two suites on one server (each its own ``PGDATABASE``)
+    share the prefix, and a test that compared the whole list failed whenever
+    the other suite built or dropped a template between its two reads, which
+    says nothing about this package. The name is the one ``template_database``
+    would give, so a template of this shape left by anything -- this build, an
+    earlier one, another process -- is still found.
+
+    With a base the key also holds its name and oid, read here the way
+    ``_base_context`` reads them but without its refusals: the refusal is what a
+    caller is asserting, and a name that required it to pass could not be
+    computed for the very bases it refuses. A base that does not exist has no
+    oid, so nothing could be built under its name and the set is then empty.
+    """
+    context = template_module._context()
+    if base is not None:
+        context = (*context, base, str(_oid(base)))
+    name = f"{TEMPLATE_PREFIX}{_key(shape, context)}"
     with connection.cursor() as cursor:
         cursor.execute(
-            "SELECT datname FROM pg_database WHERE datname LIKE %s", [f"{TEMPLATE_PREFIX}%"]
+            "SELECT datname FROM pg_database WHERE datname IN (%s, %s)",
+            [name, f"{name}{PARTIAL_SUFFIX}"],
         )
         return {row[0] for row in cursor.fetchall()}
 
@@ -197,6 +219,39 @@ def test_it_creates_a_template_named_after_the_declaration(
 
     assert name.startswith(TEMPLATE_PREFIX)
     assert _oid(name) is not None
+
+
+def test_a_template_is_keyed_to_the_run_that_asked_for_it(
+    temporary_databases: list[str],
+) -> None:
+    # Two suites on one server, each its own PGDATABASE, would otherwise declare
+    # the same shape and share a template: one reading it half made, or losing
+    # it to the other's teardown. The salt is in the suite-wide fixture.
+    shape = _shape()
+    name = _template(shape, temporary_databases)
+
+    assert name == f"{TEMPLATE_PREFIX}{_key(shape, template_module._context())}"
+    assert name != f"{TEMPLATE_PREFIX}{_key(shape, _context())}"
+
+
+def test_what_a_build_of_a_shape_would_leave_is_found_wherever_it_came_from(
+    temporary_databases: list[str],
+) -> None:
+    # The leftover check names the template and the partial the shape would
+    # make, so one that something else left -- another process, an earlier run --
+    # is found, and one for another shape is not.
+    shape = _shape()
+    name = f"{TEMPLATE_PREFIX}{_key(shape, template_module._context())}"
+    elsewhere = _shape(seed=1)
+    assert _left_by(shape) == set()
+
+    with connection._nodb_cursor() as cursor:
+        for left in (name, f"{name}{PARTIAL_SUFFIX}"):
+            cursor.execute(f"CREATE DATABASE {connection.ops.quote_name(left)}")
+            temporary_databases.append(left)
+
+    assert _left_by(shape) == {name, f"{name}{PARTIAL_SUFFIX}"}
+    assert _left_by(elsewhere) == set()
 
 
 def test_asking_twice_does_not_build_twice(temporary_databases: list[str]) -> None:
@@ -316,13 +371,7 @@ def test_a_shape_whose_build_fails_leaves_no_half_built_template(
     with pytest.raises(InvalidShape, match="inserted no rows"):
         temporary_databases.append(template_database(shape))
 
-    with connection.cursor() as cursor:
-        cursor.execute(
-            "SELECT count(*) FROM pg_database WHERE datname LIKE %s",
-            [f"{TEMPLATE_PREFIX}%\\_\\_partial"],
-        )
-
-        assert cursor.fetchone()[0] == 0
+    assert _left_by(shape) == set()
 
 
 def test_a_template_holds_a_whole_graph(temporary_databases: list[str]) -> None:
@@ -731,10 +780,10 @@ def test_a_base_ahead_of_the_migrations_on_disk_is_refused(temporary_databases: 
         "INSERT INTO django_migrations (app, name, applied) "
         "VALUES ('contenttypes', '9999_ghost', now())",
     )
-    before = _templates_on_the_server()
+    declared = _shape()
 
     with pytest.raises(UnusableBase) as refused:
-        temporary_databases.append(template_database(_shape(), base=base))
+        temporary_databases.append(template_database(declared, base=base))
 
     message = str(refused.value)
     assert base in message
@@ -744,7 +793,9 @@ def test_a_base_ahead_of_the_migrations_on_disk_is_refused(temporary_databases: 
     # branch's rows would leave its schema behind and stop the refusal.
     assert "manage.py migrate contenttypes --prune" in message
     assert "recreate it" in message
-    assert _templates_on_the_server() == before
+    assert _left_by(declared, base) == set()
+    # Nor does a refusal fall back to building the shape without its base.
+    assert _left_by(declared) == set()
 
 
 def test_a_base_that_goes_ahead_is_refused_with_its_template_already_built(
@@ -791,14 +842,16 @@ def test_a_row_for_an_app_no_longer_installed_does_not_refuse_the_base(
 
 
 def test_a_base_that_does_not_exist_is_refused_by_name(temporary_databases: list[str]) -> None:
-    before = _templates_on_the_server()
+    declared = _shape()
 
     with pytest.raises(UnusableBase, match="shape_base_that_was_never_made"):
         temporary_databases.append(
-            template_database(_shape(), base="shape_base_that_was_never_made")
+            template_database(declared, base="shape_base_that_was_never_made")
         )
 
-    assert _templates_on_the_server() == before
+    # A base nobody made has no oid, so nothing could be built under its name; what a
+    # regression could do is fall back to building the shape without it.
+    assert _left_by(declared) == set()
 
 
 def _allow_connections(database: str, allowed: bool) -> None:
@@ -817,15 +870,17 @@ def test_a_base_that_refuses_connections_is_refused_by_name(
     # the migration loader, naming nothing a reader asked for.
     base = _base(temporary_databases)
     _allow_connections(base, False)
-    before = _templates_on_the_server()
+    declared = _shape()
 
     with pytest.raises(UnusableBase) as refused:
-        temporary_databases.append(template_database(_shape(), base=base))
+        temporary_databases.append(template_database(declared, base=base))
 
     message = str(refused.value)
     assert base in message
     assert "ALLOW_CONNECTIONS true" in message
-    assert _templates_on_the_server() == before
+    assert _left_by(declared, base) == set()
+    # Nor does a refusal fall back to building the shape without its base.
+    assert _left_by(declared) == set()
 
 
 def test_a_template_is_never_a_base(temporary_databases: list[str]) -> None:
@@ -915,14 +970,10 @@ def test_a_base_holding_rows_in_a_declared_table_is_named_as_their_cause(
     # the tables of an app without them are rebuilt from the models.
     base = _base(temporary_databases)
     _execute_in(base, "INSERT INTO auth_group (name) VALUES ('kept in the base')")
-    before = _templates_on_the_server()
+    declared = Shape(Table(Group, rows=1, name=Constant("declared")), seed=42)
 
     with pytest.raises(ShapeNotEmpty) as refused:
-        temporary_databases.append(
-            template_database(
-                Shape(Table(Group, rows=1, name=Constant("declared")), seed=42), base=base
-            )
-        )
+        temporary_databases.append(template_database(declared, base=base))
 
     message = " ".join(str(refused.value).split())
     assert message.startswith("auth_group already holds rows")
@@ -932,8 +983,9 @@ def test_a_base_holding_rows_in_a_declared_table_is_named_as_their_cause(
     )
     # The partial the build failed in is dropped with it, so the next run does
     # not find a half-built database under a name it would have to judge.
-    assert _templates_on_the_server() == before
-    assert not [name for name in _templates_on_the_server() if name.endswith("__partial")]
+    assert _left_by(declared, base) == set()
+    # Nor does a refusal fall back to building the shape without its base.
+    assert _left_by(declared) == set()
 
 
 # Every column of a table as information_schema describes it, which is what a
@@ -1237,17 +1289,19 @@ def test_a_reference_into_such_a_table_refuses_the_base(temporary_databases: lis
         "CREATE TABLE kept_reference "
         f"(catalogue_id bigint REFERENCES {Catalogue._meta.db_table} (id))",
     )
-    before = _templates_on_the_server()
+    declared = _shape(rows=40, seed=46)
 
     with pytest.raises(UnusableBase) as refused:
-        temporary_databases.append(template_database(_shape(rows=40, seed=46), base=base))
+        temporary_databases.append(template_database(declared, base=base))
 
     message = str(refused.value)
     assert base in message
     assert "kept_reference" in message
     assert "recreate it" in message
     assert "CASCADE" not in message
-    assert _templates_on_the_server() == before
+    assert _left_by(declared, base) == set()
+    # Nor does a refusal fall back to building the shape without its base.
+    assert _left_by(declared) == set()
     assert _rows_in(base, "SELECT to_regclass('kept_reference') IS NOT NULL") == [(True,)]
 
 
@@ -1591,10 +1645,10 @@ def test_a_squash_applied_in_part_with_its_replaced_files_deleted_is_refused(
         "INSERT INTO django_migrations (app, name, applied) "
         "VALUES ('contenttypes', '0003_folded', now())",
     )
-    before = _templates_on_the_server()
+    declared = _shape(rows=40, seed=37)
 
     with pytest.raises(UnusableBase) as refused:
-        temporary_databases.append(template_database(_shape(rows=40, seed=37), base=base))
+        temporary_databases.append(template_database(declared, base=base))
 
     message = str(refused.value)
     assert base in message
@@ -1604,7 +1658,9 @@ def test_a_squash_applied_in_part_with_its_replaced_files_deleted_is_refused(
     # The applied half is replaced by a squash on disk, so it is not ahead, and
     # the message is this check's rather than that one's.
     assert "ahead" not in message
-    assert _templates_on_the_server() == before
+    assert _left_by(declared, base) == set()
+    # Nor does a refusal fall back to building the shape without its base.
+    assert _left_by(declared) == set()
 
 
 # A squash of a squash, as squashmigrations writes one from Django 6.0: the outer
@@ -1810,16 +1866,18 @@ def test_a_squash_of_a_squash_applied_in_part_with_a_replaced_file_deleted_is_re
         "INSERT INTO django_migrations (app, name, applied) "
         "VALUES ('contenttypes', '0003_folded', now())",
     )
-    before = _templates_on_the_server()
+    declared = _shape(rows=40, seed=55)
 
     with pytest.raises(UnusableBase) as refused:
-        temporary_databases.append(template_database(_shape(rows=40, seed=55), base=base))
+        temporary_databases.append(template_database(declared, base=base))
 
     message = str(refused.value)
     assert "contenttypes.0003_squashed_0005" in message
     assert "contenttypes.0005_more" in message
     assert "ahead" not in message
-    assert _templates_on_the_server() == before
+    assert _left_by(declared, base) == set()
+    # Nor does a refusal fall back to building the shape without its base.
+    assert _left_by(declared) == set()
 
 
 def test_a_base_ahead_only_of_a_squash_of_a_squash_says_to_finish_the_squash(
@@ -1868,16 +1926,18 @@ def test_a_base_with_tables_but_no_django_migrations_is_refused(
     # migration executor, naming a table rather than the base.
     base = _base(temporary_databases)
     _execute_in(base, "DROP TABLE django_migrations")
-    before = _templates_on_the_server()
+    declared = _shape(rows=40, seed=38)
 
     with pytest.raises(UnusableBase) as refused:
-        temporary_databases.append(template_database(_shape(rows=40, seed=38), base=base))
+        temporary_databases.append(template_database(declared, base=base))
 
     message = str(refused.value)
     assert base in message
     assert "django_migrations" in message
     assert "auth_group" in message
-    assert _templates_on_the_server() == before
+    assert _left_by(declared, base) == set()
+    # Nor does a refusal fall back to building the shape without its base.
+    assert _left_by(declared) == set()
 
 
 def test_a_base_whose_django_migrations_records_nothing_is_refused(
@@ -1889,16 +1949,18 @@ def test_a_base_whose_django_migrations_records_nothing_is_refused(
     # "already exists" from inside the executor.
     base = _base(temporary_databases)
     _execute_in(base, "DELETE FROM django_migrations")
-    before = _templates_on_the_server()
+    declared = _shape(rows=40, seed=47)
 
     with pytest.raises(UnusableBase) as refused:
-        temporary_databases.append(template_database(_shape(rows=40, seed=47), base=base))
+        temporary_databases.append(template_database(declared, base=base))
 
     message = str(refused.value)
     assert base in message
     assert "auth_group" in message
     assert "--schema-only" in message
-    assert _templates_on_the_server() == before
+    assert _left_by(declared, base) == set()
+    # Nor does a refusal fall back to building the shape without its base.
+    assert _left_by(declared) == set()
 
 
 def test_so_is_one_with_no_record_of_a_single_app_whose_tables_it_holds(

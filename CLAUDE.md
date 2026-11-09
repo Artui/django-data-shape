@@ -119,6 +119,11 @@ own module, a re-export in `__init__.py`, and a docs entry.
   refuses cannot be covered by the job that gates coverage, and the gate would
   have to move somewhere it means less.
 - A test that asserts a plan must assert the *plan*, never a duration.
+- **Parallel runs on one server stay apart by `PGDATABASE`.** Template databases are
+  server-wide and named by a digest of the shape, so `tests/conftest.py` salts every
+  template's key with it: two runs with different `PGDATABASE` values share no
+  template. A test asserting a shape left nothing behind names that shape's databases
+  (`_left_by`) rather than listing the server's.
 
 ## Type checking
 
