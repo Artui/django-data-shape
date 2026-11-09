@@ -40,8 +40,10 @@ def resolve_tree(tree: Tree, rows: int, seed: int, table: str, field: str) -> Tr
     is left short, and a row that finds no earlier row with room left -- early
     on, before enough targets have accumulated -- falls back to an earlier row
     chosen by weight alone, which places a child past that row's target.
-    Measured on ``Zipf()`` at 200,000 rows that is about 2% of the children;
-    ``docs/relations.md`` has the shape of it.
+    Measured on ``Tree(roots=0.05, sizes=Zipf())`` at 200,000 rows of
+    ``testapp_category.parent`` over seeds 0 to 15, that is 0.5% to 17.8% of the
+    children, median 3.2%: one whale's position decides it, and the draws are
+    keyed on the table and field name. ``docs/relations.md`` has the shape of it.
     """
     # Through the share's decimal reading rather than the float product, which
     # overshoots: 100 * 0.07 is 7.000000000000001, and its ceiling is 8.
