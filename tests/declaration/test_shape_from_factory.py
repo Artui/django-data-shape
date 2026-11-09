@@ -15,20 +15,26 @@ from django.db import connection
 from django.db.models import Model
 
 import django_data_shape
-from django_data_shape import InvalidShape, Shape, Table, Tree, build, shape_from_factory
+from django_data_shape import Constant, InvalidShape, Shape, Table, Tree, build, shape_from_factory
 from tests.testapp.models import (
     Category,
     Chain,
     Checked,
+    Coded,
     Company,
     Exclusive,
     Folder,
+    Mirror,
     Project,
     Relay,
     RootlessLink,
     RootlessNode,
     Session,
+    Shelf,
     Sibling,
+    SpelledChain,
+    SpelledFolder,
+    SpelledRelay,
     Successor,
     TiedLink,
 )
@@ -401,7 +407,7 @@ def test_a_self_key_no_shape_can_fill_is_a_comment_and_a_finding_not_a_tree(
     field = link.removesuffix("_id")
     assert "Tree(" not in report
     assert "FanOut(" not in report
-    assert f"    # {field}: no shape can fill this" in report
+    assert f"    # {field}: nothing written here" in report
     assert f"{model.__name__}.{field}: {why}" in report
     assert f"{field}=" not in report
     # Being unique is no longer why nothing fills it.
@@ -447,7 +453,7 @@ def test_a_nullable_unique_self_key_is_written_as_a_flat_tree_not_told_to_be_lef
 
     assert "previous=Tree(roots=0.1, sizes=Constant(1))," in report
     assert "1 of 10 rows had no parent" in report
-    assert "no shape can fill" not in report
+    assert "nothing written here" not in report
     assert "Leave it out and fill it after the build." not in report
     assert "Zipf" not in report
 
@@ -484,16 +490,27 @@ def test_a_unique_self_key_always_left_null_is_the_figure_table_offers_and_a_fin
 
 @_NEEDS_NULLS_DISTINCT
 def test_a_self_key_whose_nulls_count_as_one_is_still_a_comment_and_a_finding() -> None:
-    # Shape refuses every tree on this column, flat or not, and the column left
-    # out holds one NULL many times, so neither is what the report may offer.
+    # One root is all that fits, and its share depends on the rows, which the report
+    # leaves as rows=..., so it names that tree and cannot write it. The column left
+    # out holds one NULL many times, so that is not what the report may offer.
     report = _report_over_a_self_key_no_shape_can_fill(TiedLink)
 
-    assert "Tree(" not in report
-    assert "    # previous: no shape can fill this" in report
+    assert "previous=" not in report
+    assert "    # previous: nothing written here" in report
     assert "TiedLink.previous: a constraint counting every NULL as one value" in report
-    assert "Fill the table with a Projection." in report
-    assert "Leave it out" not in report
+    assert "Tree(roots=1/rows, sizes=Constant(1))" in report
+    assert "Projection" in report
+    assert "no shape can fill" not in report
     assert "null=True" not in report
+
+
+@_NEEDS_NULLS_DISTINCT
+def test_the_tree_the_finding_names_under_nulls_counted_as_one_is_accepted() -> None:
+    # The finding is true at the rows it describes, and false one root later.
+    rows = 50
+    Shape(Table(TiedLink, rows=rows, previous=Tree(roots=1 / rows, sizes=Constant(1))))
+    with pytest.raises(InvalidShape):
+        Shape(Table(TiedLink, rows=rows, previous=Tree(roots=2 / rows, sizes=Constant(1))))
 
 
 def _chain_with_roots(n: int) -> int | None:
@@ -512,7 +529,7 @@ def test_a_key_in_a_composite_unique_constraint_is_not_unique_on_its_own() -> No
     report = shape_from_factory(_tree_factory(Folder, _chain_with_roots), samples=20)
 
     assert "parent=Tree(roots=0.25, sizes=Zipf())" in report
-    assert "no shape can fill" not in report
+    assert "nothing written here" not in report
 
 
 def test_a_conditional_unique_constraint_does_not_make_the_key_unique() -> None:
@@ -576,3 +593,174 @@ def test_a_relation_to_another_table_is_reported_exactly_as_before() -> None:
         "# Read at 20 samples. A larger run sees more of the tail, so the numbers above "
         "move with it."
     )
+
+
+def _one_code(n: int) -> str:
+    return "c"
+
+
+def _named_factory(
+    model: type[Model],
+    name: Callable[[int], str],
+    *,
+    code: Callable[[int], str] = lambda n: f"k{n}",
+) -> Callable[[], Model]:
+    """A tree factory whose ``n``th row is called ``name(n)``, to make a column distinct or not.
+
+    ``code`` is each row's own unless given: a model with a uniqueness over
+    ``code`` needs one that does not repeat with ``name``.
+    """
+    made: list[Model] = []
+
+    def factory() -> Model:
+        n = len(made) + 1
+        parent = made[n - 2] if n > 1 and _chain_with_roots(n) is not None else None
+        row = model.objects.create(  # type: ignore[attr-defined]
+            name=name(n), code=code(n), parent=parent
+        )
+        made.append(row)
+        return row
+
+    return factory
+
+
+def _compiles(report: str) -> None:
+    """The report is source: it has to parse, whatever it says."""
+    compile(report, "<report>", "exec")
+
+
+@pytest.mark.parametrize("model", [Folder, SpelledFolder, Shelf])
+def test_source_over_columns_that_are_all_distinct_compiles(model: type[Model]) -> None:
+    """Fails without the comma moved before the comment: it landed inside it.
+
+    ``name=Sequential(...)  # every value distinct,`` left the next column
+    without a separator, so a model with a column after it was a SyntaxError.
+    The 0.25.1 tests all used repeated names, so none reached this line.
+    """
+    report = shape_from_factory(
+        _named_factory(model, lambda n: f"n{n}", code=_one_code), samples=20
+    )
+
+    assert "name=Sequential(...),  # every value distinct\n" in report
+    _compiles(report)
+
+
+@pytest.mark.parametrize("model", [Folder, SpelledFolder, Shelf])
+def test_source_over_a_column_with_many_values_compiles(model: type[Model]) -> None:
+    """The other commented declaration of ``_describe``, which had the same defect."""
+    report = shape_from_factory(
+        _named_factory(model, lambda n: f"n{n % 15}", code=_one_code), samples=40
+    )
+
+    assert "name=Skew({...}),  # 15 distinct values, top share" in report
+    _compiles(report)
+
+
+def test_every_declaration_in_a_report_keeps_its_comma_outside_its_comment() -> None:
+    companies = [Company.objects.create(name=f"c{i}") for i in range(4)]
+    report = shape_from_factory(lambda: _shared_parent(companies), samples=20)
+
+    # A column without a comment, unchanged.
+    assert "    label=Constant('s'),\n" in report
+    _compiles(report)
+
+
+@pytest.mark.parametrize(
+    ("model", "uniqueness"),
+    [
+        (Folder, "one_name_per_folder"),
+        (SpelledFolder, "one_name_per_spelled_folder"),
+        (Shelf, "unique_together ('parent', 'name')"),
+    ],
+)
+def test_a_self_key_under_a_composite_uniqueness_over_repeated_values_is_a_finding(
+    model: type[Model], uniqueness: str
+) -> None:
+    """The report wrote ``Tree`` beside ``Skew`` with nothing said, and ``Shape`` refuses that."""
+    report = shape_from_factory(
+        _named_factory(model, lambda n: f"n{n % 3}", code=_one_code), samples=20
+    )
+
+    finding = next(
+        line
+        for line in report.splitlines()
+        if line.startswith(f"#   - {model.__name__}.parent:") and uniqueness in line
+    )
+    assert "name is declared as a draw" in finding
+    assert "Sequential" in finding
+    assert "Projection" in finding
+    # The finding is true: the source as written is the one Shape refuses.
+    with pytest.raises(InvalidShape, match="is a Tree beside"):
+        Shape(_built(report, model))
+
+
+@pytest.mark.parametrize("model", [Folder, SpelledFolder, Shelf])
+def test_a_self_key_under_a_composite_uniqueness_over_distinct_values_needs_no_finding(
+    model: type[Model],
+) -> None:
+    """A pair is distinct as soon as either half is, so ``Sequential`` keeps the constraint."""
+    report = shape_from_factory(
+        _named_factory(model, lambda n: f"n{n}", code=_one_code), samples=20
+    )
+
+    assert "declared as a draw" not in report
+    assert "one_name_per" not in report
+    assert "unique_together" not in report
+
+
+def test_a_self_key_beside_a_relation_in_the_uniqueness_is_still_a_finding() -> None:
+    """A relation is written as a fan-out, never as a column distinct in every row.
+
+    Fails without ``not field.is_relation`` in ``_is_distinct``: every call here
+    gets a company of its own, so the values are all different, and a fan-out
+    over them is still a draw.
+    """
+    made: list[Mirror] = []
+
+    def factory() -> Mirror:
+        row = Mirror.objects.create(
+            company=Company.objects.create(name="c"), parent=made[-1] if made else None
+        )
+        made.append(row)
+        return row
+
+    report = shape_from_factory(factory, samples=20)
+
+    assert "company=FanOut(Zipf())" in report
+    assert "company is declared as a draw" in report
+
+
+@pytest.mark.parametrize("model", [SpelledChain, SpelledRelay])
+def test_a_uniqueness_spelled_with_the_attname_still_makes_the_self_key_unique(
+    model: type[Model],
+) -> None:
+    """Fails without ``get_field(...).name``: ``previous_id`` is not ``previous``.
+
+    Unread, the key got ``sizes=Zipf()``, which ``Shape`` refuses on a unique column.
+    """
+    report = _report_over_a_self_key_no_shape_can_fill(model)
+
+    assert "previous=Tree(roots=0.1, sizes=Constant(1))," in report
+    assert "Zipf" not in report
+    Shape(_built(report, model))
+
+
+def test_a_uniqueness_that_leaves_the_self_key_out_is_no_finding_about_it() -> None:
+    """Fails without ``field.name in names`` in either loop of ``_composite_uniqueness``."""
+    report = shape_from_factory(
+        _named_factory(Coded, lambda n: f"n{n % 3}", code=lambda n: f"k{n // 3}"), samples=20
+    )
+
+    assert "unique together" not in report
+    assert "one_code_per_name" not in report
+    assert "unique_together" not in report
+
+
+@pytest.mark.parametrize("model", [Chain, Relay, SpelledChain])
+def test_a_uniqueness_over_the_self_key_alone_is_no_composite_finding(
+    model: type[Model],
+) -> None:
+    """Fails without ``len(names) > 1``: a column alone is not unique *together* with nothing."""
+    report = _report_over_a_self_key_no_shape_can_fill(model)
+
+    assert "unique together" not in report

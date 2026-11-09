@@ -183,6 +183,8 @@ how many companies there are.
   condition reads the same value: `Q(status=None)` over a column left out puts
   every row inside it, 0 in 20, and `Q(status="on")` over a `db_default` of `"off"`
   puts none.
+  A `unique=True` column left out is read the same way: a literal `db_default` or
+  `Now()` there is refused at two rows or more, since it loaded 0 times in 20.
 - **`Now()` as a `db_default` is one value in every row too.** Django compiles it to
   `STATEMENT_TIMESTAMP()` on PostgreSQL and a table's rows arrive in one `COPY`, so
   every row holds one instant. Beside a skewed `Tree` or `FanOut` it loaded 0 times

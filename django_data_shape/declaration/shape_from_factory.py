@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import Counter
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from typing import Any
 
 from django.apps import apps
@@ -126,18 +126,23 @@ def _grown(
 
 
 def _describe(values: list[object], rows: int) -> tuple[str, str | None]:
-    """A declaration for one column, and the finding it deserves if any."""
+    """A declaration for one column, and the finding it deserves if any.
+
+    The declaration carries its own trailing comma, **before** any comment: one
+    written after ``# every value distinct`` is inside the comment, and the next
+    column then has no separator and the source does not compile.
+    """
     counts = Counter(values)
     if len(counts) == 1:
         only = next(iter(counts))
         return (
-            f"Constant({only!r})",
+            f"Constant({only!r}),",
             f"every row got {only!r}. The factory fixes this column, so the declaration above "
             "says the planner will see one value -- decide what the real spread is.",
         )
     if len(counts) == rows:
         return (
-            "Sequential(...)  # every value distinct",
+            "Sequential(...),  # every value distinct",
             "every value was distinct. Sequential fills that cheaply; a unique short code needs "
             "a generator of its own.",
         )
@@ -145,9 +150,9 @@ def _describe(values: list[object], rows: int) -> tuple[str, str | None]:
         shares = ", ".join(
             f"{value!r}: {count / rows:.2f}" for value, count in counts.most_common()
         )
-        return f"Skew({{{shares}}})", None
+        return f"Skew({{{shares}}}),", None
     return (
-        f"Skew({{...}})  # {len(counts)} distinct values, "
+        f"Skew({{...}}),  # {len(counts)} distinct values, "
         f"top share {counts.most_common(1)[0][1] / rows:.0%}",
         f"{len(counts)} distinct values is more than a Skew wants written out. If they are "
         "evenly spread, Uniform says it in one line; if they are not, keep the head and let the "
@@ -206,11 +211,12 @@ def _self_key(
     other key would hand back source that cannot be built. The key is a
     :class:`~django_data_shape.relations.tree.Tree` where one can fill it.
 
-    **Where none can, there is no declaration at all** (``None``) and the finding
-    says why, rather than a ``Tree`` that will be refused. A column that refuses
-    NULL has no first row to point at, and a constraint counting every NULL as one
-    value makes a tree's roots collide. Neither is an error of the factory's, and
-    the rest of what it measured is still worth reading, so this does not raise.
+    **Where this cannot write one, there is no declaration at all** (``None``) and
+    the finding says why, rather than a ``Tree`` that will be refused. A column that
+    refuses NULL has no first row to point at. A constraint counting every NULL as
+    one value holds one root, so its share depends on the rows, which the report
+    leaves to the caller. Neither is an error of the factory's, and the rest of what
+    it measured is still worth reading, so this does not raise.
 
     **A unique key gets sizes of one value**, because a tree whose sizes hold one
     value gives no row two children, and that is what such a column requires. Every
@@ -220,23 +226,21 @@ def _self_key(
     parent: a ``Counter`` over them would count it as one more parent, as
     :func:`_relation` does for a key to another table, where it is harmless.
     """
-    tied = _nulls_count_as_one(model, field)
-    if tied or not field.null:
-        reasons = []
-        if not field.null:
-            reasons.append("a key that refuses NULL has no first row to point at")
-        if tied:
-            reasons.append("a constraint counting every NULL as one value makes the roots collide")
-        # Leaving a column out is no shape under either: ``Table`` refuses the
-        # undeclared required one, and a tied one would hold one NULL in every row.
-        remedy = (
-            "Fill the table with a Projection."
-            if tied
-            else "Make the column null=True, or fill the table with a Projection."
-        )
+    if not field.null:
         return None, (
-            f"{' and '.join(reasons)}, so no shape can fill it: a Tree is refused on this "
-            f"column and a FanOut reads keys from a table still empty at load time. {remedy}"
+            "a key that refuses NULL has no first row to point at, so no shape can fill it: a Tree "
+            "is refused on this column and a FanOut reads keys from a table still empty at load "
+            "time. Make the column null=True, or fill the table with a Projection."
+        )
+    if _nulls_count_as_one(model, field):
+        # The rows a share would be written against are the caller's: the report leaves
+        # them as ``rows=...``, so it can name this tree and cannot write it down.
+        return None, (
+            "a constraint counting every NULL as one value has room for one root, so a Tree "
+            "fills it only with one root and sizes of one value, Tree(roots=1/rows, "
+            "sizes=Constant(1)) at the rows you build, and the share a factory measures is no "
+            "use. Leaving it out holds one NULL many times. Write that tree, or fill the table "
+            "with a Projection."
         )
     unique = _is_unique(model, field)
     sizes = "Constant(1)" if unique else "Zipf()"
@@ -278,9 +282,19 @@ def _is_unique(model: type[Model], field: Field[Any, Any]) -> bool:
     """
     return (
         field.unique
-        or (field.name,) in map(tuple, model._meta.unique_together)
+        or any(_names(model, entry) == (field.name,) for entry in model._meta.unique_together)
         or any(_constraints_on_it_alone(model, field))
     )
+
+
+def _names(model: type[Model], spelled: Iterable[str]) -> tuple[str, ...]:
+    """The fields' names, however each was spelled.
+
+    Django takes ``parent`` and ``parent_id`` in a ``UniqueConstraint`` and in
+    ``unique_together`` alike and keeps them as written, so comparing the text to
+    ``field.name`` misses the attname's. ``get_field`` answers to either.
+    """
+    return tuple(model._meta.get_field(name).name for name in spelled)
 
 
 def _nulls_count_as_one(model: type[Model], field: Field[Any, Any]) -> bool:
@@ -300,11 +314,70 @@ def _constraints_on_it_alone(
     """The unconditional ``UniqueConstraint``s over this one column and nothing else."""
     return (
         constraint
-        for constraint in model._meta.constraints
-        if isinstance(constraint, UniqueConstraint)
-        and constraint.condition is None
-        and tuple(constraint.fields) == (field.name,)
+        for constraint in _unconditional_constraints(model)
+        if _names(model, constraint.fields) == (field.name,)
     )
+
+
+def _unconditional_constraints(model: type[Model]) -> Iterator[UniqueConstraint]:
+    """The ``UniqueConstraint``s that hold on every row, which is what a shape must keep."""
+    return (
+        constraint
+        for constraint in model._meta.constraints
+        if isinstance(constraint, UniqueConstraint) and constraint.condition is None
+    )
+
+
+def _composite_uniqueness(
+    model: type[Model], field: Field[Any, Any]
+) -> Iterator[tuple[str, tuple[str, ...]]]:
+    """Each uniqueness over this column together with others: how it is named, and its columns."""
+    for constraint in _unconditional_constraints(model):
+        names = _names(model, constraint.fields)
+        if field.name in names and len(names) > 1:
+            yield constraint.name, names
+    for entry in model._meta.unique_together:
+        names = _names(model, entry)
+        if field.name in names and len(names) > 1:
+            yield f"unique_together {names!r}", names
+
+
+def _is_distinct(field: Field[Any, Any], values: list[object]) -> bool:
+    """Whether the column is written as one distinct in every row, which is ``Sequential``.
+
+    Not a relation, whatever its values: a key to another table is written as a
+    fan-out, which is a draw.
+    """
+    return not field.is_relation and len(set(values)) == len(values)
+
+
+def _composite_finding(
+    model: type[Model],
+    field: Field[Any, Any],
+    columns: dict[str, tuple[Field[Any, Any], list[object]]],
+) -> list[str]:
+    """What a tree beside a draw under a composite uniqueness means, one finding per uniqueness.
+
+    **Because ``Shape`` refuses it and the report would not say so.** A pair is
+    distinct as soon as either half is, so a column distinct in every row keeps the
+    uniqueness on its own and ``Sequential`` is written for it. Where none is, the
+    others are drawn per row from a distribution, and siblings of one parent cannot
+    see what each other drew.
+    """
+    findings = []
+    for label, names in _composite_uniqueness(model, field):
+        others = [name for name in names if name != field.name]
+        if any(_is_distinct(*columns[name]) for name in others):
+            continue
+        drawn = ", ".join(others)
+        findings.append(
+            f"{label} makes ({', '.join(names)}) unique together, and {drawn} is declared as a "
+            "draw rather than as a column distinct in every row. Table refuses a Tree beside a "
+            "draw under it, because siblings of one parent cannot see what each other drew. "
+            f"Make {drawn} distinct in every row -- Sequential does -- or fill the table with "
+            "a Projection with columns= and sql=."
+        )
+    return findings
 
 
 def _render(
@@ -331,24 +404,35 @@ def _render(
                 f"{samples / delta:.1f} children per parent."
             )
 
+    columns = {
+        field.name: (field, [getattr(row, _read(field)) for row in made])
+        for field in model._meta.concrete_fields
+        if not field.primary_key
+    }
     body = [f"Table({model.__name__}, rows=...,"]
-    for field in model._meta.concrete_fields:
-        if field.primary_key:
-            continue
-        values = [getattr(row, _read(field)) for row in made]
+    for field, values in columns.values():
         declaration: str | None
+        # The comma ends the line for a declaration that has not put it before its
+        # comment, which is every one of a key; ``_describe`` has, and a second
+        # would sit inside the comment it writes.
+        comma = ","
+        extra: list[str] = []
         if field.is_relation and field.related_model is model:
             declaration, finding = _self_key(model, field, values, len(made))
+            if declaration is not None:
+                extra = _composite_finding(model, field, columns)
         elif field.is_relation:
             declaration, finding = _relation(values, len(made))
         else:
             declaration, finding = _describe(values, len(made))
+            comma = ""
         if declaration is None:
-            body.append(f"    # {field.name}: no shape can fill this -- see the findings above.")
+            body.append(f"    # {field.name}: nothing written here -- see the findings above.")
         else:
-            body.append(f"    {field.name}={declaration},")
-        if finding:
-            findings.append(f"{model.__name__}.{field.name}: {finding}")
+            body.append(f"    {field.name}={declaration}{comma}")
+        findings.extend(
+            f"{model.__name__}.{field.name}: {text}" for text in [finding, *extra] if text
+        )
     body.append(")")
 
     if findings:

@@ -130,6 +130,7 @@ def check_constraints(tables: tuple[Table | Projection, ...]) -> None:
         for name, fields, condition in _uniquenesses(table.model):
             _check_one(table, name, fields, condition, rows_of)
         _check_a_fan_out_on_a_unique_column(table, rows_of)
+        _check_a_unique_column_left_to_one_value(table)
 
 
 def _uniquenesses(model: type[Model]) -> Iterable[tuple[str, tuple[str, ...], Q | None]]:
@@ -855,6 +856,37 @@ def _check_a_fan_out_on_a_unique_column(table: Table, rows_of: dict[type[Model],
             "FanOut(Constant(1)) with no childless share over at least as many parents as this "
             "table has rows."
         )
+
+
+def _check_a_unique_column_left_to_one_value(table: Table) -> None:
+    """A ``unique=True`` column the shape leaves to a ``db_default`` of one value.
+
+    Its own check for the reason :func:`_check_a_fan_out_on_a_unique_column` is:
+    ``unique=True`` writes no entry in ``_meta.constraints``, so the reading of a left-out
+    column that :func:`_check_one` does never reaches it. Measured at no loads in twenty,
+    a literal and ``Now()`` alike. A column left out with no default holds a NULL per row,
+    and each is its own group, and an expression :func:`_held` cannot read stays with the
+    other two nets.
+
+    .. warning::
+
+       **Conjuncts the coverage gate cannot see**, each of which loads when it is kept
+       and is refused when it is not, in ``test_each_exemption_is_accepted_and_loads``:
+       ``rows`` by the two ``on_one_row`` parameters, ``unique`` by
+       ``a_column_not_unique_repeats_its_db_default``, ``_LeftOut`` by
+       ``unique_column_declared_despite_its_db_default``, ``holds_null`` by
+       ``unique_column_left_out_holds_a_null_per_row``.
+    """
+    if table.rows < 2:
+        return
+    for field in table.model._meta.concrete_fields:
+        held = _held(table, field.name)
+        if field.unique and isinstance(held, _LeftOut) and not held.holds_null:
+            raise InvalidShape(
+                f"{table.model.__name__}.{field.name} is unique and holds {held!r}, so "
+                f"{table.rows} rows cannot load. Declare the column with a distribution that is "
+                "Distinct, or give it a db_default the database makes new in every row."
+            )
 
 
 def _check_drawn_columns_only(

@@ -1548,6 +1548,40 @@ with isolate_apps("tests.testapp"):
                 models.UniqueConstraint(fields=["at"], name="one_stamped_only"),
             ]
 
+    class StampedUnique(models.Model):
+        at = models.DateTimeField(null=True, unique=True, **_db_default(Now()))
+
+        class Meta:
+            app_label = "testapp"
+
+    class CodedUnique(models.Model):
+        code = models.CharField(max_length=8, unique=True, **_db_default("on"))
+
+        class Meta:
+            app_label = "testapp"
+
+    class TokenedUnique(models.Model):
+        token = models.UUIDField(
+            null=True,
+            unique=True,
+            **_db_default(models.Func(function="gen_random_uuid", output_field=models.UUIDField())),
+        )
+
+        class Meta:
+            app_label = "testapp"
+
+    class CodedRepeating(models.Model):
+        code = models.CharField(max_length=8, **_db_default("on"))
+
+        class Meta:
+            app_label = "testapp"
+
+    class NullableUnique(models.Model):
+        code = models.CharField(max_length=8, null=True, unique=True)
+
+        class Meta:
+            app_label = "testapp"
+
     class UnstampedRule(models.Model):
         company = _key(Company)
         at = models.DateTimeField(null=True, **_db_default(Now()))
@@ -1979,6 +2013,29 @@ def test_a_condition_may_name_a_left_out_key_by_its_attname() -> None:
 
 
 @_NEEDS_DJANGO_5
+@pytest.mark.parametrize(
+    ("build", "column", "held"),
+    [
+        pytest.param(lambda: Table(CodedUnique, rows=20), "CodedUnique.code", "'on'", id="literal"),
+        pytest.param(lambda: Table(StampedUnique, rows=20), "StampedUnique.at", "Now()", id="now"),
+    ],
+)
+def test_a_unique_column_left_to_a_db_default_of_one_value_is_refused(
+    build: Any, column: str, held: str
+) -> None:
+    # Each loaded 0 of 20: unique=True writes no constraint, so no check read the
+    # column, and the second row of the COPY repeated the first row's value.
+    with pytest.raises(InvalidShape) as raised:
+        Shape(build())
+
+    message = str(raised.value)
+    assert column in message
+    assert "is unique" in message
+    assert f"its db_default {held} in every row" in message
+    assert "20 rows" in message
+
+
+@_NEEDS_DJANGO_5
 def test_now_alone_counts_as_one_combination() -> None:
     with pytest.raises(InvalidShape) as raised:
         Shape(Table(StampedOnly, rows=20))
@@ -2224,6 +2281,42 @@ def test_one_root_is_offered_beside_a_draw_and_in_a_conditional_when_it_would_ho
                 Table(StampedSeat, rows=20, company=FanOut(Zipf(), max_children=1)),
             ],
             id="now_beside_a_cap_of_one",
+            marks=_NEEDS_DJANGO_5,
+        ),
+        pytest.param(
+            (CodedUnique,),
+            lambda: [Table(CodedUnique, rows=1)],
+            id="unique_column_with_a_literal_db_default_on_one_row",
+            marks=_NEEDS_DJANGO_5,
+        ),
+        pytest.param(
+            (StampedUnique,),
+            lambda: [Table(StampedUnique, rows=1)],
+            id="unique_column_with_now_on_one_row",
+            marks=_NEEDS_DJANGO_5,
+        ),
+        pytest.param(
+            (TokenedUnique,),
+            lambda: [Table(TokenedUnique, rows=20)],
+            id="unique_column_with_an_expression_new_in_every_row",
+            marks=_NEEDS_DJANGO_5,
+        ),
+        pytest.param(
+            (CodedRepeating,),
+            lambda: [Table(CodedRepeating, rows=20)],
+            id="a_column_not_unique_repeats_its_db_default",
+            marks=_NEEDS_DJANGO_5,
+        ),
+        pytest.param(
+            (NullableUnique,),
+            lambda: [Table(NullableUnique, rows=20)],
+            id="unique_column_left_out_holds_a_null_per_row",
+            marks=_NEEDS_DJANGO_5,
+        ),
+        pytest.param(
+            (CodedUnique,),
+            lambda: [Table(CodedUnique, rows=20, code=Sequential(1, 1))],
+            id="unique_column_declared_despite_its_db_default",
             marks=_NEEDS_DJANGO_5,
         ),
         pytest.param(

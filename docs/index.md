@@ -238,11 +238,11 @@ parent or a comment's reply-to is written as
 the factory left NULL, which `Table` builds as it stands. `sizes` is not
 measured. Where the factory left every row a root, or none, there is no share to
 write, so the report offers `roots=0.05` and says it is not a measurement. A
-unique key gets `sizes=Constant(1)`, which gives no row two children. Where no
-shape can fill the key -- one that refuses NULL has no first row to point at, and
-under `nulls_distinct=False` the roots collide -- the report holds a comment where
-the declaration would be, and a finding saying why, rather than a `Tree` that a
-shape refuses.
+unique key gets `sizes=Constant(1)`, which gives no row two children. Where the
+report cannot write the key -- one that refuses NULL has no first row to point at,
+and under `nulls_distinct=False` the tree has one root, whose share depends on the
+rows you build -- it holds a comment where the declaration would be, and a finding
+saying why, rather than a `Tree` that a shape refuses.
 
 A factory that already varies everything gets a declaration and **no findings** —
 if the quiet case were not quiet, the loud one would stop meaning anything.

@@ -15,12 +15,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   keeps a uniqueness beside other columns holds for it alone, as `FanOut(max_children=1)`
   holds on a unique key to another table. It now builds on Postgres under each spelling.
   Any other sizes stay refused, and the refusal names the flat `Tree`. A self-key that
-  refuses NULL stays refused, and so does any tree under `nulls_distinct=False`, whose
-  roots collide among themselves.
+  refuses NULL stays refused, and so does a tree of many roots under
+  `nulls_distinct=False`, whose roots collide among themselves.
 - **`shape_from_factory` writes that `Tree` for a nullable unique self-key,** with the
   root share it measured, instead of a comment and a finding. A self-key that refuses
   NULL keeps both, and a self-key under `nulls_distinct=False` now gets them too, naming
-  a `Projection`, rather than a `Tree` a shape would refuse.
+  the one-root tree and a `Projection`, rather than a `Tree` a shape would refuse.
 
 ### Fixed
 
@@ -41,6 +41,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   for the same reason. Under `nulls_distinct=False` with a null share on the relation the
   proof does not hold, and those are refused.
 
+- **`shape_from_factory` writes source that compiles beside a commented column.** A
+  column reported as `name=Sequential(...)  # every value distinct,` put the comma
+  inside the comment, so any column after it was a `SyntaxError`; the same held for a
+  `Skew({...})` over many values. The comma now comes before the comment.
+- **`shape_from_factory` says when a self-key sits in a composite uniqueness over
+  columns it draws.** `Folder`, unique on `(parent, name)`, with repeated names got
+  `parent=Tree(...)` and `name=Skew(...)` and no finding, and `Shape` then refused it.
+  A finding now names the constraint (or the `unique_together`) and the remedy: a
+  column distinct in every row, or a `Projection`.
+- **A `UniqueConstraint` or `unique_together` that spells the attname is read.**
+  `fields=["parent_id"]` was not the column `parent`, so `shape_from_factory` wrote
+  `sizes=Zipf()` for a unique self-key, which `Shape` refuses. `fields=["parent_id",
+  "name"]` was read as columns the shape left out, and died in `COPY`. Both are read as
+  the fields they name.
+- **`Table`'s refusals on a required self-key offer a remedy it accepts.** The `Tree`
+  refusal told a non-null self-key to "leave it out and fill it after the build", and
+  the required-relation refusal then offered `FanOut(Zipf())` on a key to the same
+  table; both were refused in turn. Both now say what `shape_from_factory` has said
+  since 0.25.1: make the column `null=True`, or fill the table with a `Projection`.
 - **A column the shape leaves out is read as what the load leaves in it.** A literal
   `db_default` holds one value in every row, and was read as a NULL that keeps rows
   apart, so beside a `Tree` or a `FanOut` it was accepted and died in `COPY`. It now
@@ -48,12 +67,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   way, since a table's rows arrive in one `COPY` and it is one instant across that
   statement. Any other expression stays with the other two nets, since
   `gen_random_uuid()` loads.
+- **A `unique=True` column left to a `db_default` of one value is refused.** No check
+  read that spelling, so a literal and `Now()` were accepted and died in `COPY` at the
+  second row.
 - **A condition reads a column left out too.** `Q(status=None)` over one puts every
   row inside the condition, and so does `Q(status="on")` over a `db_default` of
   `"on"`. Both were accepted and died in `COPY`; both are refused.
-- **A constraint may name a column by its attname.** `fields=["parent_id", "name"]`
-  and the same `unique_together` were read as columns the shape left out, and died
-  in `COPY`. They are read as the fields they name.
 - **`nulls_distinct=False` is read wherever a check assumed each NULL is its own
   group.** A column left out holds one value there. A `FanOut` with a `null` share
   has one more group, so its cap of one is no proof and the pigeonhole counts the
