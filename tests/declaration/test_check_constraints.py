@@ -20,6 +20,7 @@ The boundary tests below carry that reasoning inline where they depend on it.
 from __future__ import annotations
 
 import datetime
+import decimal
 import uuid
 from typing import Any, cast
 
@@ -46,6 +47,15 @@ from django_data_shape import (
     Zipf,
 )
 from django_data_shape import build as build_shape
+from tests.declaration.test_a_relation_in_a_condition import (
+    _assert_loads,
+    _Case,
+    _model,
+    _named_for_position,
+    _refusal,
+    _skew,
+    _tree,
+)
 from tests.testapp.models import (
     Approval,
     Assignment,
@@ -69,6 +79,7 @@ from tests.testapp.models import (
     Template,
     TemplateSession,
     Ticketed,
+    TiedLink,
     Venue,
     Voucher,
 )
@@ -485,16 +496,18 @@ def test_a_column_derived_from_the_group_is_left_to_the_other_two_nets() -> None
 
 
 def test_every_constraint_this_cannot_read_is_left_to_the_other_two_nets() -> None:
-    # Eight skips in one model: a condition over an expression rather than
-    # fields, one grouped by a column no fan-out partitions, one joining two
-    # clauses with AND, an OR whose branches name two different columns, a
-    # negated OR, an OR one of whose branches is a comparison, a comparison as a
-    # keyword argument and the same comparison as a bare lookup expression --
-    # which arrive as different shapes of child and take different exits -- plus
-    # a check constraint, which is not a unique constraint at all.
+    # Seven skips in one model: a condition over an expression rather than
+    # fields, one joining two clauses with AND, an OR whose branches name two
+    # different columns, a negated OR, an OR one of whose branches is a
+    # comparison, a comparison as a keyword argument and the same comparison as
+    # a bare lookup expression -- which arrive as different shapes of child and
+    # take different exits -- plus a check constraint, which is not a unique
+    # constraint at all.
     #
-    # Two used to live here and moved out when they stopped being skips:
-    # state__in to Review, and a nested Q(Q(a) | Q(b)) to Approval. What is left
+    # Three used to live here and moved out when they stopped being skips:
+    # state__in to Review, a nested Q(Q(a) | Q(b)) to Approval, and a condition
+    # grouped by a plain column to
+    # test_a_condition_grouped_by_a_plain_column_is_refused. What is left
     # is what genuinely describes no set of values for one column -- and the
     # three OR shapes are here to hold that line, because the recursion that
     # reads an OR-tree is the thing most likely to be widened past it.
@@ -2168,6 +2181,128 @@ def test_a_unique_uuid_left_out_is_offered_the_db_default_that_is_new_in_every_r
     assert "Sequential" not in message
 
 
+def _fallback_model(suffix: str, field: models.Field[Any, Any]) -> type[models.Model]:
+    """A unique column left to one db_default, one table per field type: testapp_fb_<suffix>."""
+    with isolate_apps("tests.testapp"):
+        meta = type("Meta", (), {"app_label": "testapp"})
+        return cast(
+            "type[models.Model]",
+            type(
+                f"fb_{suffix}", (models.Model,), {"__module__": __name__, "v": field, "Meta": meta}
+            ),
+        )
+
+
+def _decimal(digits: int, places: int) -> models.Field[Any, Any]:
+    return models.DecimalField(
+        max_digits=digits, decimal_places=places, unique=True, db_default=decimal.Decimal(1)
+    )
+
+
+# Each loads Sequential(1, 1) twenty times in twenty at two hundred rows. The text and decimal
+# cases sit on the bound: three characters, and three digits before the point.
+@_ON_POSTGRES
+@_NEEDS_DJANGO_5
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.parametrize(
+    ("suffix", "field"),
+    [
+        pytest.param("char3", lambda: models.CharField(max_length=3, unique=True, db_default="a")),
+        pytest.param("text", lambda: models.TextField(unique=True, db_default="a")),
+        pytest.param("int", lambda: models.IntegerField(unique=True, db_default=1)),
+        pytest.param("smallint", lambda: models.SmallIntegerField(unique=True, db_default=1)),
+        pytest.param("float", lambda: models.FloatField(unique=True, db_default=1.0)),
+        pytest.param("json", lambda: models.JSONField(unique=True, db_default=1)),
+        pytest.param(
+            "duration",
+            lambda: models.DurationField(unique=True, db_default=datetime.timedelta(1)),
+        ),
+        pytest.param("dec52", lambda: _decimal(5, 2)),
+    ],
+)
+def test_the_fallback_is_offered_where_it_builds(suffix: str, field: Any) -> None:
+    model = _fallback_model(suffix, field())
+    with pytest.raises(InvalidShape) as raised:
+        Shape(Table(model, rows=200))
+
+    assert "v=Sequential(1, 1)" in str(raised.value)
+    _assert_builds((model,), Table(model, rows=200, v=Sequential(1, 1)))
+
+
+# Sequential(1, 1) loads none of twenty in each, at two hundred rows and at two for a boolean:
+# a value too long, a numeric overflow, a TypeError or a ValidationError.
+@_NEEDS_DJANGO_5
+@pytest.mark.parametrize(
+    ("suffix", "field", "rows"),
+    [
+        pytest.param(
+            "char2", lambda: models.CharField(max_length=2, unique=True, db_default="a"), 200
+        ),
+        pytest.param(
+            "slug2", lambda: models.SlugField(max_length=2, unique=True, db_default="a"), 200
+        ),
+        pytest.param("dec32", lambda: _decimal(3, 2), 200),
+        pytest.param("dec42", lambda: _decimal(4, 2), 200),
+        pytest.param(
+            "time", lambda: models.TimeField(unique=True, db_default=datetime.time(1)), 200
+        ),
+        pytest.param(
+            "ip",
+            lambda: models.GenericIPAddressField(unique=True, db_default="1.1.1.1"),
+            200,
+        ),
+        pytest.param("binary", lambda: models.BinaryField(unique=True, db_default=b"a"), 200),
+        pytest.param("bool", lambda: models.BooleanField(unique=True, db_default=True), 2),
+        pytest.param(
+            "smallint_full",
+            lambda: models.SmallIntegerField(unique=True, db_default=1),
+            32768,
+        ),
+        pytest.param(
+            "psmallint_full",
+            lambda: models.PositiveSmallIntegerField(unique=True, db_default=1),
+            32768,
+        ),
+    ],
+)
+def test_the_fallback_is_withheld_where_it_cannot_build(suffix: str, field: Any, rows: int) -> None:
+    with pytest.raises(InvalidShape) as raised:
+        Shape(Table(_fallback_model(suffix, field()), rows=rows))
+
+    message = str(raised.value)
+    assert "Sequential" not in message
+    assert "Projection with columns= and sql=" in message
+
+
+@_NEEDS_DJANGO_5
+@pytest.mark.parametrize(
+    ("suffix", "field"),
+    [
+        pytest.param("smallint_last", lambda: models.SmallIntegerField(unique=True, db_default=1)),
+        pytest.param(
+            "psmallint_last",
+            lambda: models.PositiveSmallIntegerField(unique=True, db_default=1),
+        ),
+    ],
+)
+def test_the_fallback_is_offered_up_to_the_last_value_a_small_integer_holds(
+    suffix: str, field: Any
+) -> None:
+    # 32767 is the largest value either holds, and Sequential(1, 1) writes 1 to rows.
+    with pytest.raises(InvalidShape) as raised:
+        Shape(Table(_fallback_model(suffix, field()), rows=32767))
+
+    assert "v=Sequential(1, 1)" in str(raised.value)
+
+
+@_NEEDS_DJANGO_5
+def test_the_tree_left_out_of_a_self_key_that_ties_its_nulls_is_not_a_remedy() -> None:
+    # A Tree refusal does not offer this, and here is why: every row would hold the
+    # one NULL the constraint allows once. Shape says so before a row is written.
+    with pytest.raises(InvalidShape, match="one_tied_link_after_each.*can produce 1"):
+        Shape(Table(TiedLink, rows=200))
+
+
 @_NEEDS_DJANGO_5
 def test_now_alone_counts_as_one_combination() -> None:
     with pytest.raises(InvalidShape) as raised:
@@ -2818,3 +2953,333 @@ def test_what_an_expression_db_default_writes_across_one_copy(
 
 def test_one_row_cannot_collide_with_anything() -> None:
     Shape(Table(Coupon, rows=1, batch=Skew({"a": 1, "b": 1}), code=Skew({"a": 1, "b": 1})))
+
+
+# Under nulls_distinct=False the rows of a null share are one group, and a remedy that keeps
+# the share is refused again. Each case is a table of its own, since the draws are keyed on its
+# name, and each figure was measured over twenty seeds with the check switched off.
+_SHARE = FanOut(Zipf(), null=0.1)
+
+
+def _tied(name: str, fields: tuple[str, ...], columns: dict[str, Any], **sized: Any) -> _Case:
+    return _Case(name, fields, None, columns, together=True, **sized)
+
+
+@_NEEDS_DJANGO_5
+def test_a_pairing_whose_relation_ties_its_nulls_is_refused() -> None:
+    # Loads 0 of 20, and 20 of 20 with no null share or with each NULL apart.
+    message = _refusal(
+        _tied(
+            "tied_two_fan_outs_paired_null_kept",
+            ("company", "owner"),
+            {"company": _SHARE, "owner": Paired("company", Zipf())},
+            people=300,
+        )
+    )
+
+    assert "is paired inside each group of" in message
+    assert "with no null share on company" in message
+
+
+@_ON_POSTGRES
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.parametrize(
+    "case",
+    [
+        pytest.param(
+            _tied(
+                "tied_two_fan_outs_paired_no_null",
+                ("company", "owner"),
+                {"company": FanOut(Zipf()), "owner": Paired("company", Zipf())},
+                people=300,
+            ),
+            marks=_NEEDS_DJANGO_5,
+            id="tied_no_null_share",
+        ),
+        pytest.param(
+            _Case(
+                "apart_two_fan_outs_paired_null_kept",
+                ("company", "owner"),
+                None,
+                {"company": _SHARE, "owner": Paired("company", Zipf())},
+                people=300,
+            ),
+            id="apart",
+        ),
+    ],
+)
+def test_a_pairing_keeps_its_pairs_where_its_relation_s_nulls_are_no_group(case: _Case) -> None:
+    _assert_loads(case)
+
+
+@_NEEDS_DJANGO_5
+@_ON_POSTGRES
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.parametrize(
+    ("refused", "offered", "builds"),
+    [
+        pytest.param(
+            # Loads 0 of 20.
+            _tied(
+                "tied_two_fan_outs",
+                ("company", "owner"),
+                {"company": _SHARE, "owner": FanOut(Zipf())},
+                people=300,
+            ),
+            "Paired('company', Zipf()) with no null share on company",
+            _tied(
+                "tied_two_fan_outs_paired_no_null",
+                ("company", "owner"),
+                {"company": FanOut(Zipf()), "owner": Paired("company", Zipf())},
+                people=300,
+            ),
+            id="paired",
+        ),
+        pytest.param(
+            # Loads 0 of 20.
+            _tied(
+                "tied_fan_out_beside_a_draw_with_room",
+                ("company", "label"),
+                {"company": _SHARE, "label": _skew()},
+                companies=100,
+            ),
+            "scope='group') over company with no null share",
+            _tied(
+                "tied_fan_out_beside_a_draw_derived_no_null",
+                ("company", "label"),
+                {
+                    "company": FanOut(Zipf()),
+                    "label": Derived("company", compute=_named_for_position, scope="group"),
+                },
+            ),
+            id="derived",
+        ),
+        pytest.param(
+            # Loads 1 of 20, and 1 of 20 again under a cap that keeps the null share.
+            _tied(
+                "tied_tree_beside_a_fan_out",
+                ("prev", "company"),
+                {"prev": _tree(), "company": _SHARE},
+                companies=300,
+            ),
+            "max_children=1 and no null share",
+            _tied(
+                "tied_tree_beside_a_fan_out_cap_no_null",
+                ("prev", "company"),
+                {"prev": _tree(), "company": FanOut(Zipf(), max_children=1)},
+                companies=300,
+            ),
+            id="cap",
+        ),
+    ],
+)
+def test_a_remedy_offered_over_a_tied_null_share_drops_the_share(
+    refused: _Case, offered: str, builds: _Case
+) -> None:
+    assert offered in _refusal(refused)
+    _assert_loads(builds)
+
+
+def test_a_group_derivation_is_refused_over_a_null_share_even_with_each_null_apart() -> None:
+    # Loads 0 of 20. Why the Derived offer drops the share whichever way NULLs are counted.
+    case = _Case(
+        "apart_fan_out_beside_a_draw",
+        ("company", "label"),
+        None,
+        {"company": _SHARE, "label": _skew()},
+    )
+    model = _model(case)
+
+    assert "with no null share" in _refusal(case)
+    with pytest.raises(InvalidShape, match="Drop the null share"):
+        Table(
+            model,
+            rows=200,
+            company=_SHARE,
+            label=Derived("company", compute=_named_for_position, scope="group"),
+        )
+
+
+def test_a_cap_of_one_over_fewer_parents_than_rows_is_no_proof() -> None:
+    # The build refuses the partition at every seed: 50 parents hold 50 rows at most.
+    message = _refusal(
+        _Case(
+            "tree_beside_a_fan_out_cap_rows_over_parents",
+            ("prev", "company"),
+            None,
+            {"prev": _tree(), "company": FanOut(Zipf(), max_children=1)},
+        )
+    )
+
+    assert "says so with max_children=1" not in message
+    assert "Projection" in message
+
+
+@pytest.mark.parametrize(
+    "company",
+    [
+        pytest.param(FanOut(Zipf()), id="skewed"),
+        pytest.param(FanOut(Zipf(), max_children=1), id="capped"),
+    ],
+)
+def test_a_one_to_one_over_fewer_parents_than_rows_is_not_offered_a_cap(company: FanOut) -> None:
+    with pytest.raises(InvalidShape) as raised:
+        Shape(
+            _companies(30),
+            Table(
+                Ticketed,
+                rows=50,
+                prefix=Constant("p"),
+                reference=Sequential("r", "x"),
+                company=company,
+            ),
+        )
+
+    assert "one row at most" in str(raised.value)
+    assert "filled by max_children=1" not in str(raised.value)
+
+
+@_ON_POSTGRES
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.parametrize(
+    "case",
+    [
+        pytest.param(
+            _Case(
+                "apart_constant_none_beside_a_fan_out",
+                ("company", "label"),
+                None,
+                {"company": FanOut(Zipf()), "label": Constant(None)},
+            ),
+            id="beside_a_fan_out",
+        ),
+        pytest.param(
+            _Case("apart_constant_none_alone", ("label",), None, {"label": Constant(None)}),
+            id="alone",
+        ),
+    ],
+)
+def test_a_declared_null_in_every_row_keeps_every_row_apart(case: _Case) -> None:
+    # Each loads 20 of 20, and each was refused as one value. Tied, it is one value: 0 of 20.
+    _assert_loads(case)
+
+
+@_NEEDS_DJANGO_5
+def test_a_declared_null_in_every_row_is_one_value_where_nulls_are_tied() -> None:
+    _refusal(
+        _tied(
+            "tied_constant_none_beside_a_fan_out",
+            ("company", "label"),
+            {"company": FanOut(Zipf()), "label": Constant(None)},
+        )
+    )
+
+
+def test_a_condition_grouped_by_a_plain_column_is_refused() -> None:
+    # Was one of Booking's skips. Loads 0 of 20 on testapp_bk_grouped_by_a_plain_column, the
+    # sizes below: every row draws its room without seeing another, and no column partitions.
+    with isolate_apps("tests.testapp"):
+        model = cast(
+            "type[models.Model]",
+            type(
+                "bk_grouped_by_a_plain_column",
+                (models.Model,),
+                {
+                    "__module__": __name__,
+                    "company": models.ForeignKey(
+                        Company, on_delete=models.CASCADE, related_name="+"
+                    ),
+                    "room": models.CharField(max_length=20),
+                    "state": models.CharField(max_length=20),
+                    "seats": models.IntegerField(),
+                    "Meta": type(
+                        "Meta",
+                        (),
+                        {
+                            "app_label": "testapp",
+                            "constraints": [
+                                models.UniqueConstraint(
+                                    fields=["room"],
+                                    condition=models.Q(state="HELD"),
+                                    name="u_bk_grouped_by_a_plain_column",
+                                )
+                            ],
+                        },
+                    ),
+                },
+            ),
+        )
+    with pytest.raises(InvalidShape) as raised:
+        Shape(
+            _companies(50),
+            Table(
+                model,
+                rows=2000,
+                company=FanOut(Zipf()),
+                room=Skew({"one": 1, "two": 1}),
+                state=Skew({"HELD": 0.5, "PAID": 0.5}),
+                seats=Constant(0),
+            ),
+        )
+
+    assert "u_bk_grouped_by_a_plain_column" in str(raised.value)
+    assert "No column of the constraint is partitioned" in str(raised.value)
+
+
+def test_several_special_rows_outside_the_condition_are_accepted() -> None:
+    # count= puts ARCHIVED on three rows of each company and COMPLETE on the rest, so no row
+    # is ACTIVE and the partial index holds none of them.
+    Shape(
+        _companies(50),
+        _projects(
+            2000,
+            status=PerParent("company", last="ARCHIVED", rest="COMPLETE", count=3),
+        ),
+    )
+
+
+def test_holding_null_is_not_offered_for_a_column_that_cannot_be_null() -> None:
+    with isolate_apps("tests.testapp"):
+        model = cast(
+            "type[models.Model]",
+            type(
+                "cc_required_condition_column",
+                (models.Model,),
+                {
+                    "__module__": __name__,
+                    "company": models.ForeignKey(
+                        Company, on_delete=models.CASCADE, related_name="+"
+                    ),
+                    "state": models.CharField(max_length=20),
+                    "other": models.CharField(max_length=20),
+                    "Meta": type(
+                        "Meta",
+                        (),
+                        {
+                            "app_label": "testapp",
+                            "constraints": [
+                                models.UniqueConstraint(
+                                    fields=["company"],
+                                    condition=models.Q(state=models.F("other")),
+                                    name="u_cc_required_condition_column",
+                                )
+                            ],
+                        },
+                    ),
+                },
+            ),
+        )
+    with pytest.raises(InvalidShape) as raised:
+        Shape(
+            _companies(50),
+            Table(
+                model,
+                rows=200,
+                company=FanOut(Zipf()),
+                state=Skew({"a": 1, "b": 1}),
+                other=Skew({"a": 1, "b": 1}),
+            ),
+        )
+
+    assert "is no set of values a PerParent could put" in str(raised.value)
+    assert "Constant(None)" not in str(raised.value)

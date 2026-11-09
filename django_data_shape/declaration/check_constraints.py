@@ -8,11 +8,19 @@ from typing import Any, cast
 
 from django.db.models import (
     NOT_PROVIDED,
+    CharField,
     DateField,
     DateTimeField,
+    DecimalField,
+    DurationField,
     Field,
+    FloatField,
+    IntegerField,
+    JSONField,
     Model,
     Q,
+    SmallIntegerField,
+    TextField,
     UniqueConstraint,
     UUIDField,
     Value,
@@ -128,14 +136,16 @@ def check_constraints(tables: tuple[Table | Projection, ...]) -> None:
     the count one per non-empty group and therefore derived from the fan-out
     rather than chosen beside it.
 
-    **What this cannot decide, and leaves to the other two nets.** A condition
+    **What this does not read, and leaves to the other two nets.** A condition
     that names no set of values for one column -- a negation, two clauses joined
     by AND, a comparison -- is skipped, because reading it would mean this package
-    deciding what an arbitrary predicate matches. A constraint over ``expressions``
-    rather than ``fields`` is skipped for the same reason. A conditional
-    constraint whose grouping columns include neither a declared ``FanOut`` nor
-    a declared ``Tree`` is skipped unless a relation fills its condition, because there
-    is no partition here to offer a ``PerParent`` over. A column the shape leaves out whose
+    deciding what an arbitrary predicate matches. ``__isnull`` and a ``Value`` are read,
+    and an ``F()`` or another expression as the value is read as a member that may be
+    met, never as one that is not. A constraint over ``expressions`` rather than
+    ``fields`` is skipped for the same reason. A derivation in a conditional
+    constraint's group is skipped, because whether its ``compute=`` keeps the rule is not
+    readable here: ``Derived("owner", ..., scope="group")`` keeps it and one grouped by
+    another relation does not. A column the shape leaves out whose
     ``db_default`` is an expression other than ``Now()`` is skipped too, because nothing
     here can read what it writes: ``gen_random_uuid()`` keeps a constraint, and
     :func:`_held` says why ``Now()`` is the one that can be read.
@@ -207,7 +217,7 @@ def _check_one(
 ) -> None:
     # Above the pigeonhole, because a column read here counts as one value there,
     # and a NULL that keeps rows out of the index must not count as anything.
-    if _a_column_keeps_every_row_apart(table, name, fields):
+    if _a_column_keeps_every_row_apart(table, name, fields, rows_of):
         return
     capacity = _capacity(table, name, fields, rows_of)
     if condition is None:
@@ -233,6 +243,7 @@ def _check_one(
     if condition is None:
         _check_a_tree_beside_a_draw(table, name, fields)
         _check_independent_fan_outs(table, name, fields, rows_of)
+        _check_a_pairing_whose_nulls_are_one_group(table, name, fields)
         # After the two-fan-out check, so a tree beside two fan-outs keeps the
         # refusal that can offer a pairing; Paired is a remedy for those two
         # and the tree is then beside a pair that is already distinct.
@@ -265,10 +276,9 @@ def _check_one(
         _check_a_relation_in_a_condition(table, name, fields, named, values, declared, rows_of)
         return
     grouping = [table.fields.get(field) for field in fields]
-    # Accepted though it fails in COPY, as docs/invariants.md counts. The two below offer a
-    # PerParent or read a family, and there is neither here.
-    # test_what_no_relation_decides_over_draws_is_left_to_the_other_two_nets holds the line.
+    # The two below offer a PerParent or read a family, and there is neither here.
     if not any(isinstance(one, (FanOut, Tree)) for one in grouping):
+        _check_conditional_over_draws(table, name, fields, column, values, declared)
         return
     # A fan-out first, whatever else is grouped beside it: one row per company
     # is enough to keep (parent, company), so its PerParent stays the remedy
@@ -336,6 +346,13 @@ def _check_independent_fan_outs(
     if len(fanned) < 2:
         return
     where = table.model.__name__
+    # The pairing keeps partners apart inside each group of its relation, and a null share
+    # counted as one group is a group it never kept: tied_two_fan_outs_paired_null_kept.
+    no_null = (
+        f" with no null share on {fanned[0]}"
+        if _a_null_share_counted_together(table, name, fanned[:1])
+        else ""
+    )
     raise InvalidShape(
         f"{name} needs every ({', '.join(fields)}) combination distinct, and "
         f"{', '.join(f'{where}.{column}' for column in fanned)} are fan-outs. "
@@ -346,11 +363,45 @@ def _check_independent_fan_outs(
         "matter of the seed. The combinations do fit, which is why the pigeonhole arithmetic "
         "lets this through -- what is missing is anything that enumerates them, and the load "
         "then fails inside COPY at a row number that moves when the seed does. An edge table "
-        f"declares one side and pairs the other: {fanned[1]}=Paired({fanned[0]!r}, Zipf()) takes "
-        f"distinct partners inside each {fanned[0]} group, so no pair can repeat and the edge "
+        f"declares one side and pairs the other: {fanned[1]}=Paired({fanned[0]!r}, Zipf()){no_null} "
+        f"takes distinct partners inside each {fanned[0]} group, so no pair can repeat and the edge "
         "count is still exactly the row count. An edge set that has to be a particular one is "
         f"filled by a statement instead -- Projection({where}, columns=(...), sql=...)."
     )
+
+
+def _check_a_pairing_whose_nulls_are_one_group(
+    table: Table, name: str, fields: tuple[str, ...]
+) -> None:
+    """A ``Paired`` beside its own relation, whose null share this constraint counts as one.
+
+    ``Paired`` keeps partners distinct inside each group of its relation, which is the
+    promise that keeps the pair. A row whose relation is NULL had a group when its partner
+    was chosen and shows none afterwards, so under ``nulls_distinct=False`` those rows are
+    one group holding partners that were never kept apart. Measured on
+    ``testapp_tied_two_fan_outs_paired_null_kept``: no loads in twenty, and twenty without
+    the null share. Each NULL apart keeps those rows out of the index:
+    ``apart_two_fan_outs_paired_null_kept`` loaded twenty times.
+    """
+    for column in fields:
+        paired = table.fields.get(column)
+        if not (
+            isinstance(paired, Paired)
+            and paired.relation in fields
+            and not _its_relation_keeps_the_groups(table, name, paired)
+        ):
+            continue
+        where = table.model.__name__
+        raise InvalidShape(
+            f"{name} needs every ({', '.join(fields)}) combination distinct, and {where}.{column} "
+            f"is paired inside each group of {where}.{paired.relation}. "
+            f"{_a_null_share_counted_together(table, name, [paired.relation])}Partners are kept "
+            "apart inside a group, and the rows of that null share had one when theirs were "
+            "chosen, so two of them sharing a partner is a matter of the seed, and the load then "
+            "fails inside COPY at a row number that moves when the seed does. The pairing keeps "
+            f"the constraint with no null share on {paired.relation}. A table whose rows have to "
+            "be a particular set is filled by a Projection with columns= and sql=."
+        )
 
 
 def _check_a_fan_out_beside_a_draw(
@@ -421,6 +472,12 @@ def _check_a_fan_out_beside_a_draw(
         return
     where = table.model.__name__
     drawn = ", ".join(f"{where}.{column}={_held(table, column)!r}" for column in others)
+    # Table refuses scope='group' over any null share, since its rows belong to no group.
+    no_null = (
+        f" over {fanned[0]} with no null share"
+        if cast("FanOut", table.fields[fanned[0]]).null
+        else ""
+    )
     room = (
         f"The {capacity} combinations do fit the {table.rows} rows"
         if capacity is not None
@@ -437,8 +494,9 @@ def _check_a_fan_out_beside_a_draw(
         f"parent's rows draw the same value is a matter of the seed. {room}, which is why the "
         "pigeonhole arithmetic lets this through, and the load then fails inside COPY at a row "
         "number that moves when the seed does. A value that varies with the group is derived "
-        f"from it rather than drawn beside it: Derived({fanned[0]!r}, compute=..., scope='group') "
-        "receives this row's position among its parent's children and how many there are. A "
+        f"from it rather than drawn beside it: Derived({fanned[0]!r}, compute=..., scope='group')"
+        f"{no_null} receives this row's position among its parent's children and how many there "
+        "are. A "
         "column that is distinct in every row keeps the constraint on its own, and says so with "
         "Distinct -- Sequential does."
     )
@@ -594,10 +652,15 @@ def _check_a_tree_beside_a_partition(
         if apart
         else ""
     )
+    # A cap of one needs a parent for every row, and leaves a null share one group of its own
+    # where NULLs are one value: tied_tree_beside_a_fan_out_cap_null_kept loaded 1 of 20, and
+    # tree_beside_a_fan_out_cap_rows_over_parents is refused by the build.
+    room = [column for column in fanned if _room_for_a_cap(table, column, rows_of)]
+    no_null = " and no null share" if _a_null_share_counted_together(table, name, room) else ""
     capped = (
         "A fan-out that gives no parent two rows keeps the constraint on its own and says so with "
-        "max_children=1. "
-        if fanned
+        f"max_children=1{no_null}. "
+        if room
         else ""
     )
     raise InvalidShape(
@@ -635,14 +698,20 @@ def _each_null_is_its_own_group(table: Table, name: str | None) -> bool:
     )
 
 
-def _a_column_keeps_every_row_apart(table: Table, name: str, fields: tuple[str, ...]) -> bool:
+def _a_column_keeps_every_row_apart(
+    table: Table, name: str, fields: tuple[str, ...], rows_of: dict[type[Model], int]
+) -> bool:
     """Whether one column settles this constraint, whatever the others do.
 
-    A combination is distinct as soon as one of its columns is, so three proofs
+    A combination is distinct as soon as one of its columns is, so four proofs
     answer for every check at once, and one spelling cannot read a proof another
     ignores. A ``Distinct`` column, each of whose rows holds a value no other row
     holds. A NULL in every row, while each NULL is its own group, which keeps every
-    row out of the index. And a tree in which no row has two children.
+    row out of the index. A tree in which no row has two children. And a ``Paired``
+    whose relation has one parent: its partition is one group, partners are distinct
+    inside a group, so every row holds a partner no other row holds.
+    ``paired_key_alone_over_one_parent`` and ``paired_key_alone_over_one_declared_parent``
+    load twenty times in twenty and hold it, each spelling of the one parent.
 
     It holds under a condition as well, since a group of one row has nothing to
     count, so a ``PerParent`` is not consulted and may say what it likes.
@@ -661,8 +730,10 @@ def _a_column_keeps_every_row_apart(table: Table, name: str, fields: tuple[str, 
     held = [_held(table, column) for column in fields]
     if any(isinstance(one, Distinct) and one.is_distinct_per_row() for one in held):
         return True
+    if any(isinstance(one, Paired) and _one_group(table, one, rows_of) for one in held):
+        return True
     return _each_null_is_its_own_group(table, name) and any(
-        isinstance(one, _LeftOut) and one.holds_null for one in held
+        isinstance(one, Constant) and one.value(0, 0.0) is None for one in held
     )
 
 
@@ -726,6 +797,12 @@ def _held(table: Table, column: str) -> object:
     if hasattr(literal, "resolve_expression") and not isinstance(literal, Now):
         return None
     return _LeftOut(literal)
+
+
+def _one_group(table: Table, paired: Paired, rows_of: dict[type[Model], int]) -> bool:
+    """Whether a pairing's relation is known to spread its rows over one parent."""
+    relation = cast("FanOut", table.fields[paired.relation])
+    return _parents_available(table, paired.relation, relation, rows_of) == 1
 
 
 def _a_flat_tree(table: Table, name: str) -> str:
@@ -870,13 +947,29 @@ def _check_a_fan_out_alone(
     # The sentence above says the null share's rows are one group, so an offer that keeps the
     # share is refused again: test_a_fan_out_alone_offers_what_loads_once_the_null_share_is_gone.
     no_null = " and no null share" if tied else ""
+    capped = (
+        f"max_children=1{no_null}, which caps every parent at one row whatever the sizes weigh, "
+        "or by "
+        if _room_for_a_cap(table, column, rows_of)
+        else ""
+    )
     raise InvalidShape(
         f"{rule}, and {fan_out!r} is a partition that exists to give some parents more than one, "
         "so the load fails inside COPY at a row number that moves when the seed does. "
-        f"{tied}A one-to-one is filled by max_children=1{no_null}, which caps every parent at one "
-        "row whatever the sizes weigh, or by FanOut(Constant(1)) with no childless "
+        f"{tied}A one-to-one is filled by {capped}FanOut(Constant(1)) with no childless "
         f"share{no_null} over at least as many parents as this table has rows."
     )
+
+
+def _room_for_a_cap(table: Table, column: str, rows_of: dict[type[Model], int]) -> bool:
+    """Whether a cap of one on this fan-out could hold every row, so a refusal may offer it.
+
+    The build counts every row against the parents a cap leaves room for, a null share's
+    included, and refuses the partition before ``COPY`` where they do not fit. A parent this
+    shape does not build has however many rows it has, so the offer stands there.
+    """
+    parent_rows = _parents_available(table, column, cast("FanOut", table.fields[column]), rows_of)
+    return parent_rows is None or table.rows <= parent_rows
 
 
 def _check_a_fan_out_on_a_unique_column(table: Table, rows_of: dict[type[Model], int]) -> None:
@@ -902,7 +995,7 @@ def _check_a_fan_out_on_a_unique_column(table: Table, rows_of: dict[type[Model],
             _check_a_fan_out_alone(table, None, column, rows_of)
 
 
-def _what_makes_a_unique_column_new(field: Field[Any, Any]) -> str:
+def _what_makes_a_unique_column_new(field: Field[Any, Any], rows: int) -> str:
     """The remedy for a unique left-out column, named for the field and loaded at several seeds.
 
     **A distribution, because a db_default new in every row has one true instance.** A
@@ -913,6 +1006,9 @@ def _what_makes_a_unique_column_new(field: Field[Any, Any]) -> str:
     ``test_the_distribution_a_unique_left_out_column_is_offered_loads`` builds the three
     distributions, and ``test_a_unique_uuid_left_out_is_offered_the_db_default_that_is_new_in_every_row``
     holds the fourth.
+
+    **Sequential(1, 1) only where :func:`_counts_to` says it builds**, and a Projection
+    alone anywhere else, since no other distribution here is ``Distinct``.
     """
     if isinstance(field, UUIDField):
         return (
@@ -924,12 +1020,42 @@ def _what_makes_a_unique_column_new(field: Field[Any, Any]) -> str:
         offered = Sequential(start, datetime.timedelta(seconds=1))
     elif isinstance(field, DateField):
         offered = Sequential(datetime.date(2020, 1, 1), datetime.timedelta(days=1))
-    else:
+    elif _counts_to(field, rows):
         offered = Sequential(1, 1)
+    else:
+        return (
+            f"No Distinct distribution here fits a {type(field).__name__} of {rows} rows, so "
+            "fill it with a Projection with columns= and sql=."
+        )
     return (
         f"Declare the column with a distribution that is Distinct, such as {field.name}={offered!r} "
         "(Sequential implements Distinct)."
     )
+
+
+def _counts_to(field: Field[Any, Any], rows: int) -> bool:
+    """Whether ``Sequential(1, 1)`` writes 1 to ``rows`` into this column and the load takes it.
+
+    Measured at two hundred rows, twenty seeds each. Integers, floats, JSON and a duration
+    load every time. Text loads where its max_length holds the digits of ``rows`` and fails
+    with a value too long one short of it, and a decimal where its digits before the point
+    do, failing with a numeric overflow. A time, an IP address, binary and a boolean load
+    never, each a TypeError or a ValidationError, and so does any field not named here.
+    A small integer, positive or not, holds 32767 at most, so it loads up to that many rows
+    and fails one row past it with a value out of range; an integer's own ceiling is two
+    billion rows away. ``test_the_fallback_is_offered_where_it_builds`` and
+    ``test_the_fallback_is_withheld_where_it_cannot_build`` hold each type and every bound,
+    and ``test_the_fallback_is_offered_up_to_the_last_value_a_small_integer_holds`` the
+    small integer's from below.
+    """
+    digits = len(str(rows))
+    if isinstance(field, SmallIntegerField):
+        return rows <= 2**15 - 1
+    if isinstance(field, DecimalField):
+        return field.max_digits - field.decimal_places >= digits
+    if isinstance(field, (CharField, TextField)):
+        return field.max_length is None or field.max_length >= digits
+    return isinstance(field, (IntegerField, FloatField, JSONField, DurationField))
 
 
 def _check_a_unique_column_left_to_one_value(table: Table) -> None:
@@ -958,7 +1084,7 @@ def _check_a_unique_column_left_to_one_value(table: Table) -> None:
         if field.unique and isinstance(held, _LeftOut) and not held.holds_null:
             raise InvalidShape(
                 f"{table.model.__name__}.{field.name} is unique and holds {held!r}, so "
-                f"{table.rows} rows cannot load. {_what_makes_a_unique_column_new(field)}"
+                f"{table.rows} rows cannot load. {_what_makes_a_unique_column_new(field, table.rows)}"
             )
 
 
@@ -1095,7 +1221,7 @@ def _cannot_collide(table: Table, column: str, rows_of: dict[type[Model], int]) 
     """
     fan_out = cast("FanOut", table.fields[column])
     parent_rows = _parents_available(table, column, fan_out, rows_of)
-    return fan_out.max_children == 1 or (
+    return (fan_out.max_children == 1 and _room_for_a_cap(table, column, rows_of)) or (
         isinstance(fan_out.sizes, Bounded)
         and fan_out.sizes.distinct_values() == 1
         and not fan_out.childless
@@ -1273,6 +1399,74 @@ def _check_conditional_over_a_tree(
         "condition; a column of the constraint that is distinct in every row, which says so with "
         f"Distinct -- Sequential does; {_a_flat_tree(table, name)}; or a Projection with columns= "
         "and sql=."
+    )
+
+
+def _check_conditional_over_draws(
+    table: Table,
+    name: str,
+    fields: tuple[str, ...],
+    column: str,
+    values: tuple[object, ...],
+    declared: object,
+) -> None:
+    """A condition over a constraint no column of which is partitioned.
+
+    ``UniqueConstraint(fields=["label"], condition=Q(state="x"))`` with both drawn. Every row
+    draws its label without seeing another, so two rows inside the condition sharing one is
+    a matter of the seed at any weight: measured on ``testapp_drawn_condition_over_a_draw``,
+    no loads in twenty, and ten at a share of one in a hundred. A ``Paired`` in the group is
+    the same defect, since its partners are kept apart only inside its relation's groups, and
+    so is a ``PerParent`` over a fan-out outside the constraint, which keeps a different rule.
+
+    **There is no partition here to offer a PerParent over**, which is why this used to be
+    skipped. What builds: a column of the constraint that is ``Distinct``, where one of them
+    is drawn rather than paired; the condition column left out where its NULL meets none of
+    the condition; and a statement. Each loaded twenty times in twenty on the refused
+    table's sizes.
+
+    A column of the constraint that is not drawn per row and not a ``Paired`` -- a
+    derivation, or one :func:`_held` cannot read -- leaves it to the other two nets, as the
+    arrangement checks do: ``Derived("owner", ..., scope="group")`` keeps it, twenty times in
+    twenty, and that is not readable here. So is a derivation filling the condition column,
+    unless it is a ``PerParent``, whose values are.
+    """
+    grouped = [_held(table, field) for field in fields]
+    if not all(_is_drawn_per_row(one) or isinstance(one, Paired) for one in grouped):
+        return
+    if isinstance(declared, PerParent):
+        if (
+            _produces_any(declared.special, values) is False
+            and _produces_any(declared.rest, values) is False
+        ):
+            return
+        asks = f"is decided per {declared.relation}, which is no group of this constraint"
+    elif isinstance(declared, Derivation) or _produces_any(declared, values) is False:
+        return
+    else:
+        asks = _asks(table, declared, values)
+    where = table.model.__name__
+    named = [
+        f"{where}.{field} is paired per {one.relation}"
+        if isinstance(one, Paired)
+        else f"{where}.{field}={one!r} is drawn per row"
+        for field, one in zip(fields, grouped, strict=True)
+    ]
+    offers: list[str] = []
+    if any(not isinstance(one, Paired) for one in grouped):
+        offers.append(
+            "a column of the constraint that is distinct in every row, which says so with Distinct "
+            "-- Sequential does"
+        )
+    if _may_be_left_out(table, column) and _produces_any(_LeftOut(None), values) is False:
+        offers.append(f"{column} left out of the shape, which holds NULL so no row is inside")
+    raise InvalidShape(
+        f"{name} permits one row with {_matching(column, values)} per ({', '.join(fields)}), and "
+        f"{', '.join(named)}; {where}.{column}={declared!r} {asks}. No column of the constraint is "
+        "partitioned, so nothing is decided per group and no row inside the condition can see "
+        "whether another in its group is inside too. Two of them sharing a group is a matter of "
+        "the seed at any weight, and the load then fails inside COPY at a row number that moves "
+        f"when the seed does. What keeps it: {'; '.join([*offers, 'a Projection with columns= and sql='])}."
     )
 
 

@@ -619,9 +619,22 @@ def test_a_tree_beside_a_fan_out_is_refused() -> None:
     assert "one_branch_per_pair" in message
     assert "Branch.parent is a Tree" in message
     assert "Branch.company is a fan-out" in message
-    assert "max_children=1" in message
+    # 200 rows over 50 companies: a cap of one cannot place them, and Shape refuses it.
+    assert "max_children=1" not in message
+    assert "Distinct" in message
+    assert "Leaving parent out of the shape" in message
     assert "Constant(1)" in message
     _assert_names_only_what_a_tree_accepts(message)
+
+
+def test_a_tree_beside_a_fan_out_over_enough_parents_is_offered_a_cap_of_one() -> None:
+    # 200 rows over 300 companies, where the cap of one is accepted by the test below.
+    message = _refusal(
+        _companies(300), Table(Branch, rows=200, parent=_tree(), company=FanOut(Zipf()))
+    )
+
+    assert "one_branch_per_pair" in message
+    assert "max_children=1" in message
 
 
 def test_a_tree_beside_a_fan_out_with_a_cap_of_one_is_accepted() -> None:
@@ -1034,7 +1047,9 @@ def test_two_trees_in_a_conditional_uniqueness_are_refused() -> None:
     assert "Crossed.right is a Tree" in message
 
 
-def test_a_conditional_uniqueness_over_no_tree_and_no_fan_out_stays_undecided() -> None:
+def test_a_conditional_uniqueness_over_no_tree_and_no_fan_out_is_refused() -> None:
+    # It used to be skipped, since there is no partition to offer a PerParent over. It cannot
+    # load at any seed: about 100 live rows over 2 tags, where the constraint allows 2.
     with isolate_apps("tests.testapp"):
 
         class Plain(models.Model):
@@ -1051,9 +1066,18 @@ def test_a_conditional_uniqueness_over_no_tree_and_no_fan_out_stays_undecided() 
                     ),
                 ]
 
-        Shape(
-            Table(Plain, rows=200, tag=Skew({"a": 1, "b": 1}), status=Skew({"live": 1, "dead": 1}))
-        )
+        with pytest.raises(InvalidShape) as raised:
+            Shape(
+                Table(
+                    Plain, rows=200, tag=Skew({"a": 1, "b": 1}), status=Skew({"live": 1, "dead": 1})
+                )
+            )
+
+    message = str(raised.value)
+    assert "one_live" in message
+    assert "Plain.tag=Skew" in message
+    assert "No column of the constraint is partitioned" in message
+    assert "Projection" in message
 
 
 def test_a_conditional_uniqueness_over_a_tree_and_a_fan_out_names_the_fan_out() -> None:

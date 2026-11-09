@@ -220,8 +220,9 @@ how many companies there are.
   trees loaded 0 times at 200 rows. The draws are keyed on the names, so another
   table's 10 is another number. `Paired` is refused over a tree, so what keeps the
   constraint is a `Distinct` column, a fan-out that gives no parent two rows
-  (`max_children=1`, or the proof flat sizes make), a tree that gives no row two
-  children, leaving the tree out, or a `Projection` with `columns=` and `sql=`.
+  (`max_children=1` where the parents can place every row, or the proof flat sizes
+  make), a tree that gives no row two children, leaving the tree out, or a `Projection`
+  with `columns=` and `sql=`.
 - **A `Tree` in a conditional `UniqueConstraint` is refused** when a row can land
   inside the condition, as in one accepted reply per parent. A per-row draw
   cannot keep a rule about a family at any weight: on a table named
@@ -238,8 +239,8 @@ how many companies there are.
   it is the per-row draw again, and size only moves the odds: over twenty seeds that
   shape loaded 20 times at 200 rows over 300 people and once over 10. `PerParent` is
   refused on a relation, so the message offers what would build for that declaration:
-  `parents=` naming only keys outside the condition, no null share, a cap of one, sizes
-  of one value or one root on a tree, the column left out, a `Distinct` column in the
+  `parents=` naming only keys outside the condition, no null share, a cap of one where
+  the parents can place every row, sizes of one value or one root on a tree, the column left out, a `Distinct` column in the
   constraint, or a `Projection`. Accepted, each at 20 loads in 20:
   - nothing can land inside: `parents=(2, 3)` under `Q(owner=1)`, or `Q(owner=None)`
     with no null share. A `Paired` never writes NULL, and a tree always does.
@@ -364,7 +365,60 @@ how many companies there are.
   under `nulls_distinct=False` is one more group, so it takes the proof away, and
   that shape loaded 0 times in 20.
 
-### What it cannot decide, and leaves to the other two nets
+- **A condition's own spelling is read, not guessed at.** `Q(state__isnull=True)` is
+  `Q(state=None)`: over a column left out it puts every row inside, and it loaded 0
+  times in 20, as `Q(state=None)` did. `Q(label__isnull=False)` is met by any value, so
+  over a drawn `label` it is refused (0 in 20) and over a column left out it is accepted
+  (20 in 20). A `Value` is the value it wraps: `Q(state=Value("x"))` over a 10% share is
+  refused (0 in 20) and `Value("z")` accepted (20 in 20). An `F()` or another expression
+  as the value is a member that may be met in any row, never one that is not:
+  `Q(state=F("label"))` over two draws and `Q(owner=F("other"))` under a cap of one are
+  refused, and loaded 0 and 18 times in 20.
+- **A condition over a constraint that nothing partitions is refused** when a row can
+  land inside it: `UniqueConstraint(fields=["label"], condition=Q(state="x"))` with both
+  drawn, or `fields=["owner"]` with `owner` a `Paired`. Every row draws without seeing
+  another, so two rows inside sharing a value is the seed. Over twenty seeds, at 200
+  rows: a 10% `state` loaded 0 times and a 1% one 10, a `Constant("x")` 0, `Q(label="a")`
+  on the drawn column itself 0, a `PerParent("company", ...)` in `state`, which keeps a
+  rule about another group, 0, and `Q(owner=1)` with `owner` left out over a
+  `db_default` of 1 0. Over a `Paired` a 10% `state` loaded 0 and the `PerParent` 0.
+  What the message offers, each 20 times in 20 on the refused table's sizes: a column of
+  the constraint that is `Distinct`, where one is drawn rather than paired; the condition
+  column left out, where it is nullable, since its NULL meets no equality; and a
+  `Projection`. A `PerParent` that writes none of the members is accepted, as any filling
+  outside the condition is, and loaded 20 in 20.
+- **Under `nulls_distinct=False`, a remedy that keeps a null share is not offered.** The
+  share's rows are one group there, so a `Paired` over that relation, a
+  `Derived(..., scope="group")` beside it and a cap of one are each offered with "no null
+  share", and a `Paired` whose relation keeps one is refused: beside two tied fan-outs it
+  loaded 0 times in 20, and 20 with the share dropped. A cap of one over a fan-out with a
+  share loaded 0 times beside a draw, and 20 without it.
+- **A cap of one is offered only where it can place every row**, or where the parents
+  are not declared in this shape. `max_children=1` over
+  fewer parents than rows cannot be partitioned, and the build refuses it before a row is
+  written, so a tree beside a fan-out of 200 rows over 50 companies is not offered one,
+  and the cap declared there is refused at `Shape()`, naming the arithmetic. Over 300
+  companies it is offered and accepted. A `OneToOneField` capped over fewer parents than
+  rows is refused the same way.
+- **A NULL declared in every row is read as one.** `Constant(None)`, which a Python
+  `default=None` becomes, keeps every row out of the index while each NULL is its own
+  group, so beside a fan-out and alone it is accepted (20 in 20 each), where the
+  pigeonhole used to count it as one value. Under `nulls_distinct=False` it is that one
+  value, and refused (0 in 20).
+- **A `Paired` whose relation has one parent is distinct in every row.** Its partition
+  is one group, and partners are distinct inside a group, so every row holds a partner
+  no other row holds. Pinned by `parents=(1,)` or one company declared, it is accepted
+  under any condition, `Q(owner=1)` and a drawn `Q(state="x")` alike, 20 times in 20.
+- **A unique column left to one `db_default` is offered what builds for its type.**
+  `Sequential(1, 1)` writes 1 to `rows`, which an integer, a float, JSON and a duration
+  take, 20 times in 20 at 200 rows. A small integer, positive or not, takes it up to 32767
+  rows and fails one row past them, out of range. Text takes it where `max_length` holds the digits of
+  `rows`: three characters at 200 rows loaded 20 times and two none, too long. A decimal
+  takes it where the digits before the point do: `(5, 2)` loaded 20 and `(4, 2)` none, an
+  overflow. A time, an IP address, binary and a boolean take it never, and are offered a
+  `Projection` alone. A date, a datetime and a UUID keep the offers they had.
+
+### What it does not read, and leaves to the other two nets
 
 - A condition that describes no set of values for one column: a negation, two
   clauses joined by AND, a comparison like `__gt` (written either as a keyword
@@ -374,18 +428,10 @@ how many companies there are.
   wrote out is not that -- it is a list of values, and deciding membership in it
   needs no planner.
 - A constraint written over `expressions` rather than `fields`.
-- A conditional constraint whose grouping columns include neither a declared
-  `FanOut` nor a declared `Tree`, where no relation fills the condition, since there is
-  no partition here to offer a `PerParent` over. This one is a gap in the refusal rather
-  than something undecidable: each of these fails in `COPY`. Over twenty seeds, on tables
-  named for each shape, over a drawn `label` at 200 rows: `Q(state="x")` with `state` a
-  10% `Skew` loaded 0 times, at 1% 10 times, with `state` a `Constant("x")` 0 times,
-  `Q(label="a")` 0 times, a `PerParent("company", last="x", ...)` in `state` 0 times, and
-  `Q(owner=1)` with `owner` left out over a `db_default` of 1 0 times. Over a `Paired`,
-  a 10% `Skew` loaded 0 times and the `PerParent` 0 times.
-- A derivation in a constraint beside a relation in the condition, since whether its
-  `compute=` is arranged is not readable here: `Q(owner=1)` over a `label` numbered per
-  company loaded once in 20, because the numbers repeat across companies.
+- A derivation in a conditional constraint's group, beside a relation in the condition
+  or a drawn one, since whether its `compute=` is arranged is not readable here:
+  `Q(owner=1)` over a `label` numbered per company loaded once in 20, because the
+  numbers repeat across companies, and numbered per owner it loaded 20 times in 20.
 - A column the shape leaves out whose `db_default` is an expression other than
   `Now()`. Nothing here can read what it writes: `gen_random_uuid()` is new in every
   row and loaded 20 times in 20, and a call this package has not read may do either.
@@ -399,6 +445,13 @@ how many companies there are.
 
 In every one of those the declaration is allowed through, and net 2 and net 3
 are what catch it.
+
+One more is allowed through and caught before either: a cap of one alone whose null
+share leaves room for the rows that have a parent, such as
+`FanOut(Zipf(), max_children=1, null=0.8)` with 200 rows over 50 companies. The build
+counts every row against the parents, the share included, and refuses it when the
+partition is drawn, naming the arithmetic, so it never reaches `COPY`. That refusal is
+left to the build.
 
 ### What it cannot count, and refuses anyway
 
@@ -419,9 +472,10 @@ refused, and the arithmetic is what drops out of the message.
   loads 20 times in 20 and is refused, because a wide draw is not `Distinct`, and over
   three hundred people with a three-value `label` it loaded 19. Room moves the odds and
   settles nothing, as it does for a drawn tuple. The remedy is a `Distinct` column.
-- A key on a `Paired` whose relation has one parent. `Q(person=1)` over `(person)` with
-  `company=FanOut(Zipf(), parents=(1,))` leaves one group, so it loads 20 times in 20,
-  and nothing here counts the groups. The remedy is the column left out or a `Projection`.
+- An expression as a condition's value, which may be met in any row. `Q(state=F("label"))`
+  over a `state` drawn from values `label` never holds, and `Q(owner=F("other"))` with
+  `other` left out, so every row compares with NULL, each load 20 times in 20 and are
+  refused. The remedy is a condition this package reads, or a `Projection`.
 - A distribution that cannot enumerate itself and a fan-out over a parent this
   shape does not build, under an unconditional constraint. Both make the *capacity*
   unknown, so the refusal falls back to the structural sentence.

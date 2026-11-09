@@ -43,9 +43,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now, and everything the message offers loads over draws alone. `Q(company=1)` over
   `(person)` with `person` paired on `company` is accepted wherever it stands, since one
   company's partners are distinct, and that takes back a refusal beside another `FanOut`.
-  `Q(owner=99)`, a key over a `Uniform(1, 10**9)` and a key on a `Paired` whose relation
-  has one parent are refused although each loads. A condition no relation fills over
-  draws alone stays accepted, and the invariants page counts how often it loads.
+  `Q(owner=99)` and a key over a `Uniform(1, 10**9)` are refused although each loads.
 - **A `Paired` beside its own relation keeps a conditional uniqueness.** Its partners are
   distinct inside each group, so `(company, person)` holds under any condition, and
   `Q(status="on")` over that pair is no longer refused. `Q(person=1)` over `company` holds
@@ -80,7 +78,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `gen_random_uuid()` loads.
 - **A `unique=True` column left to a `db_default` of one value is refused.** No check
   read that spelling, so a literal and `Now()` were accepted and died in `COPY` at the
-  second row. The refusal names a `Sequential` for the field's type.
+  second row. The refusal names a `Sequential` where one builds for the field's type,
+  and a `Projection` alone where none does.
 - **A condition reads a column left out too.** `Q(status=None)` over one puts every
   row inside the condition, and so does `Q(status="on")` over a `db_default` of
   `"on"`. Both were accepted and died in `COPY`; both are refused.
@@ -111,6 +110,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A `FanOut` on a `unique=True` column is accepted at one row.** The same index
   written as a `UniqueConstraint` was, and the field was refused for a skew that had
   no second row to put on a parent. One check now decides both spellings, and it loads.
+- **A condition is read as it is spelled.** `Q(x__isnull=True)` was read as never met,
+  so over a column left out every row was inside and the load died in `COPY`; it is
+  `Q(x=None)` now. `__isnull=False` is met by any value, and a `Value` is the value it
+  wraps. An `F()` or another expression as the value was read as never met too, and
+  `Q(owner=F("boss"))` loaded 0 times in 20; it is now a member that may be met in any
+  row, so `Q(state=F("label"))` over a `state` that never holds a label is refused
+  although it loads.
+- **A conditional uniqueness that nothing partitions is refused.** A constraint over
+  draws alone, or a `Paired` alone, with a condition a row can meet, was skipped, and
+  seven such shapes loaded 0 times in 20. The refusal offers a `Distinct` column of the
+  constraint, the condition column left out where it is nullable, and a `Projection`,
+  each loaded. A derivation in the group stays with the other two nets.
+- **Under `nulls_distinct=False` a refusal no longer offers a remedy that keeps a null
+  share**, and a `Paired` whose relation keeps one is refused: offered beside two fan-outs,
+  it loaded 0 times in 20. A cap of one is no longer offered over fewer parents than rows,
+  and one declared there beside a tree is refused at `Shape()`, where it was accepted and
+  failed in the build. `Constant(None)`, and a Python `default=None`, are read as a NULL
+  in every row, which keeps every row apart while each NULL is its own group and is one
+  value where they tie; the pigeonhole counted them as one value either way.
+- **A `Paired` whose relation has one parent keeps any uniqueness over it.** Its one
+  group gives every row a different partner, and it was refused under a condition
+  although it loads.
 
 ### Documentation
 

@@ -10,7 +10,10 @@ so each loaded table is made to refuse a copy of one of its own rows.
 The tree beside nothing at all has its loads in
 ``test_build_flat_tree_on_a_unique_key.py``; the tree beside a draw, a fan-out,
 a second tree and a conditional uniqueness are here, with the ``Projection`` each
-of them offers.
+of them offers. The tree left out of a self-key that ties its NULLs is no remedy, and
+``Shape`` refuses it before a row is written, so
+``test_the_tree_left_out_of_a_self_key_that_ties_its_nulls_is_not_a_remedy`` is in
+``tests/declaration/test_check_constraints.py``, with no database.
 """
 
 from __future__ import annotations
@@ -26,7 +29,6 @@ from django.db.models import F, Model
 from django_data_shape import (
     Constant,
     FanOut,
-    InvalidShape,
     Projection,
     Sequential,
     Shape,
@@ -203,14 +205,6 @@ def test_a_projection_fills_a_unique_self_key_that_counts_its_nulls_as_one_value
     assert len(links) == _ROWS
     assert [key for key, parent in links.items() if parent is None] == [1]
     _refuses_a_copy_of(TiedLink, previous__isnull=False)
-
-
-@pytest.mark.skipif(django.VERSION < (5, 0), reason="nulls_distinct arrived in Django 5.0")
-def test_the_tree_left_out_of_a_self_key_that_ties_its_nulls_is_not_a_remedy() -> None:
-    # The refusal does not offer this, and here is why: every row would hold the
-    # one NULL the constraint allows once. Shape now says so before a row is written.
-    with pytest.raises(InvalidShape, match="one_tied_link_after_each.*can produce 1"):
-        Shape(Table(TiedLink, rows=_ROWS))
 
 
 # A self-key that refuses NULL, which no tree can fill.

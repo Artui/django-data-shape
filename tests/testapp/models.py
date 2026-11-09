@@ -531,14 +531,13 @@ class Seat(models.Model):
 class Booking(models.Model):
     """A model carrying every conditional constraint the pre-check cannot read.
 
-    One model rather than eight, because what is being tested is a set of
-    skips: a condition written over an expression rather than fields, one
-    grouped by a column no fan-out partitions, one joining two clauses with AND,
-    an OR whose branches name two different columns, a negated OR, an OR one of
-    whose branches is a comparison, a comparison written as a keyword argument,
-    and one written as a bare lookup expression -- plus a check constraint,
-    which is not a unique constraint at all. A declaration naming this model has
-    to be accepted whole.
+    One model rather than seven, because what is being tested is a set of
+    skips: a condition written over an expression rather than fields, one joining
+    two clauses with AND, an OR whose branches name two different columns, a
+    negated OR, an OR one of whose branches is a comparison, a comparison written
+    as a keyword argument, and one written as a bare lookup expression -- plus a
+    check constraint, which is not a unique constraint at all. A declaration
+    naming this model has to be accepted whole.
 
     Two used to be here and are not skips any more. ``state__in`` moved to
     :class:`Review`, and a nested ``Q(Q(a) | Q(b))`` over one column moved to
@@ -564,11 +563,6 @@ class Booking(models.Model):
                 models.functions.Lower("room"),
                 condition=models.Q(state="HELD"),
                 name="booking_over_an_expression",
-            ),
-            models.UniqueConstraint(
-                fields=["room"],
-                condition=models.Q(state="HELD"),
-                name="booking_grouped_by_a_plain_column",
             ),
             models.UniqueConstraint(
                 fields=["company"],

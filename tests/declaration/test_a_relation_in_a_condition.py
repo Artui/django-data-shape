@@ -52,7 +52,7 @@ _ON_POSTGRES = pytest.mark.skipif(
 class _Case(NamedTuple):
     name: str
     fields: tuple[str, ...]
-    condition: Q
+    condition: Q | None
     columns: dict[str, Any]
     rows: int = 200
     companies: int = 50
@@ -570,16 +570,8 @@ _REFUSED = (
         {"owner": FanOut(Zipf()), "label": _skew()},
         people=300,
     ),
-    # Each of these loads 20 of 20 and is refused. A wide draw is not Distinct, a key is
-    # read as able to land inside until the build reads the parent, and a pairing's relation
-    # with one parent leaves one group, which nothing here counts.
-    _Case(
-        "paired_key_alone_over_one_parent",
-        ("owner",),
-        Q(owner=1),
-        {"company": FanOut(Zipf(), parents=(1,)), "owner": _paired()},
-        people=300,
-    ),
+    # Each of these loads 20 of 20 and is refused. A wide draw is not Distinct, and a key is
+    # read as able to land inside until the build reads the parent.
     _Case(
         "key_under_a_wide_draw",
         ("label",),
@@ -891,6 +883,34 @@ _KEPT = (
         ("label",),
         Q(owner=1),
         {"owner": FanOut(Zipf())},
+    ),
+    # A pairing's relation with one parent is one group, so every partner is distinct:
+    # pinned by parents= and by the one company declared, under a key and under a draw.
+    _Case(
+        "paired_key_alone_over_one_parent",
+        ("owner",),
+        Q(owner=1),
+        {"company": FanOut(Zipf(), parents=(1,)), "owner": _paired()},
+        people=300,
+    ),
+    _Case(
+        "paired_key_alone_over_one_declared_parent",
+        ("owner",),
+        Q(owner=1),
+        {"company": FanOut(Zipf()), "owner": _paired()},
+        companies=1,
+        people=300,
+    ),
+    _Case(
+        "paired_alone_over_one_parent_under_a_draw",
+        ("owner",),
+        Q(state="x"),
+        {
+            "company": FanOut(Zipf(), parents=(1,)),
+            "owner": _paired(),
+            "state": Skew({"x": 0.5, "y": 0.5}),
+        },
+        people=300,
     ),
 )
 
@@ -1286,9 +1306,9 @@ def test_the_statement_the_refusal_offers_builds_under_a_draw() -> None:
             editor.delete_model(model)
 
 
-# No relation fills the condition and nothing partitions the constraint, or a derivation
-# stands in the group. Each is accepted and fails in COPY, and docs/invariants.md names it.
-_LEFT_TO_THE_NETS = (
+# No relation fills the condition and nothing partitions the constraint. Each was accepted
+# and failed in COPY, and each loads as its comment says.
+_OVER_DRAWS = (
     # Loads 0 of 20.
     _Case(
         "drawn_condition_over_a_draw",
@@ -1356,18 +1376,11 @@ _LEFT_TO_THE_NETS = (
         {"label": _skew()},
         owner_db_default=1,
     ),
-    # Loads 1 of 20.
-    _Case(
-        "key_under_a_derivation",
-        ("label",),
-        Q(owner=1),
-        {
-            "owner": FanOut(Zipf()),
-            "company": FanOut(Zipf()),
-            "label": Derived("company", compute=_named_for_position, scope="group"),
-        },
-    ),
 )
+
+
+def _over_draws(name: str) -> _Case:
+    return next(case for case in _OVER_DRAWS if case.name == name)
 
 
 @pytest.mark.parametrize(
@@ -1378,11 +1391,171 @@ _LEFT_TO_THE_NETS = (
             id=case.name,
             marks=[_NEEDS_DJANGO_5] if case.owner_db_default is not None else [],
         )
-        for case in _LEFT_TO_THE_NETS
+        for case in _OVER_DRAWS
     ],
 )
-def test_what_no_relation_decides_over_draws_is_left_to_the_other_two_nets(case: _Case) -> None:
+def test_a_condition_over_a_constraint_nothing_partitions_is_refused(case: _Case) -> None:
+    message = _refusal(case)
+
+    assert f"uq_{case.name}"[:60] in message
+    assert "No column of the constraint is partitioned" in message
+    # A PerParent declared on the condition column is quoted back; none is offered.
+    assert "PerParent(" not in message.split("What keeps it:")[1]
+
+
+_DISTINCT = Sequential(1, 1)
+
+
+# Each remedy loads 20 of 20 on its own table.
+@_ON_POSTGRES
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.parametrize(
+    ("refused", "offered", "withheld", "builds"),
+    [
+        pytest.param(
+            _over_draws("drawn_condition_over_a_draw"),
+            ("Distinct", "state left out of the shape"),
+            (),
+            (
+                _over_draws("drawn_condition_over_a_draw")._replace(
+                    name="drawn_condition_over_a_draw_distinct",
+                    columns={"state": Skew({"x": 0.1, "y": 0.9}), "label": _DISTINCT},
+                ),
+                _over_draws("drawn_condition_over_a_draw")._replace(
+                    name="drawn_condition_over_a_draw_left_out", columns={"label": _skew()}
+                ),
+            ),
+            id="drawn_condition",
+        ),
+        pytest.param(
+            _over_draws("condition_on_the_draw_itself"),
+            ("Distinct", "label left out of the shape"),
+            (),
+            (
+                _over_draws("condition_on_the_draw_itself")._replace(
+                    name="condition_on_the_draw_itself_distinct", columns={"label": _DISTINCT}
+                ),
+                _over_draws("condition_on_the_draw_itself")._replace(
+                    name="condition_on_the_draw_itself_left_out", columns={}
+                ),
+            ),
+            id="on_the_draw_itself",
+        ),
+        pytest.param(
+            _over_draws("drawn_condition_over_a_pairing"),
+            ("state left out of the shape",),
+            ("Distinct",),
+            (
+                _over_draws("drawn_condition_over_a_pairing")._replace(
+                    name="drawn_condition_over_a_pairing_left_out",
+                    columns={"company": _flat(), "owner": _paired()},
+                ),
+            ),
+            id="over_a_pairing",
+        ),
+        pytest.param(
+            _over_draws("key_a_db_default_holds_under_a_draw"),
+            ("Distinct",),
+            ("left out of the shape",),
+            (
+                _over_draws("key_a_db_default_holds_under_a_draw")._replace(
+                    name="key_a_db_default_holds_under_a_draw_distinct",
+                    columns={"label": _DISTINCT},
+                ),
+            ),
+            marks=_NEEDS_DJANGO_5,
+            id="db_default_key",
+        ),
+    ],
+)
+def test_a_condition_over_draws_is_offered_only_what_builds(
+    refused: _Case,
+    offered: tuple[str, ...],
+    withheld: tuple[str, ...],
+    builds: tuple[_Case, ...],
+) -> None:
+    message = _refusal(refused)
+
+    assert "Projection" in message
+    for one in offered:
+        assert one in message
+    for one in withheld:
+        assert one not in message
+    for one in builds:
+        _assert_loads(one)
+
+
+def test_a_derivation_grouped_under_a_drawn_condition_is_left_to_the_other_two_nets() -> None:
+    # As under a relation's condition: whether a compute= keeps the rule is not readable here.
+    case = _Case(
+        "derivation_under_a_drawn_condition",
+        ("label",),
+        Q(state="x"),
+        {
+            "company": FanOut(Zipf()),
+            "state": Skew({"x": 0.1, "y": 0.9}),
+            "label": Derived("company", compute=_named_for_position, scope="group"),
+        },
+    )
+
     Shape(*_tables(case, _model(case)))
+
+
+@_ON_POSTGRES
+@pytest.mark.django_db(transaction=True)
+def test_a_rule_per_parent_that_writes_no_member_keeps_every_row_outside() -> None:
+    # Loads 20 of 20: no row holds "z", so no row is inside.
+    _assert_loads(
+        _over_draws("rule_per_parent_over_a_draw")._replace(
+            name="rule_per_parent_outside_a_draw", condition=Q(state="z")
+        )
+    )
+
+
+def test_a_condition_that_any_value_meets_is_named_as_written() -> None:
+    message = _refusal(
+        _over_draws("drawn_condition_over_a_draw")._replace(
+            name="any_value_or_one_over_a_draw",
+            condition=Q(state__isnull=False) | Q(state="x"),
+        )
+    )
+
+    assert "state in (NOT NULL, 'x')" in message
+    assert "may meet the condition in any row" in message
+
+
+def test_a_derivation_in_the_group_is_left_to_the_other_two_nets() -> None:
+    # Loads 1 of 20 grouped by company, which is no group of the constraint, and is accepted:
+    # whether a compute= keeps the rule is not readable here, and Derived("owner") keeps it.
+    case = _Case(
+        "key_under_a_derivation",
+        ("label",),
+        Q(owner=1),
+        {
+            "owner": FanOut(Zipf()),
+            "company": FanOut(Zipf()),
+            "label": Derived("company", compute=_named_for_position, scope="group"),
+        },
+    )
+
+    Shape(*_tables(case, _model(case)))
+
+
+@_ON_POSTGRES
+@pytest.mark.django_db(transaction=True)
+def test_a_derivation_grouped_by_the_key_keeps_the_condition() -> None:
+    # Loads 20 of 20.
+    _assert_loads(
+        _Case(
+            "key_under_a_derivation_by_owner",
+            ("label",),
+            Q(owner=1),
+            {
+                "owner": FanOut(Zipf()),
+                "label": Derived("owner", compute=_named_for_position, scope="group"),
+            },
+        )
+    )
 
 
 def test_the_tree_remedies_are_not_offered_where_they_prove_nothing() -> None:
@@ -1738,3 +1911,39 @@ def test_a_condition_that_is_no_set_of_values_is_offered_only_what_builds(
         assert one not in message
     for one in builds:
         _assert_loads(one)
+
+
+@pytest.mark.parametrize(
+    "condition",
+    [Q(prev__isnull=False), Q(prev=F("other"))],
+    ids=["not_null", "expression"],
+)
+def test_the_flat_tree_is_offered_only_for_a_condition_that_names_one_key(condition: Q) -> None:
+    # Sizes of one value give one key one child at most. A condition that is no one key puts
+    # every child of every row inside, so the same sizes prove nothing there.
+    case = _Case(
+        "tree_key_that_is_no_one_key",
+        ("company",),
+        condition,
+        {"company": FanOut(Zipf()), "prev": _tree()},
+    )
+
+    message = _refusal(case)
+
+    assert "uq_tree_key_that_is_no_one_key" in message
+    assert "one child at most" not in message
+
+
+def test_leaving_the_condition_column_out_is_not_offered_where_its_null_is_inside() -> None:
+    # A column left out holds NULL, which Q(state=None) is, so every row would be inside.
+    case = _Case(
+        "condition_on_null_over_a_draw",
+        ("label",),
+        Q(state=None),
+        {"state": Skew({None: 0.1, "y": 0.9}), "label": _skew()},
+    )
+
+    message = _refusal(case)
+
+    assert "No column of the constraint is partitioned" in message
+    assert "state left out" not in message
