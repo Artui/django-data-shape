@@ -20,6 +20,7 @@ from django_data_shape.distributions.distinct import Distinct
 from django_data_shape.relations.count_roots import count_roots
 from django_data_shape.relations.fan_out import FanOut
 from django_data_shape.relations.gives_no_row_two_children import gives_no_row_two_children
+from django_data_shape.relations.paired import Paired
 from django_data_shape.relations.tree import Tree
 
 
@@ -111,7 +112,10 @@ def check_constraints(tables: tuple[Table | Projection, ...]) -> None:
     yes. A fan-out over a parent this shape does not build, or one carrying a null
     share while each NULL is its own group, leaves only the capacity unknown. The
     arrangement refusals never needed it, so they stand, and what drops out is the
-    arithmetic in the message.
+    arithmetic in the message. A key under a condition is read the same way where
+    ``parents=`` does not settle it, since this runs before any parent's keys are read, so
+    ``Q(owner=99)`` over five people is refused although it would load. See
+    :func:`_check_a_relation_in_a_condition`.
 
     A :class:`~django_data_shape.declaration.projection.Projection` is skipped entirely. Its
     columns are copied along a join rather than drawn from distributions, so
@@ -206,8 +210,11 @@ def _check_one(
     # here can read, and the guard is held by
     # test_a_condition_nothing_can_read_is_left_alone: without it, None reads as the
     # value NULL and Q(token=None) is refused.
-    declared = _held(table, _attname_to_name(table.model).get(column, column))
+    named = _attname_to_name(table.model).get(column, column)
+    declared = _held(table, named)
     if declared is None:
+        return
+    if _a_pairing_keeps_every_pair_apart(table, name, fields):
         return
     # A partition with no group of two leaves the condition nothing to count, so what
     # fills it is not consulted, as with a column that keeps every row apart. Measured at
@@ -223,12 +230,18 @@ def _check_one(
     ):
         return
     grouping = [table.fields.get(field) for field in fields]
+    if not any(isinstance(one, (FanOut, Tree)) for one in grouping):
+        return
+    # Ahead of the two below, because a relation takes no PerParent and neither of their
+    # readings of what fills the condition can read one.
+    if isinstance(declared, (FanOut, Paired, Tree)):
+        _check_a_relation_in_a_condition(table, name, fields, named, values, declared, rows_of)
     # A fan-out first, whatever else is grouped beside it: one row per company
     # is enough to keep (parent, company), so its PerParent stays the remedy
     # even with a tree in the constraint.
-    if any(isinstance(one, FanOut) for one in grouping):
+    elif any(isinstance(one, FanOut) for one in grouping):
         _check_conditional(table, name, fields, capacity, column, values, declared)
-    elif any(isinstance(one, Tree) for one in grouping):
+    else:
         _check_conditional_over_a_tree(table, name, fields, column, values, declared)
 
 
@@ -611,8 +624,8 @@ def _each_null_is_its_own_group(table: Table, name: str) -> bool:
     constraint's name here, and its index always keeps the default.
 
     Everything that rests on the answer: :func:`_a_column_keeps_every_row_apart`,
-    :func:`_a_tree_gives_no_row_two_children`, :func:`_no_group_of_two` and
-    :func:`_capacity`. ``Distinct`` needs no reading, since a column of different
+    :func:`_a_tree_gives_no_row_two_children`, :func:`_no_group_of_two`,
+    :func:`_can_land_inside`, :func:`_its_relation_keeps_the_groups` and :func:`_capacity`. ``Distinct`` needs no reading, since a column of different
     values holds one NULL at most, so it keeps the rows apart either way.
     """
     return all(
@@ -1132,6 +1145,250 @@ def _check_conditional_over_a_tree(
     )
 
 
+def _check_a_relation_in_a_condition(
+    table: Table,
+    name: str,
+    fields: tuple[str, ...],
+    column: str,
+    values: tuple[object, ...],
+    declared: FanOut | Paired | Tree,
+    rows_of: dict[type[Model], int],
+) -> None:
+    """The condition names a relation, so what it tests is a key this package chose.
+
+    ``UniqueConstraint(fields=["company"], condition=Q(owner=1))`` with ``owner`` a
+    fan-out. The defect is :func:`_check_conditional`'s: which row holds a key comes from
+    the row index, so no row inside the condition can see whether another in its group is
+    inside too, and two of them sharing a group is a matter of the seed. Size moves the odds
+    and settles nothing: ``Q(owner=1)`` loaded twenty times in twenty at two hundred rows
+    over three hundred people, and one in twenty over ten.
+
+    **It is a check of its own because that remedy is refused here.** ``PerParent`` is a
+    derivation, and :class:`~django_data_shape.declaration.table.Table` refuses anything
+    but a ``FanOut``, a ``Paired`` or a ``Tree`` on a relation. So the message offers what
+    :func:`_what_keeps_a_relation_out` says would build for this declaration.
+
+    Three ways to be accepted. Nothing can land inside, which is
+    :func:`_can_land_inside`. At most one row per group lands inside, which is
+    :func:`_keeps_one_row_inside_per_group`. Or a column beside the relation is not drawn
+    per row, a derivation or one :func:`_held` cannot read, which leaves it to the other
+    two nets, as :func:`_check_conditional_over_a_tree` does. A ``Distinct`` column, a flat
+    tree in the constraint and a fan-out that leaves no group two rows have answered before
+    this runs, and so has a ``Paired`` beside its own relation.
+
+    **A key the parent does not have is read as able to land inside.** ``Q(owner=99)``
+    over five people loads every time and is refused, as ``Uniform(1, 9)`` is under
+    ``Q(status="accepted")``: unknown is read as a yes, and this package does not read a
+    parent's keys until the build.
+    """
+    inside = tuple(
+        value for value in values if _can_land_inside(table, name, fields, column, declared, value)
+    )
+    if not inside or _keeps_one_row_inside_per_group(
+        table, name, fields, column, inside, declared, rows_of
+    ):
+        return
+    others = [
+        field for field in fields if not isinstance(table.fields.get(field), (FanOut, Paired, Tree))
+    ]
+    if not all(_is_drawn_per_row(_held(table, field)) for field in others):
+        return
+    where = table.model.__name__
+    remedies = _what_keeps_a_relation_out(table, column, inside, declared, others, rows_of)
+    raise InvalidShape(
+        f"{name} permits one row with {_matching(column, inside)} per ({', '.join(fields)}), and "
+        f"{where}.{column}={declared!r} can write that. A relation's keys are spread over the "
+        "rows from the row index alone, so no row inside the condition can see whether another "
+        "in its group is inside too. Two of them sharing a group is a matter of the seed at any "
+        "size, and the load then fails inside COPY at a row number that moves when the seed "
+        "does. PerParent is no way out, since a relation takes only a FanOut, a Paired or a "
+        f"Tree. What keeps it: {remedies}."
+    )
+
+
+def _can_land_inside(
+    table: Table,
+    name: str,
+    fields: tuple[str, ...],
+    column: str,
+    declared: FanOut | Paired | Tree,
+    value: object,
+) -> bool:
+    """Whether a row this relation fills can hold ``value`` and count under the constraint.
+
+    NULL first. A row whose NULL is in a column of the constraint is out of the index while
+    each NULL is its own group, so it counts for nothing. Otherwise a fan-out writes one
+    only with a null share, a tree always, since its first row is a root, and a ``Paired``
+    never, since it asks for a partner per row and the null share of its relation thins
+    only that relation.
+
+    A key is inside unless ``parents=`` leaves it out, which a tree does not have. Compared
+    as text because a key is written in a condition and in ``parents=`` by hand, and
+    ``"1"`` and ``1`` are one key to the database.
+
+    .. warning::
+
+       **Conjuncts the coverage gate cannot see.** ``null_share`` in
+       ``test_a_relation_that_can_land_inside_the_condition_is_refused`` holds
+       ``column in fields``, and ``null_share_grouped_together`` the NULL reading.
+    """
+    if value is None:
+        if column in fields and _each_null_is_its_own_group(table, name):
+            return False
+        return bool(declared.null) if isinstance(declared, FanOut) else isinstance(declared, Tree)
+    parents = None if isinstance(declared, Tree) else declared.parents
+    return parents is None or str(value) in {str(key) for key in parents}
+
+
+def _keeps_one_row_inside_per_group(
+    table: Table,
+    name: str,
+    fields: tuple[str, ...],
+    column: str,
+    inside: tuple[object, ...],
+    declared: FanOut | Paired | Tree,
+    rows_of: dict[type[Model], int],
+) -> bool:
+    """Whether the one value left inside can give a group two rows. A proof, or False.
+
+    **One value, because two are two rows.** A cap of one leaves each key one row, so a set
+    of two keys is two rows that may share a group: ``Q(owner__in=[1, 2])`` under
+    ``max_children=1`` loaded ten times in twenty over five companies.
+
+    A key on a fan-out that gives no parent two rows, which is :func:`_cannot_collide`
+    rather than :func:`_no_group_of_two`, because a null share is no matter here: the
+    condition reads a key, and those rows hold none. A tree that gives no row two children
+    is the same proof, and NULL on a tree is its roots, so one root is one row. A key on a
+    ``Paired`` grouped by its own relation has one row per group, since partners are
+    distinct inside a group, unless NULLs of that relation are one group.
+
+    .. warning::
+
+       **Conjuncts the coverage gate cannot see.** ``set_under_a_cap`` holds the one value,
+       ``null_share_under_a_cap`` holds ``is not None``, and
+       ``cap_of_one_with_nulls_together`` keeps :func:`_no_group_of_two` from standing in.
+       ``roots_of_a_flat_tree`` and ``key_over_one_root`` hold the two tree readings apart.
+       ``paired_under_another_fan_out`` holds the relation being in the constraint.
+    """
+    if len(inside) != 1:
+        return False
+    if isinstance(declared, Tree):
+        if inside[0] is None:
+            return count_roots(declared, table.rows) <= 1
+        return gives_no_row_two_children(declared, table.rows)
+    if isinstance(declared, FanOut):
+        return inside[0] is not None and _cannot_collide(table, column, rows_of)
+    return declared.relation in fields and _its_relation_keeps_the_groups(table, name, declared)
+
+
+def _a_pairing_keeps_every_pair_apart(table: Table, name: str, fields: tuple[str, ...]) -> bool:
+    """Whether a ``Paired`` and its own relation are both in this constraint.
+
+    Partners are distinct inside each group of the relation, so no pair repeats and the
+    constraint holds whatever the condition says, which is the promise ``Paired`` makes.
+    Each loaded twenty times in twenty, and that is what the condition's own reading
+    cannot see, since ``Q(company=1)`` over the pair puts many rows inside.
+
+    ``paired_key_over_its_relation`` is the one column's version, in
+    :func:`_keeps_one_row_inside_per_group`. ``paired_beside_another_fan_out`` holds the
+    relation being here, and ``paired_pair_null_relation_together`` the NULL reading: a
+    null share loads thirteen times in twenty there.
+    """
+    return any(
+        isinstance(paired, Paired)
+        and paired.relation in fields
+        and _its_relation_keeps_the_groups(table, name, paired)
+        for paired in (table.fields.get(field) for field in fields)
+    )
+
+
+def _its_relation_keeps_the_groups(table: Table, name: str, paired: Paired) -> bool:
+    """Whether this constraint sees the groups the pairing kept its partners distinct in.
+
+    A row with a NULL relation had a group when the partners were chosen and shows none
+    afterwards. While each NULL is its own group that keeps it out of the index, and under
+    ``nulls_distinct=False`` it joins one group holding partners that were never kept apart.
+    """
+    relation = cast("FanOut", table.fields[paired.relation])
+    return not relation.null or _each_null_is_its_own_group(table, name)
+
+
+def _what_keeps_a_relation_out(
+    table: Table,
+    column: str,
+    inside: tuple[object, ...],
+    declared: FanOut | Paired | Tree,
+    others: list[str],
+    rows_of: dict[type[Model], int],
+) -> str:
+    """Only the remedies that would build for this declaration, last the one that always does.
+
+    ``test_the_refusal_offers_only_what_builds`` loads each of them. A narrowed ``Paired``
+    is not offered: it is accepted, and whether it builds depends on the busiest group
+    against the partners left, which nothing reads here.
+    """
+    offers: list[str] = []
+    if isinstance(declared, FanOut):
+        offers.extend(_what_keeps_a_fan_out_out(table, column, inside, declared, rows_of))
+    elif isinstance(declared, Tree) and len(inside) == 1:
+        offers.append(
+            f"{column}=Tree(roots=1/{table.rows}, sizes=...), since one root is one row with NULL"
+            if inside[0] is None
+            else "a tree with sizes that hold one value, such as Constant(1), which give that row "
+            "one child at most"
+        )
+    if None not in inside and _may_be_left_out(table, column):
+        offers.append(f"{column} left out of the shape, which holds NULL so no row is inside")
+    if others:
+        offers.append(
+            "a column of the constraint that is distinct in every row, which says so with Distinct "
+            "-- Sequential does"
+        )
+    return "; ".join([*offers, "a Projection with columns= and sql="])
+
+
+def _what_keeps_a_fan_out_out(
+    table: Table,
+    column: str,
+    inside: tuple[object, ...],
+    declared: FanOut,
+    rows_of: dict[type[Model], int],
+) -> list[str]:
+    """Narrowing the keys away and dropping the null share, or a cap that leaves one row.
+
+    Narrowing needs a parent to narrow to and the cap needs one for every row, so each is
+    offered only where the parent's row count says so. ``key_over_the_only_parent`` and
+    ``key_over_unknown_parents`` are what fail otherwise.
+    """
+    keys = [value for value in inside if value is not None]
+    parent_rows = _parents_available(table, column, declared, rows_of)
+    offers: list[str] = []
+    if not keys:
+        offers.append("no null share")
+    elif parent_rows is None or parent_rows > len(keys):
+        narrowed = "parents= naming only keys outside the condition"
+        offers.append(narrowed if len(keys) == len(inside) else f"{narrowed} and no null share")
+    if len(inside) == 1 and keys and parent_rows is not None and table.rows <= parent_rows:
+        offers.append("max_children=1, which gives that key one row at most")
+    return offers
+
+
+def _may_be_left_out(table: Table, column: str) -> bool:
+    """Whether leaving this column out loads a NULL, with nothing else needing it.
+
+    ``key_on_a_required_column`` holds ``null``, ``key_on_a_defaulted_column`` the default,
+    and ``key_read_by_owner`` and ``key_read_by_label`` the two readers, each of which
+    ``Table`` refuses without the relation it reads.
+    """
+    field = cast("Field[Any, Any]", table.model._meta.get_field(column))
+    read = any(
+        (isinstance(one, Paired) and one.relation == column)
+        or (isinstance(one, Derivation) and column in one.sources)
+        for one in table.fields.values()
+    )
+    return not read and field.null and getattr(field, "db_default", NOT_PROVIDED) is NOT_PROVIDED
+
+
 def _asks(table: Table, declared: object, values: tuple[object, ...]) -> str:
     """The declaration's own arithmetic, quoted back at it when it has any.
 
@@ -1232,6 +1489,9 @@ def _produces(declared: object, value: object) -> bool | None:
 
     ``PerParent``'s ``rest`` reaches here too, and it is either a plain value or
     a ``Categorical``, so for that caller the answer is never unknown.
+
+    A relation never does: comparing its declaration to a key is false for every key,
+    so :func:`_check_a_relation_in_a_condition` answers for it instead.
     """
     if isinstance(declared, Categorical):
         return any(candidate == value for candidate in declared.shares())

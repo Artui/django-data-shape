@@ -24,6 +24,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A condition naming a relation column is read as what that relation can write.** A
+  `FanOut`, `Tree` or `Paired` was compared to the condition's value as though it were
+  that value, which is never true, so `UniqueConstraint(fields=["company"],
+  condition=Q(owner=1))` over `owner=FanOut(Zipf())` was accepted and the load failed in
+  `COPY` at some seeds. It is refused now, with a message of its own that offers only what
+  builds for that declaration, because `PerParent` is refused on a relation. Accepted, and
+  loaded at several seeds: a key `parents=` leaves out, `Q(owner=None)` with no null share,
+  a NULL in a column of the constraint itself while each NULL is its own group, a single
+  key under `max_children=1` or flat sizes, a single key on a tree that gives no row two
+  children, and `Q(prev=None)` on one root. A key the parent does not have is refused
+  although it loads, since nothing reads a parent's keys before the build.
+- **A `Paired` beside its own relation keeps a conditional uniqueness.** Its partners are
+  distinct inside each group, so `(company, person)` holds under any condition, and
+  `Q(status="on")` over that pair is no longer refused. `Q(person=1)` over `company` holds
+  for the same reason. Under `nulls_distinct=False` with a null share on the relation the
+  proof does not hold, and those are refused.
+
 - **A column the shape leaves out is read as what the load leaves in it.** A literal
   `db_default` holds one value in every row, and was read as a NULL that keeps rows
   apart, so beside a `Tree` or a `FanOut` it was accepted and died in `COPY`. It now
