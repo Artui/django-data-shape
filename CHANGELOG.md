@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A `Tree` beside a `FanOut` or a second `Tree` under one uniqueness is refused
+  at declaration.** Both were accepted and left to `COPY`: `(parent, company)` over
+  `FanOut(Zipf())` loaded in 0 of 20 seeds at 200 rows over 50 companies, and two
+  self-keys in 0 of 20. A `Distinct` column keeps the constraint, and so does a
+  fan-out that gives no parent two rows; a `Projection` fills the rest.
+- **A `Tree` in a conditional `UniqueConstraint` is refused at declaration** when a
+  row can land inside the condition; a 10% share loaded in 3 of 20 seeds. The refusal names what a tree accepts rather than `PerParent`, which `Table`
+  refuses over one. A constraint grouping a `Tree` with a `FanOut` keeps the
+  `PerParent` remedy, and its message now names the fan-out wherever it sits in
+  the constraint, where it used to name the first field.
+- **The `Tree` measurements in `docs/relations.md` name their table and field,**
+  because draw streams are keyed on those names and the same declaration on another
+  column is a different tree. The share of children that fall back to choosing by
+  weight, stated as about 2%, is 0.5% to 17.8% at 200,000 rows over sixteen seeds.
+
 ## [0.25.0] — 2026-11-07
 
 ### Added

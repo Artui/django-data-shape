@@ -571,6 +571,16 @@ filled first is decided by the declarations and needs no connection to answer.
   of them sharing one is a matter of the seed. A column that is `Distinct` in
   every row, such as `Sequential`, keeps the constraint; a `Tree` alone under a
   `UniqueConstraint` is refused as a unique column is.
+- A `Tree` under a uniqueness beside a **`FanOut` or a second `Tree`**. Each column
+  is computed from the row index without seeing the other, so two rows sharing a
+  combination is a matter of the seed. A `Distinct` column keeps the constraint,
+  and so does a fan-out that gives no parent two rows (`max_children=1`); a
+  `Projection` with `columns=` and `sql=` fills a table whose rows have to be a
+  particular set, and a tree left out loads NULL.
+- A `Tree` in a **conditional** uniqueness, when a row can land inside the
+  condition. `PerParent` is refused over a tree, so what keeps it is a column that
+  stays outside the condition, a `Distinct` column in the constraint, or a
+  `Projection`. Beside a `FanOut`, `PerParent` over that fan-out is the remedy.
 - A required relation **left undeclared**, which would fail the load on a
   not-null violation rather than at declaration time. The message names the
   column and the fan-out that fills it: forgetting one foreign key is the

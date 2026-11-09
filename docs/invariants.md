@@ -178,6 +178,22 @@ how many companies there are.
   ranges of rows, so no derivation is decided per family; the exemption is
   `Distinct`, and a `Tree` alone under a `UniqueConstraint` is refused as a
   unique column is.
+- **A `Tree` beside a `FanOut`, or two `Tree`s, under one constraint are refused**
+  for the reason two fan-outs are: each column is computed from the row index
+  and neither sees the other. Measured over twenty seeds, a tree beside
+  `FanOut(Zipf())` loaded 0 times at 200 rows over 50 companies and 10 times at
+  50 rows over 1,000; two trees loaded 0 times at 200 rows. `Paired` is refused
+  over a tree, so what keeps the constraint is a `Distinct` column, a fan-out
+  that gives no parent two rows (`max_children=1`, or the proof flat sizes make),
+  leaving the tree out, or a `Projection` with `columns=` and `sql=`.
+- **A `Tree` in a conditional `UniqueConstraint` is refused** when a row can land
+  inside the condition, as in one accepted reply per parent. A per-row draw
+  cannot keep a rule about a family at any weight: a 10% share loaded 3 times in
+  20 at 200 rows and a 2.5% share 14. `PerParent` is refused over a tree, so what
+  keeps the constraint is a filling of the column that stays outside the
+  condition, a `Distinct` column in the constraint, or a `Projection`. A `Tree`
+  beside a `FanOut` keeps the `PerParent` remedy over that fan-out, because one
+  row per company is enough to keep `(parent, company)`.
 - **Enough room is not a way to fill it.** An unconditional constraint over
   **two fan-outs** — the through table of a many-to-many — passes the pigeonhole
   comfortably, because the product of two parent counts dwarfs the row count,
@@ -262,9 +278,9 @@ how many companies there are.
   wrote out is not that -- it is a list of values, and deciding membership in it
   needs no planner.
 - A constraint written over `expressions` rather than `fields`.
-- A conditional constraint whose grouping columns include no declared `FanOut`,
-  because there is no partition here to satisfy it with and a refusal would name
-  no remedy.
+- A conditional constraint whose grouping columns include neither a declared
+  `FanOut` nor a declared `Tree`, because there is no partition here to satisfy
+  it with and a refusal would name no remedy.
 - A column filled by a distribution that cannot enumerate itself, and a fan-out
   over a parent this shape does not build. Both make the *capacity* unknown, so
   a conditional refusal drops its arithmetic and an unconditional one falls back
@@ -277,7 +293,10 @@ how many companies there are.
 - A column filled by a `Derivation` under an unconditional constraint. A
   derivation reads something other than its own row index, so it is the one kind
   of declaration that *can* be arranged around a group — and whether a
-  particular `compute=` is arranged around it is not readable from here.
+  particular `compute=` is arranged around it is not readable from here. A
+  `Derivation` filling the condition column of a `Tree`'s conditional constraint
+  is left alone for the same reason, except `PerParent`, whose values are
+  readable.
 
 In every one of those the declaration is allowed through, and net 2 and net 3
 are what catch it.
