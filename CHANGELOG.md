@@ -20,7 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`shape_from_factory` writes that `Tree` for a nullable unique self-key,** with the
   root share it measured, instead of a comment and a finding. A self-key that refuses
   NULL keeps both, and a self-key under `nulls_distinct=False` now gets them too, naming
-  a `Projection`, rather than a `Tree` a shape would refuse.
+  the one-root tree and a `Projection`, rather than a `Tree` a shape would refuse.
 
 ### Fixed
 
@@ -50,6 +50,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   way, since a table's rows arrive in one `COPY` and it is one instant across that
   statement. Any other expression stays with the other two nets, since
   `gen_random_uuid()` loads.
+- **A `unique=True` column left to a `db_default` of one value is refused.** No check
+  read that spelling, so a literal and `Now()` were accepted and died in `COPY` at the
+  second row.
 - **A condition reads a column left out too.** `Q(status=None)` over one puts every
   row inside the condition, and so does `Q(status="on")` over a `db_default` of
   `"on"`. Both were accepted and died in `COPY`; both are refused.

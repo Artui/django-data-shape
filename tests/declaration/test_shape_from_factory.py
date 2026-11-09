@@ -15,7 +15,7 @@ from django.db import connection
 from django.db.models import Model
 
 import django_data_shape
-from django_data_shape import InvalidShape, Shape, Table, Tree, build, shape_from_factory
+from django_data_shape import Constant, InvalidShape, Shape, Table, Tree, build, shape_from_factory
 from tests.testapp.models import (
     Category,
     Chain,
@@ -407,7 +407,7 @@ def test_a_self_key_no_shape_can_fill_is_a_comment_and_a_finding_not_a_tree(
     field = link.removesuffix("_id")
     assert "Tree(" not in report
     assert "FanOut(" not in report
-    assert f"    # {field}: no shape can fill this" in report
+    assert f"    # {field}: nothing written here" in report
     assert f"{model.__name__}.{field}: {why}" in report
     assert f"{field}=" not in report
     # Being unique is no longer why nothing fills it.
@@ -453,7 +453,7 @@ def test_a_nullable_unique_self_key_is_written_as_a_flat_tree_not_told_to_be_lef
 
     assert "previous=Tree(roots=0.1, sizes=Constant(1))," in report
     assert "1 of 10 rows had no parent" in report
-    assert "no shape can fill" not in report
+    assert "nothing written here" not in report
     assert "Leave it out and fill it after the build." not in report
     assert "Zipf" not in report
 
@@ -490,16 +490,27 @@ def test_a_unique_self_key_always_left_null_is_the_figure_table_offers_and_a_fin
 
 @_NEEDS_NULLS_DISTINCT
 def test_a_self_key_whose_nulls_count_as_one_is_still_a_comment_and_a_finding() -> None:
-    # Shape refuses every tree on this column, flat or not, and the column left
-    # out holds one NULL many times, so neither is what the report may offer.
+    # One root is all that fits, and its share depends on the rows, which the report
+    # leaves as rows=..., so it names that tree and cannot write it. The column left
+    # out holds one NULL many times, so that is not what the report may offer.
     report = _report_over_a_self_key_no_shape_can_fill(TiedLink)
 
-    assert "Tree(" not in report
-    assert "    # previous: no shape can fill this" in report
+    assert "previous=" not in report
+    assert "    # previous: nothing written here" in report
     assert "TiedLink.previous: a constraint counting every NULL as one value" in report
-    assert "Fill the table with a Projection." in report
-    assert "Leave it out" not in report
+    assert "Tree(roots=1/rows, sizes=Constant(1))" in report
+    assert "Projection" in report
+    assert "no shape can fill" not in report
     assert "null=True" not in report
+
+
+@_NEEDS_NULLS_DISTINCT
+def test_the_tree_the_finding_names_under_nulls_counted_as_one_is_accepted() -> None:
+    # The finding is true at the rows it describes, and false one root later.
+    rows = 50
+    Shape(Table(TiedLink, rows=rows, previous=Tree(roots=1 / rows, sizes=Constant(1))))
+    with pytest.raises(InvalidShape):
+        Shape(Table(TiedLink, rows=rows, previous=Tree(roots=2 / rows, sizes=Constant(1))))
 
 
 def _chain_with_roots(n: int) -> int | None:
@@ -518,7 +529,7 @@ def test_a_key_in_a_composite_unique_constraint_is_not_unique_on_its_own() -> No
     report = shape_from_factory(_tree_factory(Folder, _chain_with_roots), samples=20)
 
     assert "parent=Tree(roots=0.25, sizes=Zipf())" in report
-    assert "no shape can fill" not in report
+    assert "nothing written here" not in report
 
 
 def test_a_conditional_unique_constraint_does_not_make_the_key_unique() -> None:
@@ -678,10 +689,6 @@ def test_a_self_key_under_a_composite_uniqueness_over_repeated_values_is_a_findi
     assert "name is declared as a draw" in finding
     assert "Sequential" in finding
     assert "Projection" in finding
-    if model is SpelledFolder:
-        # check_constraints compares the spelling too, so Shape accepts this model
-        # until that half of the attname fix lands; the finding is still owed.
-        return
     # The finding is true: the source as written is the one Shape refuses.
     with pytest.raises(InvalidShape, match="is a Tree beside"):
         Shape(_built(report, model))

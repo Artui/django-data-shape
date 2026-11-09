@@ -211,11 +211,12 @@ def _self_key(
     other key would hand back source that cannot be built. The key is a
     :class:`~django_data_shape.relations.tree.Tree` where one can fill it.
 
-    **Where none can, there is no declaration at all** (``None``) and the finding
-    says why, rather than a ``Tree`` that will be refused. A column that refuses
-    NULL has no first row to point at, and a constraint counting every NULL as one
-    value makes a tree's roots collide. Neither is an error of the factory's, and
-    the rest of what it measured is still worth reading, so this does not raise.
+    **Where this cannot write one, there is no declaration at all** (``None``) and
+    the finding says why, rather than a ``Tree`` that will be refused. A column that
+    refuses NULL has no first row to point at. A constraint counting every NULL as
+    one value holds one root, so its share depends on the rows, which the report
+    leaves to the caller. Neither is an error of the factory's, and the rest of what
+    it measured is still worth reading, so this does not raise.
 
     **A unique key gets sizes of one value**, because a tree whose sizes hold one
     value gives no row two children, and that is what such a column requires. Every
@@ -225,23 +226,21 @@ def _self_key(
     parent: a ``Counter`` over them would count it as one more parent, as
     :func:`_relation` does for a key to another table, where it is harmless.
     """
-    tied = _nulls_count_as_one(model, field)
-    if tied or not field.null:
-        reasons = []
-        if not field.null:
-            reasons.append("a key that refuses NULL has no first row to point at")
-        if tied:
-            reasons.append("a constraint counting every NULL as one value makes the roots collide")
-        # Leaving a column out is no shape under either: ``Table`` refuses the
-        # undeclared required one, and a tied one would hold one NULL in every row.
-        remedy = (
-            "Fill the table with a Projection."
-            if tied
-            else "Make the column null=True, or fill the table with a Projection."
-        )
+    if not field.null:
         return None, (
-            f"{' and '.join(reasons)}, so no shape can fill it: a Tree is refused on this "
-            f"column and a FanOut reads keys from a table still empty at load time. {remedy}"
+            "a key that refuses NULL has no first row to point at, so no shape can fill it: a Tree "
+            "is refused on this column and a FanOut reads keys from a table still empty at load "
+            "time. Make the column null=True, or fill the table with a Projection."
+        )
+    if _nulls_count_as_one(model, field):
+        # The rows a share would be written against are the caller's: the report leaves
+        # them as ``rows=...``, so it can name this tree and cannot write it down.
+        return None, (
+            "a constraint counting every NULL as one value has room for one root, so a Tree "
+            "fills it only with one root and sizes of one value, Tree(roots=1/rows, "
+            "sizes=Constant(1)) at the rows you build, and the share a factory measures is no "
+            "use. Leaving it out holds one NULL many times. Write that tree, or fill the table "
+            "with a Projection."
         )
     unique = _is_unique(model, field)
     sizes = "Constant(1)" if unique else "Zipf()"
@@ -428,7 +427,7 @@ def _render(
             declaration, finding = _describe(values, len(made))
             comma = ""
         if declaration is None:
-            body.append(f"    # {field.name}: no shape can fill this -- see the findings above.")
+            body.append(f"    # {field.name}: nothing written here -- see the findings above.")
         else:
             body.append(f"    {field.name}={declaration}{comma}")
         findings.extend(
