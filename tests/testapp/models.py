@@ -8,6 +8,7 @@ schema has them even though this release refuses to shape them.
 from __future__ import annotations
 
 import uuid
+from typing import Any
 
 import django
 from django.db import models
@@ -1335,3 +1336,85 @@ class Relay(models.Model):
 
     class Meta:
         unique_together = [("previous",)]
+
+
+class Sibling(models.Model):
+    """A self-reference whose only uniqueness is conditional, so the column is not unique.
+
+    The constraint holds only on the rows its condition selects, so ``parent``
+    alone repeats freely on the rest: a tree under it is not the one-to-one
+    chain a unique column makes.
+    """
+
+    parent = models.ForeignKey("self", null=True, on_delete=models.CASCADE, related_name="+")
+    name = models.CharField(max_length=50)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["parent"],
+                condition=models.Q(name="only"),
+                name="one_only_child",
+            ),
+        ]
+
+
+class UnenforcedConstraint(models.constraints.BaseConstraint):
+    """A constraint that is not a ``UniqueConstraint`` and has no ``condition`` to speak of.
+
+    Stands in for a third-party one and for ``ExclusionConstraint``, which
+    Django restricts to GiST indexes and so cannot be declared on an integer key
+    without an extension. It has no ``fields`` and its ``condition`` is ``None``,
+    the one shape a check constraint cannot take from Django 5.1, where its
+    predicate is its ``condition``. It writes no SQL.
+    """
+
+    condition = None
+
+    def constraint_sql(self, model: Any, schema_editor: Any) -> None:
+        return None
+
+    def create_sql(self, model: Any, schema_editor: Any) -> None:
+        return None
+
+    def remove_sql(self, model: Any, schema_editor: Any) -> None:
+        return None
+
+    def validate(
+        self, model: Any, instance: Any, exclude: Any = None, using: str = "default"
+    ) -> None:
+        return None
+
+
+class Exclusive(models.Model):
+    """A self-reference under a constraint that says nothing about uniqueness."""
+
+    parent = models.ForeignKey("self", null=True, on_delete=models.CASCADE, related_name="+")
+    name = models.CharField(max_length=50)
+
+    class Meta:
+        constraints = [UnenforcedConstraint(name="exclusive_says_nothing")]
+
+
+class Checked(models.Model):
+    """A self-reference with a check constraint, which says nothing about uniqueness.
+
+    A ``CheckConstraint`` has no ``fields``, so reading the constraints of a model
+    as if each were a ``UniqueConstraint`` fails here.
+    """
+
+    parent = models.ForeignKey("self", null=True, on_delete=models.CASCADE, related_name="+")
+    name = models.CharField(max_length=50)
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(
+                name="checked_is_not_its_own_parent",
+                # See Booking: the predicate's keyword is not one spelling across the floor.
+                **(
+                    {"condition": ~models.Q(parent=models.F("id"))}
+                    if django.VERSION >= (5, 1)
+                    else {"check": ~models.Q(parent=models.F("id"))}
+                ),
+            ),
+        ]
