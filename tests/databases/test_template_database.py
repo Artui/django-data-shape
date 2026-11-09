@@ -794,6 +794,8 @@ def test_a_base_ahead_of_the_migrations_on_disk_is_refused(temporary_databases: 
     assert "manage.py migrate contenttypes --prune" in message
     assert "recreate it" in message
     assert _left_by(declared, base) == set()
+    # Nor does a refusal fall back to building the shape without its base.
+    assert _left_by(declared) == set()
 
 
 def test_a_base_that_goes_ahead_is_refused_with_its_template_already_built(
@@ -847,7 +849,9 @@ def test_a_base_that_does_not_exist_is_refused_by_name(temporary_databases: list
             template_database(declared, base="shape_base_that_was_never_made")
         )
 
-    assert _left_by(declared, "shape_base_that_was_never_made") == set()
+    # A base nobody made has no oid, so nothing could be built under its name; what a
+    # regression could do is fall back to building the shape without it.
+    assert _left_by(declared) == set()
 
 
 def _allow_connections(database: str, allowed: bool) -> None:
@@ -875,6 +879,8 @@ def test_a_base_that_refuses_connections_is_refused_by_name(
     assert base in message
     assert "ALLOW_CONNECTIONS true" in message
     assert _left_by(declared, base) == set()
+    # Nor does a refusal fall back to building the shape without its base.
+    assert _left_by(declared) == set()
 
 
 def test_a_template_is_never_a_base(temporary_databases: list[str]) -> None:
@@ -978,6 +984,8 @@ def test_a_base_holding_rows_in_a_declared_table_is_named_as_their_cause(
     # The partial the build failed in is dropped with it, so the next run does
     # not find a half-built database under a name it would have to judge.
     assert _left_by(declared, base) == set()
+    # Nor does a refusal fall back to building the shape without its base.
+    assert _left_by(declared) == set()
 
 
 # Every column of a table as information_schema describes it, which is what a
@@ -1292,6 +1300,8 @@ def test_a_reference_into_such_a_table_refuses_the_base(temporary_databases: lis
     assert "recreate it" in message
     assert "CASCADE" not in message
     assert _left_by(declared, base) == set()
+    # Nor does a refusal fall back to building the shape without its base.
+    assert _left_by(declared) == set()
     assert _rows_in(base, "SELECT to_regclass('kept_reference') IS NOT NULL") == [(True,)]
 
 
@@ -1649,6 +1659,8 @@ def test_a_squash_applied_in_part_with_its_replaced_files_deleted_is_refused(
     # the message is this check's rather than that one's.
     assert "ahead" not in message
     assert _left_by(declared, base) == set()
+    # Nor does a refusal fall back to building the shape without its base.
+    assert _left_by(declared) == set()
 
 
 # A squash of a squash, as squashmigrations writes one from Django 6.0: the outer
@@ -1864,6 +1876,8 @@ def test_a_squash_of_a_squash_applied_in_part_with_a_replaced_file_deleted_is_re
     assert "contenttypes.0005_more" in message
     assert "ahead" not in message
     assert _left_by(declared, base) == set()
+    # Nor does a refusal fall back to building the shape without its base.
+    assert _left_by(declared) == set()
 
 
 def test_a_base_ahead_only_of_a_squash_of_a_squash_says_to_finish_the_squash(
@@ -1922,6 +1936,8 @@ def test_a_base_with_tables_but_no_django_migrations_is_refused(
     assert "django_migrations" in message
     assert "auth_group" in message
     assert _left_by(declared, base) == set()
+    # Nor does a refusal fall back to building the shape without its base.
+    assert _left_by(declared) == set()
 
 
 def test_a_base_whose_django_migrations_records_nothing_is_refused(
@@ -1943,6 +1959,8 @@ def test_a_base_whose_django_migrations_records_nothing_is_refused(
     assert "auth_group" in message
     assert "--schema-only" in message
     assert _left_by(declared, base) == set()
+    # Nor does a refusal fall back to building the shape without its base.
+    assert _left_by(declared) == set()
 
 
 def test_so_is_one_with_no_record_of_a_single_app_whose_tables_it_holds(
