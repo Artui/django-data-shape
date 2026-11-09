@@ -256,6 +256,20 @@ how many companies there are.
     is refused like a fan-out: 11 in 20 under another fan-out, and 11 for a set of
     three partners over its own relation. Narrowing it with `parents=` is accepted and
     not offered, since it builds only if the partners left cover the busiest group.
+  - one key of the relation a `Paired` in the constraint takes its groups from.
+    `Q(company=1)` over `(person)` is one group, whose partners are distinct, and it holds
+    at four rows of every company over four people, beside a drawn column or another
+    `FanOut`, with a null share and under `nulls_distinct=False`, since a key holds no
+    NULL. Two keys are two groups (`Q(company__in=[1, 2, 3])` loaded 2 in 20), and the
+    rows a null share leaves had no group at all (`Q(company=None)` loaded 0 in 20).
+- **That refusal needs no partition in the constraint**, because nothing it offers does.
+  Over twenty seeds, on tables named for each shape: `Q(owner=1)` over a drawn `label`
+  loaded 0 times at 200 rows and 15 at 20, `Q(prev=1)` over one 11, `Q(person=1)` over one
+  with `person` a `Paired` 12, and `Q(person=1)` over `(person)` itself once. What the
+  message offers loaded 20 in 20 on each of those: the narrowed keys, the column left out,
+  a `Distinct` column, a cap of one, no null share, sizes of one value or one root on a
+  tree. Where the `Paired` is the whole constraint only the column left out and a
+  `Projection` are offered, since no other column can be `Distinct`.
 - **A tree that gives no row two children keeps all three of those constraints**,
   beside any number of fan-outs, and it is a proof rather than a probability. Sizes
   holding one value, such as
@@ -361,10 +375,17 @@ how many companies there are.
   needs no planner.
 - A constraint written over `expressions` rather than `fields`.
 - A conditional constraint whose grouping columns include neither a declared
-  `FanOut` nor a declared `Tree`, because there is no partition here to satisfy
-  it with and a refusal would name no remedy. That holds whatever the condition names:
-  `Q(owner=1)` over `(label)` with `label` drawn loaded 0 times in 20 and is accepted,
-  and so is `Q(person=1)` over `(person)` with `person` a `Paired`, at 5 in 20.
+  `FanOut` nor a declared `Tree`, where no relation fills the condition, since there is
+  no partition here to offer a `PerParent` over. This one is a gap in the refusal rather
+  than something undecidable: each of these fails in `COPY`. Over twenty seeds, on tables
+  named for each shape, over a drawn `label` at 200 rows: `Q(state="x")` with `state` a
+  10% `Skew` loaded 0 times, at 1% 10 times, with `state` a `Constant("x")` 0 times,
+  `Q(label="a")` 0 times, a `PerParent("company", last="x", ...)` in `state` 0 times, and
+  `Q(owner=1)` with `owner` left out over a `db_default` of 1 0 times. Over a `Paired`,
+  a 10% `Skew` loaded 0 times and the `PerParent` 0 times.
+- A derivation in a constraint beside a relation in the condition, since whether its
+  `compute=` is arranged is not readable here: `Q(owner=1)` over a `label` numbered per
+  company loaded once in 20, because the numbers repeat across companies.
 - A column the shape leaves out whose `db_default` is an expression other than
   `Now()`. Nothing here can read what it writes: `gen_random_uuid()` is new in every
   row and loaded 20 times in 20, and a call this package has not read may do either.
@@ -391,8 +412,16 @@ refused, and the arithmetic is what drops out of the message.
   is a declaration that says what it writes, such as a `Skew`.
 - A key under a condition, where `parents=` does not settle it. Nothing here reads a
   parent's keys before the build, so `Q(owner=99)` over five people and `Q(prev=500)`
-  over two hundred rows are refused although each loads 20 times in 20. The remedy is
-  `parents=`, or the column left out.
+  over two hundred rows are refused although each loads 20 times in 20, over a
+  partition and over a drawn column alike. The remedy is `parents=`, or the column left
+  out.
+- A key over a drawn column that merely has room. `Q(owner=1)` over a `Uniform(1, 10**9)`
+  loads 20 times in 20 and is refused, because a wide draw is not `Distinct`, and over
+  three hundred people with a three-value `label` it loaded 19. Room moves the odds and
+  settles nothing, as it does for a drawn tuple. The remedy is a `Distinct` column.
+- A key on a `Paired` whose relation has one parent. `Q(person=1)` over `(person)` with
+  `company=FanOut(Zipf(), parents=(1,))` leaves one group, so it loads 20 times in 20,
+  and nothing here counts the groups. The remedy is the column left out or a `Projection`.
 - A distribution that cannot enumerate itself and a fan-out over a parent this
   shape does not build, under an unconditional constraint. Both make the *capacity*
   unknown, so the refusal falls back to the structural sentence.

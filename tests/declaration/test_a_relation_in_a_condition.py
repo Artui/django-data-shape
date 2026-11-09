@@ -27,12 +27,14 @@ from django_data_shape import (
     FanOut,
     InvalidShape,
     Paired,
+    PerParent,
     Projection,
     Sequential,
     Shape,
     Skew,
     Table,
     Tree,
+    Uniform,
     Zipf,
 )
 from django_data_shape import build as build_shape
@@ -102,6 +104,7 @@ def _model(case: _Case) -> type[models.Model]:
                         "self", null=True, on_delete=models.CASCADE, related_name="+"
                     ),
                     "label": models.CharField(max_length=20, null=True),
+                    "state": models.CharField(max_length=20, null=True),
                     "Meta": meta,
                 },
             ),
@@ -400,6 +403,202 @@ _REFUSED = (
         people=30,
         together=True,
     ),
+    # What follows has no fan-out and no tree in the constraint at all, so nothing used to
+    # read it, whatever the condition named.
+    # Loads 0 of 20.
+    _Case(
+        "fan_out_key_under_a_draw",
+        ("label",),
+        Q(owner=1),
+        {"owner": FanOut(Zipf()), "label": _skew()},
+    ),
+    # Loads 15 of 20.
+    _Case(
+        "key_under_a_draw_at_twenty_rows",
+        ("label",),
+        Q(owner=1),
+        {"owner": FanOut(Zipf()), "label": _skew()},
+        rows=20,
+    ),
+    # Loads 18 of 20.
+    _Case(
+        "key_with_room_for_a_cap_under_a_draw",
+        ("label",),
+        Q(owner=1),
+        {"owner": FanOut(Zipf()), "label": _skew()},
+        rows=60,
+        people=60,
+    ),
+    # Loads 0 of 20.
+    _Case(
+        "key_under_one_value",
+        ("label",),
+        Q(owner=1),
+        {"owner": FanOut(Zipf()), "label": Constant("a")},
+    ),
+    # Loads 11 of 20.
+    _Case(
+        "tree_key_under_a_draw",
+        ("label",),
+        Q(prev=1),
+        {"prev": _tree(), "label": _skew()},
+    ),
+    # Loads 12 of 20.
+    _Case(
+        "paired_key_under_a_draw",
+        ("label",),
+        Q(owner=1),
+        {"company": _flat(), "owner": _paired(), "label": _skew()},
+        people=30,
+    ),
+    # Loads 1 of 20.
+    _Case(
+        "paired_key_alone",
+        ("owner",),
+        Q(owner=1),
+        {"company": _flat(), "owner": _paired()},
+        people=30,
+    ),
+    # Loads 0 of 20.
+    _Case(
+        "paired_set_alone",
+        ("owner",),
+        Q(owner__in=[1, 2, 3]),
+        {"company": _flat(), "owner": _paired()},
+        people=30,
+    ),
+    # Loads 2 of 20.
+    _Case(
+        "paired_key_beside_a_draw",
+        ("owner", "label"),
+        Q(owner=1),
+        {"company": _flat(), "owner": _paired(), "label": _skew()},
+        people=30,
+    ),
+    # Loads 0 of 20.
+    _Case(
+        "null_share_under_a_draw",
+        ("label",),
+        Q(owner=None),
+        {"owner": FanOut(Zipf(), null=0.5), "label": _skew()},
+    ),
+    # Loads 0 of 20.
+    _Case(
+        "roots_under_a_draw",
+        ("label",),
+        Q(prev=None),
+        {"prev": _tree(), "label": _skew()},
+    ),
+    # Loads 0 of 20.
+    _Case(
+        "set_under_a_draw",
+        ("label",),
+        Q(owner__in=[1, 2]),
+        {"owner": FanOut(Zipf()), "label": _skew()},
+    ),
+    # Loads 17 of 20.
+    _Case(
+        "set_under_a_cap_under_a_draw",
+        ("label",),
+        Q(owner__in=[1, 2]),
+        {"owner": FanOut(Zipf(), max_children=1), "label": _skew()},
+        rows=9,
+    ),
+    # Loads 0 of 20.
+    _Case(
+        "left_out_group_together",
+        ("label",),
+        Q(owner=1),
+        {"owner": FanOut(Zipf())},
+        together=True,
+    ),
+    # A pairing in the constraint keeps one key of its own relation and nothing else.
+    # Two keys are two groups, whose partners were never kept apart.
+    # Loads 2 of 20.
+    _Case(
+        "relation_set_over_its_pairing",
+        ("owner",),
+        Q(company__in=[1, 2, 3]),
+        {"company": FanOut(Zipf()), "owner": _paired()},
+        rows=60,
+        companies=10,
+        people=100,
+    ),
+    # The rows a null share leaves had no group to keep their partners apart in.
+    # Loads 0 of 20.
+    _Case(
+        "relation_null_over_its_pairing",
+        ("owner",),
+        Q(company=None),
+        {"company": FanOut(Zipf(), null=0.5), "owner": _paired()},
+        rows=60,
+        companies=10,
+        people=100,
+    ),
+    # Loads 0 of 20.
+    _Case(
+        "relation_null_over_its_pairing_together",
+        ("owner",),
+        Q(company=None),
+        {"company": FanOut(Zipf(), null=0.5), "owner": _paired()},
+        rows=60,
+        companies=10,
+        people=100,
+        together=True,
+    ),
+    # Loads 19 of 20.
+    _Case(
+        "another_key_over_a_pairing",
+        ("owner",),
+        Q(other=1),
+        {"company": _flat(), "owner": _paired(), "other": FanOut(Zipf())},
+        people=30,
+    ),
+    # Loads 17 of 20.
+    _Case(
+        "tree_key_over_a_pairing",
+        ("owner",),
+        Q(prev=1),
+        {"company": _flat(), "owner": _paired(), "prev": _tree()},
+        people=30,
+    ),
+    # Loads 19 of 20: room moves the odds and proves nothing.
+    _Case(
+        "key_over_many_parents_under_a_draw",
+        ("label",),
+        Q(owner=1),
+        {"owner": FanOut(Zipf()), "label": _skew()},
+        people=300,
+    ),
+    # Each of these loads 20 of 20 and is refused. A wide draw is not Distinct, a key is
+    # read as able to land inside until the build reads the parent, and a pairing's relation
+    # with one parent leaves one group, which nothing here counts.
+    _Case(
+        "paired_key_alone_over_one_parent",
+        ("owner",),
+        Q(owner=1),
+        {"company": FanOut(Zipf(), parents=(1,)), "owner": _paired()},
+        people=300,
+    ),
+    _Case(
+        "key_under_a_wide_draw",
+        ("label",),
+        Q(owner=1),
+        {"owner": FanOut(Zipf()), "label": Uniform(1, 10**9)},
+    ),
+    _Case(
+        "absent_key_under_a_draw",
+        ("label",),
+        Q(owner=99),
+        {"owner": FanOut(Zipf()), "label": _skew()},
+        people=5,
+    ),
+    _Case(
+        "absent_tree_key_under_a_draw",
+        ("label",),
+        Q(prev=500),
+        {"prev": _tree(), "label": _skew()},
+    ),
 )
 
 
@@ -637,6 +836,62 @@ _KEPT = (
             "label": Derived("company", compute=_named_for_position, scope="group"),
         },
     ),
+    # One key of the relation a pairing takes its groups from is one group, and partners
+    # are distinct inside a group, so every row inside holds a different partner. Four
+    # rows of every company over four people is the tightest that builds.
+    _Case(
+        "relation_key_over_its_pairing",
+        ("owner",),
+        Q(company=1),
+        {"company": _flat(), "owner": _paired()},
+        people=4,
+    ),
+    _Case(
+        "relation_key_over_a_busy_group_of_its_pairing",
+        ("owner",),
+        Q(company=1),
+        {"company": FanOut(Zipf()), "owner": _paired()},
+        rows=60,
+        companies=10,
+        people=60,
+    ),
+    _Case(
+        "relation_key_over_its_pairing_beside_a_draw",
+        ("owner", "label"),
+        Q(company=1),
+        {"company": _flat(), "owner": _paired(), "label": _skew()},
+        people=4,
+    ),
+    _Case(
+        "relation_key_over_its_pairing_beside_a_fan_out",
+        ("owner", "other"),
+        Q(company=1),
+        {"company": _flat(), "owner": _paired(), "other": FanOut(Zipf())},
+        people=4,
+    ),
+    # A key holds none of the NULLs, however they are counted.
+    _Case(
+        "relation_key_over_its_pairing_with_a_null_share",
+        ("owner",),
+        Q(company=1),
+        {"company": _flat(null=0.3), "owner": _paired()},
+        people=30,
+    ),
+    _Case(
+        "relation_key_over_its_pairing_together",
+        ("owner",),
+        Q(company=1),
+        {"company": _flat(null=0.3), "owner": _paired()},
+        people=30,
+        together=True,
+    ),
+    # Each label left out is a NULL of its own, so no row reaches the index.
+    _Case(
+        "key_under_a_left_out_group",
+        ("label",),
+        Q(owner=1),
+        {"owner": FanOut(Zipf())},
+    ),
 )
 
 
@@ -769,6 +1024,193 @@ _REMEDIES = (
         ),
         id="paired_offers_neither_a_narrowing_nor_a_cap",
     ),
+    pytest.param(
+        _refused("fan_out_key_under_a_draw"),
+        ("parents= naming only keys outside the condition", "left out of the shape", "Distinct"),
+        ("max_children=1", "no null share", "PerParent("),
+        (
+            _refused("fan_out_key_under_a_draw")._replace(
+                name="draw_remedy_narrowed",
+                columns={"owner": FanOut(Zipf(), parents=(2, 3)), "label": _skew()},
+            ),
+            _refused("fan_out_key_under_a_draw")._replace(
+                name="draw_remedy_left_out", columns={"label": _skew()}
+            ),
+            _refused("fan_out_key_under_a_draw")._replace(
+                name="draw_remedy_distinct",
+                columns={"owner": FanOut(Zipf()), "label": Sequential(1, 1)},
+            ),
+        ),
+        id="key_under_a_draw",
+    ),
+    pytest.param(
+        _refused("key_with_room_for_a_cap_under_a_draw"),
+        ("max_children=1",),
+        (),
+        (
+            _refused("key_with_room_for_a_cap_under_a_draw")._replace(
+                name="draw_remedy_capped",
+                columns={"owner": FanOut(Zipf(), max_children=1), "label": _skew()},
+            ),
+        ),
+        id="key_under_a_draw_with_a_parent_for_every_row",
+    ),
+    pytest.param(
+        _refused("null_share_under_a_draw"),
+        ("no null share", "Distinct"),
+        ("parents=", "max_children=1", "left out of the shape"),
+        (
+            _refused("null_share_under_a_draw")._replace(
+                name="draw_remedy_no_null",
+                columns={"owner": FanOut(Zipf()), "label": _skew()},
+            ),
+            _refused("null_share_under_a_draw")._replace(
+                name="draw_remedy_distinct_over_nulls",
+                columns={"owner": FanOut(Zipf(), null=0.5), "label": Sequential(1, 1)},
+            ),
+        ),
+        id="null_share_under_a_draw",
+    ),
+    pytest.param(
+        _refused("tree_key_under_a_draw"),
+        ("sizes that hold one value", "left out of the shape", "Distinct"),
+        ("parents=", "max_children=1"),
+        (
+            _refused("tree_key_under_a_draw")._replace(
+                name="draw_remedy_flat_tree",
+                columns={"prev": _flat_tree(), "label": _skew()},
+            ),
+            _refused("tree_key_under_a_draw")._replace(
+                name="draw_remedy_no_tree", columns={"label": _skew()}
+            ),
+            _refused("tree_key_under_a_draw")._replace(
+                name="draw_remedy_distinct_beside_a_tree",
+                columns={"prev": _tree(), "label": Sequential(1, 1)},
+            ),
+        ),
+        id="tree_key_under_a_draw",
+    ),
+    pytest.param(
+        _refused("roots_under_a_draw"),
+        ("roots=1/200", "Distinct"),
+        ("left out of the shape", "sizes that hold one value"),
+        (
+            _refused("roots_under_a_draw")._replace(
+                name="draw_remedy_one_root",
+                columns={"prev": Tree(roots=1 / 200, sizes=Zipf()), "label": _skew()},
+            ),
+            _refused("roots_under_a_draw")._replace(
+                name="draw_remedy_distinct_beside_roots",
+                columns={"prev": _tree(), "label": Sequential(1, 1)},
+            ),
+        ),
+        id="roots_under_a_draw",
+    ),
+    pytest.param(
+        _refused("paired_key_under_a_draw"),
+        ("left out of the shape", "Distinct"),
+        ("parents=", "max_children=1"),
+        (
+            _refused("paired_key_under_a_draw")._replace(
+                name="draw_remedy_no_pairing",
+                columns={"company": _flat(), "label": _skew()},
+            ),
+            _refused("paired_key_under_a_draw")._replace(
+                name="draw_remedy_distinct_beside_a_pairing",
+                columns={"company": _flat(), "owner": _paired(), "label": Sequential(1, 1)},
+            ),
+        ),
+        id="paired_key_under_a_draw",
+    ),
+    pytest.param(
+        _refused("paired_key_alone"),
+        ("left out of the shape",),
+        ("Distinct", "parents=", "max_children=1"),
+        (
+            _refused("paired_key_alone")._replace(
+                name="alone_remedy_no_pairing", columns={"company": _flat()}
+            ),
+        ),
+        id="paired_key_alone",
+    ),
+    pytest.param(
+        _refused("left_out_group_together"),
+        ("parents= naming only keys outside the condition", "left out of the shape", "Distinct"),
+        ("max_children=1",),
+        (
+            _refused("left_out_group_together")._replace(
+                name="tied_remedy_narrowed",
+                columns={"owner": FanOut(Zipf(), parents=(2, 3))},
+            ),
+            _refused("left_out_group_together")._replace(name="tied_remedy_left_out", columns={}),
+            _refused("left_out_group_together")._replace(
+                name="tied_remedy_distinct",
+                columns={"owner": FanOut(Zipf()), "label": Sequential(1, 1)},
+            ),
+        ),
+        id="left_out_group_together",
+        marks=_NEEDS_DJANGO_5,
+    ),
+    pytest.param(
+        _refused("relation_set_over_its_pairing"),
+        ("parents= naming only keys outside the condition",),
+        ("left out of the shape", "Distinct", "max_children=1"),
+        (
+            _refused("relation_set_over_its_pairing")._replace(
+                name="pairing_remedy_narrowed",
+                columns={"company": FanOut(Zipf(), parents=(4, 5, 6)), "owner": _paired()},
+            ),
+        ),
+        id="relation_set_over_its_pairing",
+    ),
+    pytest.param(
+        _refused("relation_null_over_its_pairing"),
+        ("no null share",),
+        ("left out of the shape", "Distinct", "parents="),
+        (
+            _refused("relation_null_over_its_pairing")._replace(
+                name="pairing_remedy_no_null",
+                columns={"company": FanOut(Zipf()), "owner": _paired()},
+            ),
+        ),
+        id="relation_null_over_its_pairing",
+    ),
+    pytest.param(
+        _refused("another_key_over_a_pairing"),
+        ("parents= naming only keys outside the condition", "left out of the shape"),
+        ("Distinct", "max_children=1"),
+        (
+            _refused("another_key_over_a_pairing")._replace(
+                name="pairing_remedy_other_narrowed",
+                columns={
+                    "company": _flat(),
+                    "owner": _paired(),
+                    "other": FanOut(Zipf(), parents=(2, 3)),
+                },
+            ),
+            _refused("another_key_over_a_pairing")._replace(
+                name="pairing_remedy_other_left_out",
+                columns={"company": _flat(), "owner": _paired()},
+            ),
+        ),
+        id="another_key_over_a_pairing",
+    ),
+    pytest.param(
+        _refused("tree_key_over_a_pairing"),
+        ("sizes that hold one value", "left out of the shape"),
+        ("Distinct", "parents="),
+        (
+            _refused("tree_key_over_a_pairing")._replace(
+                name="pairing_remedy_flat_tree",
+                columns={"company": _flat(), "owner": _paired(), "prev": _flat_tree()},
+            ),
+            _refused("tree_key_over_a_pairing")._replace(
+                name="pairing_remedy_no_tree",
+                columns={"company": _flat(), "owner": _paired()},
+            ),
+        ),
+        id="tree_key_over_a_pairing",
+    ),
 )
 
 
@@ -818,16 +1260,128 @@ def test_the_statement_the_refusal_offers_builds() -> None:
             editor.delete_model(model)
 
 
-def test_a_relation_grouped_by_draws_alone_is_left_to_the_other_two_nets() -> None:
-    # Loads 0 of 20, and it is the line every conditional constraint keeps: no
-    # partition in the constraint, so nothing here reads it, whatever the condition names.
-    case = _Case(
-        "fan_out_key_under_a_draw",
+@_ON_POSTGRES
+@pytest.mark.django_db(transaction=True)
+def test_the_statement_the_refusal_offers_builds_under_a_draw() -> None:
+    model = _model(_refused("fan_out_key_under_a_draw")._replace(name="draw_remedy_statement"))
+    quote = connection.ops.quote_name
+    with connection.schema_editor() as editor:
+        editor.create_model(model)
+    try:
+        build_shape(
+            Shape(
+                Table(Company, rows=5, name=Constant("acme")),
+                Projection(
+                    model,
+                    columns=("id", "label"),
+                    sql=f"SELECT id, 'at-' || id FROM {quote(Company._meta.db_table)}",
+                ),
+            )
+        )
+        with connection.cursor() as cursor:
+            cursor.execute(f"SELECT COUNT(*) FROM {quote(model._meta.db_table)}")
+            assert cursor.fetchone()[0] == 5
+    finally:
+        with connection.schema_editor() as editor:
+            editor.delete_model(model)
+
+
+# No relation fills the condition and nothing partitions the constraint, or a derivation
+# stands in the group. Each is accepted and fails in COPY, and docs/invariants.md names it.
+_LEFT_TO_THE_NETS = (
+    # Loads 0 of 20.
+    _Case(
+        "drawn_condition_over_a_draw",
+        ("label",),
+        Q(state="x"),
+        {"state": Skew({"x": 0.1, "y": 0.9}), "label": _skew()},
+    ),
+    # Loads 10 of 20.
+    _Case(
+        "rare_condition_over_a_draw",
+        ("label",),
+        Q(state="x"),
+        {"state": Skew({"x": 0.01, "y": 0.99}), "label": _skew()},
+    ),
+    # Loads 0 of 20.
+    _Case(
+        "constant_condition_over_a_draw",
+        ("label",),
+        Q(state="x"),
+        {"state": Constant("x"), "label": _skew()},
+    ),
+    # Loads 0 of 20.
+    _Case(
+        "condition_on_the_draw_itself",
+        ("label",),
+        Q(label="a"),
+        {"label": _skew()},
+    ),
+    # Loads 0 of 20.
+    _Case(
+        "drawn_condition_over_a_pairing",
+        ("owner",),
+        Q(state="x"),
+        {"company": _flat(), "owner": _paired(), "state": Skew({"x": 0.1, "y": 0.9})},
+        people=30,
+    ),
+    # Loads 0 of 20.
+    _Case(
+        "rule_per_parent_over_a_draw",
+        ("label",),
+        Q(state="x"),
+        {
+            "company": FanOut(Zipf()),
+            "state": PerParent("company", last="x", rest="y"),
+            "label": _skew(),
+        },
+    ),
+    # Loads 0 of 20.
+    _Case(
+        "rule_per_parent_over_a_pairing",
+        ("owner",),
+        Q(state="x"),
+        {
+            "company": _flat(),
+            "owner": _paired(),
+            "state": PerParent("company", last="x", rest="y"),
+        },
+        people=30,
+    ),
+    # Loads 0 of 20.
+    _Case(
+        "key_a_db_default_holds_under_a_draw",
         ("label",),
         Q(owner=1),
-        {"owner": FanOut(Zipf()), "label": _skew()},
-    )
+        {"label": _skew()},
+        owner_db_default=1,
+    ),
+    # Loads 1 of 20.
+    _Case(
+        "key_under_a_derivation",
+        ("label",),
+        Q(owner=1),
+        {
+            "owner": FanOut(Zipf()),
+            "company": FanOut(Zipf()),
+            "label": Derived("company", compute=_named_for_position, scope="group"),
+        },
+    ),
+)
 
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        pytest.param(
+            case,
+            id=case.name,
+            marks=[_NEEDS_DJANGO_5] if case.owner_db_default is not None else [],
+        )
+        for case in _LEFT_TO_THE_NETS
+    ],
+)
+def test_what_no_relation_decides_over_draws_is_left_to_the_other_two_nets(case: _Case) -> None:
     Shape(*_tables(case, _model(case)))
 
 
