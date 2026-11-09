@@ -34,6 +34,11 @@ from django_data_shape.utils import (
     primary_key_field,
 )
 
+# What both refusals of a required key to this same table offer: neither a Tree
+# (its first row has no parent to point at) nor a FanOut (its keys are read from
+# a table still empty) fills one, and the wording is 0.25.1's, from shape_from_factory.
+_SELF_KEY_REMEDY = "Make the column null=True, or fill the table with a Projection."
+
 
 class Table:
     """How many rows of one model, and how each column is distributed.
@@ -319,8 +324,7 @@ class Table:
                 raise InvalidShape(
                     f"{where} cannot be null, and a tree's roots are the rows whose parent is "
                     "NULL. The first row is always one, since there is no earlier row for it to "
-                    "point at, so no tree fits a column that refuses NULL. Make the column "
-                    "null=True, or leave it out and fill it after the build."
+                    "point at, so no tree fits a column that refuses NULL. " + _SELF_KEY_REMEDY
                 )
             if field.unique and not gives_no_row_two_children(declared, self.rows):
                 raise InvalidShape(
@@ -753,16 +757,33 @@ class Table:
                 if defaulted
                 else ""
             )
-            raise InvalidShape(
-                f"{self.model.__name__}.{', '.join(required_relations)} cannot be null, so every "
-                "row needs a parent and this shape does not say which."
-                f"{because} A relation is declared as "
-                f"a fan-out over the parent's real keys -- {required_relations[0]}=FanOut(Zipf()) "
+            # A key to this same table is refused a FanOut, which reads its keys from
+            # a table still empty at load time, so the remedy for it is the one a
+            # Tree on a required key is given and not the sentence for the rest.
+            own_table = [
+                name for name in required_relations if known[name].related_model is self.model
+            ]
+            elsewhere = [name for name in required_relations if name not in own_table]
+            remedy = (
+                f" A relation is declared as a fan-out over the parent's real keys -- "
+                f"{elsewhere[0]}=FanOut(Zipf()) "
                 "for the realistic heavy tail, FanOut(Uniform(1, 10)) for something flatter, and "
                 "FanOut(Zipf(), max_children=1) for a one-to-one. childless= is the share of "
                 "parents nobody references. The parent's "
                 "own table has to be built in the same shape or already loaded, because that is "
                 "where the keys are read from."
+                if elsewhere
+                else ""
+            )
+            if own_table:
+                remedy += (
+                    f" {', '.join(own_table)} points at {self.model.__name__} itself, and a "
+                    "FanOut reads its keys from a table still empty at load time, so it is "
+                    f"refused there. {_SELF_KEY_REMEDY}"
+                )
+            raise InvalidShape(
+                f"{self.model.__name__}.{', '.join(required_relations)} cannot be null, so every "
+                f"row needs a parent and this shape does not say which.{because}{remedy}"
             )
         undeclared = [(name, field) for name, field in undeclared if not field.is_relation]
 

@@ -22,6 +22,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   NULL keeps both, and a self-key under `nulls_distinct=False` now gets them too, naming
   a `Projection`, rather than a `Tree` a shape would refuse.
 
+### Fixed
+
+- **`shape_from_factory` writes source that compiles beside a commented column.** A
+  column reported as `name=Sequential(...)  # every value distinct,` put the comma
+  inside the comment, so any column after it was a `SyntaxError`; the same held for a
+  `Skew({...})` over many values. The comma now comes before the comment.
+- **`shape_from_factory` says when a self-key sits in a composite uniqueness over
+  columns it draws.** `Folder`, unique on `(parent, name)`, with repeated names got
+  `parent=Tree(...)` and `name=Skew(...)` and no finding, and `Shape` then refused it.
+  A finding now names the constraint (or the `unique_together`) and the remedy: a
+  column distinct in every row, or a `Projection`.
+- **A `UniqueConstraint` or `unique_together` that spells the attname is read.**
+  `fields=["parent_id"]` was not the column `parent`, so `shape_from_factory` wrote
+  `sizes=Zipf()` for a unique self-key, which `Shape` refuses.
+- **`Table`'s refusals on a required self-key offer a remedy it accepts.** The `Tree`
+  refusal told a non-null self-key to "leave it out and fill it after the build", and
+  the required-relation refusal then offered `FanOut(Zipf())` on a key to the same
+  table; both were refused in turn. Both now say what `shape_from_factory` has said
+  since 0.25.1: make the column `null=True`, or fill the table with a `Projection`.
+
 ## [0.25.1] — 2026-11-09
 
 ### Fixed

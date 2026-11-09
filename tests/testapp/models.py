@@ -1363,6 +1363,82 @@ class TiedLink(models.Model):
         ]
 
 
+class SpelledChain(models.Model):
+    """A unique self-reference whose constraint spells the attname, ``previous_id``.
+
+    Django accepts either spelling in ``UniqueConstraint(fields=)``, and a reader
+    comparing it to the field's ``name`` finds a different column.
+    """
+
+    previous = models.ForeignKey("self", null=True, on_delete=models.CASCADE, related_name="+")
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["previous_id"], name="one_spelled_link_after_each"),
+        ]
+
+
+class SpelledRelay(models.Model):
+    """The same, through ``unique_together``, which takes either spelling too."""
+
+    previous = models.ForeignKey("self", null=True, on_delete=models.CASCADE, related_name="+")
+
+    class Meta:
+        unique_together = [("previous_id",)]
+
+
+class SpelledFolder(models.Model):
+    """``Folder``'s uniqueness over ``(parent, name)``, spelled ``parent_id``."""
+
+    parent = models.ForeignKey("self", null=True, on_delete=models.CASCADE, related_name="+")
+    name = models.CharField(max_length=50)
+    code = models.CharField(max_length=50)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["parent_id", "name"], name="one_name_per_spelled_folder"
+            ),
+        ]
+
+
+class Mirror(models.Model):
+    """A self-key unique together with a key to another table."""
+
+    parent = models.ForeignKey("self", null=True, on_delete=models.CASCADE, related_name="+")
+    company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name="+")
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["parent", "company"], name="one_company_per_mirror"),
+        ]
+
+
+class Coded(models.Model):
+    """A self-key beside a uniqueness that does not include it, by constraint and by tuple."""
+
+    parent = models.ForeignKey("self", null=True, on_delete=models.CASCADE, related_name="+")
+    name = models.CharField(max_length=50)
+    code = models.CharField(max_length=50)
+
+    class Meta:
+        unique_together = [("name", "code")]
+        constraints = [
+            models.UniqueConstraint(fields=["code", "name"], name="one_code_per_name"),
+        ]
+
+
+class Shelf(models.Model):
+    """``Folder``'s uniqueness through ``unique_together``, the other place Django keeps one."""
+
+    parent = models.ForeignKey("self", null=True, on_delete=models.CASCADE, related_name="+")
+    name = models.CharField(max_length=50)
+    code = models.CharField(max_length=50)
+
+    class Meta:
+        unique_together = [("parent", "name")]
+
+
 class Sibling(models.Model):
     """A self-reference whose only uniqueness is conditional, so the column is not unique.
 

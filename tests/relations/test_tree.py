@@ -10,6 +10,7 @@ from django_data_shape import (
     FanOut,
     InvalidShape,
     PerParent,
+    Projection,
     Shape,
     Skew,
     Table,
@@ -62,6 +63,49 @@ def test_a_tree_on_a_key_to_another_table_is_refused() -> None:
 def test_a_tree_on_a_column_that_refuses_null_is_refused() -> None:
     with pytest.raises(InvalidShape, match="RootlessNode.parent cannot be null"):
         Table(RootlessNode, rows=5, parent=Tree(roots=0.1, sizes=Zipf()))
+
+
+def _the_sentence_the_remedy_was_read_from(message: str) -> None:
+    """The one wording 0.25.1 gave ``shape_from_factory``, and the two remedies it names."""
+    assert "Make the column null=True, or fill the table with a Projection" in message
+    # Both of these were offered and then refused: a column left out of a table
+    # whose key refuses NULL is the required-relation refusal.
+    assert "leave it out" not in message
+    assert "fill it after the build" not in message
+    assert "FanOut(Zipf())" not in message
+
+
+def test_a_tree_refused_on_a_key_that_refuses_null_offers_a_remedy_table_accepts() -> None:
+    with pytest.raises(InvalidShape, match="RootlessNode.parent cannot be null") as refused:
+        Table(RootlessNode, rows=5, parent=Tree(roots=0.1, sizes=Zipf()))
+
+    _the_sentence_the_remedy_was_read_from(str(refused.value))
+    # The projection half of the remedy is a declaration, not a hope: it builds
+    # a shape over the very table the refusal is about.
+    Shape(Projection(RootlessNode, columns=("id", "parent_id"), sql="SELECT 1, 1"))
+
+
+def test_an_undeclared_self_key_that_refuses_null_is_not_offered_a_fan_out() -> None:
+    """``FanOut`` on a self-key is refused, so the required-relation refusal cannot offer it."""
+    with pytest.raises(InvalidShape, match="RootlessNode.parent cannot be null") as refused:
+        Table(RootlessNode, rows=5)
+
+    _the_sentence_the_remedy_was_read_from(str(refused.value))
+    with pytest.raises(InvalidShape, match="RootlessNode.parent"):
+        Table(RootlessNode, rows=5, parent=FanOut(Zipf()))
+
+
+def test_a_nullable_self_key_left_out_is_the_remedy_and_builds_a_table() -> None:
+    """The first half of the remedy, on the same shape with the column made nullable."""
+    Table(Category, rows=5, name=Constant("c"))
+
+
+def test_a_required_key_to_another_table_is_still_offered_a_fan_out() -> None:
+    with pytest.raises(InvalidShape, match="Session.company cannot be null") as refused:
+        Table(Session, rows=5, label=Constant("x"))
+
+    assert "company=FanOut(Zipf())" in str(refused.value)
+    assert "Projection" not in str(refused.value)
 
 
 def test_a_tree_on_a_unique_self_reference_is_refused() -> None:
