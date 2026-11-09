@@ -1443,3 +1443,82 @@ class Checked(models.Model):
                 ),
             ),
         ]
+
+
+class Limb(models.Model):
+    """A tree beside a fan-out under one uniqueness, as a real table.
+
+    ``(parent, company)`` is unique, so two children of one row may not sit in
+    one company. Real because the remedies a refusal names for this pair are
+    loads, and the declaration tests build no table.
+    """
+
+    parent = models.ForeignKey("self", null=True, on_delete=models.CASCADE, related_name="+")
+    company = models.ForeignKey(Company, null=True, on_delete=models.CASCADE, related_name="+")
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["parent", "company"], name="one_limb_per_pair"),
+        ]
+
+
+class Spur(models.Model):
+    """``Limb`` with a third column, which is what can keep the triple apart."""
+
+    parent = models.ForeignKey("self", null=True, on_delete=models.CASCADE, related_name="+")
+    company = models.ForeignKey(Company, null=True, on_delete=models.CASCADE, related_name="+")
+    label = models.CharField(max_length=50, null=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["parent", "company", "label"], name="one_spur_per_triple"
+            ),
+        ]
+
+
+class Rung(models.Model):
+    """Two self-keys under one uniqueness."""
+
+    left = models.ForeignKey("self", null=True, on_delete=models.CASCADE, related_name="+")
+    right = models.ForeignKey("self", null=True, on_delete=models.CASCADE, related_name="+")
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["left", "right"], name="one_rung_per_pair"),
+        ]
+
+
+class LabelledRung(models.Model):
+    """Two self-keys and a third column."""
+
+    left = models.ForeignKey("self", null=True, on_delete=models.CASCADE, related_name="+")
+    right = models.ForeignKey("self", null=True, on_delete=models.CASCADE, related_name="+")
+    label = models.CharField(max_length=50, null=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["left", "right", "label"], name="one_rung_per_triple"),
+        ]
+
+
+class Verdict(models.Model):
+    """A conditional uniqueness over a tree and a second column.
+
+    One accepted verdict per ``(parent, code)``: the rule is about the rows a
+    condition selects, so the table loads only if no two accepted rows share a
+    parent and a code.
+    """
+
+    parent = models.ForeignKey("self", null=True, on_delete=models.CASCADE, related_name="+")
+    code = models.CharField(max_length=50, null=True)
+    status = models.CharField(max_length=50, null=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["parent", "code"],
+                condition=models.Q(status="accepted"),
+                name="one_accepted_verdict",
+            ),
+        ]
