@@ -1,5 +1,3 @@
-"""Loading tables whose primary keys are not integers."""
-
 from __future__ import annotations
 
 import datetime
@@ -29,8 +27,7 @@ pytestmark = [
 
 
 def test_a_uuid_keyed_table_loads() -> None:
-    # Refused outright before this release, which made the package unusable for
-    # any project on UUID keys.
+    # Refused outright before this release, which made the package unusable on UUID keys.
     build_shape(Shape(Table(Tenant, rows=500, name=Constant("acme"))))
 
     keys = list(Tenant.objects.values_list("id", flat=True))
@@ -40,8 +37,7 @@ def test_a_uuid_keyed_table_loads() -> None:
 
 
 def test_a_foreign_key_over_a_uuid_parent_carries_uuids() -> None:
-    # The case that proves the work reaches past the key column: the parent's
-    # real keys come back as UUIDs and have to survive into the child's column.
+    # The parent's real UUID keys must survive into the child's column.
     build_shape(
         Shape(
             Table(Tenant, rows=40, name=Constant("acme")),
@@ -71,8 +67,7 @@ def test_uuid_keys_are_reproducible_across_builds() -> None:
     build_shape(shape)
     second = sorted(Tenant.objects.values_list("id", flat=True))
 
-    # Derived, not drawn. A random key would make every foreign key pointing at
-    # it differ between two builds of one shape.
+    # Derived, not drawn.
     assert first == second
 
 
@@ -97,9 +92,7 @@ def test_an_exotic_key_loads_when_the_caller_declares_it() -> None:
 def test_a_uuid_table_needs_no_sequence_reset_and_still_accepts_orm_writes() -> None:
     build_shape(Shape(Table(Tenant, rows=50, name=Constant("acme"))))
 
-    # There is no sequence behind a UUID key, so nothing to move -- but the
-    # first ORM write still has to work, which is the failure the reset exists
-    # to prevent on integer keys.
+    # No sequence sits behind a UUID key, but the first ORM write must still work.
     made = Tenant.objects.create(name="after")
 
     assert Tenant.objects.count() == 51
@@ -107,11 +100,7 @@ def test_a_uuid_table_needs_no_sequence_reset_and_still_accepts_orm_writes() -> 
 
 
 def test_an_exotic_key_is_prepared_by_its_field_like_any_other_value() -> None:
-    # The primary key used to go straight to the driver while every other value
-    # went through Django's field preparation. For an integer that is the same
-    # thing and for a UUID psycopg happens to adapt it -- but a naive datetime
-    # is stored verbatim rather than localised, which is exactly the bug already
-    # found once on an ordinary column.
+    # 12:00 in the suite's America/Chicago TIME_ZONE is 18:00 UTC.
     base = datetime.datetime(2020, 1, 1, 12, 0)
     with pytest.warns(RuntimeWarning, match="received a naive datetime"):
         build_shape(
@@ -127,6 +116,4 @@ def test_an_exotic_key_is_prepared_by_its_field_like_any_other_value() -> None:
 
     stored = sorted(Reading.objects.values_list("at", flat=True))
 
-    # 12:00 in the suite's America/Chicago TIME_ZONE is 18:00 UTC. Without the
-    # field's preparation it would have been stored as 12:00 UTC.
     assert stored[0] == datetime.datetime(2020, 1, 1, 18, 0, tzinfo=datetime.timezone.utc)

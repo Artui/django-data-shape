@@ -1,11 +1,3 @@
-"""A tree built where there is no COPY: SQLite, through the portable route.
-
-Every parent is an earlier row, so it is already in the table when its child
-is inserted. Checked with SQLite's own foreign key check rather than trusted,
-because a test transaction is never committed and a deferred key is never
-checked otherwise.
-"""
-
 from __future__ import annotations
 
 import pytest

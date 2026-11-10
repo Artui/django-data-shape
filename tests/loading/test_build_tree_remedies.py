@@ -1,21 +1,3 @@
-"""Every remedy a Tree refusal names, loaded on a real table that enforces the uniqueness.
-
-The refusal tests stop at ``Shape()`` on isolated models, so a remedy a message
-offers was only ever read, never built: 0.25.1 found a refusal pointing at a
-shape that died in ``COPY``. Each test below takes one remedy from one refusal's
-wording and builds it on PostgreSQL at several seeds. A passing build is proof
-the rows do not collide only because the index is there to refuse a collision,
-so each loaded table is made to refuse a copy of one of its own rows.
-
-The tree beside nothing at all has its loads in
-``test_build_flat_tree_on_a_unique_key.py``; the tree beside a draw, a fan-out,
-a second tree and a conditional uniqueness are here, with the ``Projection`` each
-of them offers. The tree left out of a self-key that ties its NULLs is no remedy, and
-``Shape`` refuses it before a row is written, so
-``test_the_tree_left_out_of_a_self_key_that_ties_its_nulls_is_not_a_remedy`` is in
-``tests/declaration/test_check_constraints.py``, with no database.
-"""
-
 from __future__ import annotations
 
 from collections import Counter
@@ -86,11 +68,7 @@ def _siblings(model: type[Model], column: str) -> int:
 
 
 def _refuses_a_copy_of(model: type[Model], **where: object) -> None:
-    """The index that makes a load evidence: a row copied whole is turned away.
-
-    A build that passed on a table with no index would pass for any seed. The
-    row chosen has every constrained column set, so the copy collides with it.
-    """
+    """The index that makes a load evidence: a row copied whole is turned away."""
     row = model._default_manager.filter(**where).first()
     assert row is not None, "no row sits in the group the index constrains"
     values = {
@@ -119,8 +97,7 @@ def test_a_distinct_column_beside_a_tree_of_siblings_loads(seed: int) -> None:
     )
 
     assert Folder.objects.count() == _ROWS
-    # Without siblings the distinct column would be doing nothing: the claim is
-    # that it keeps the pair apart where the tree gives a parent several rows.
+    # The distinct column keeps the pair apart where the tree gives a parent several rows.
     assert _siblings(Folder, "parent") > 1
     _refuses_a_copy_of(Folder, parent__isnull=False)
 
@@ -212,8 +189,7 @@ def test_a_projection_fills_a_unique_self_key_that_counts_its_nulls_as_one_value
 
 @pytest.mark.parametrize("seed", _SEEDS)
 def test_the_nullable_key_a_refusal_asks_for_loads_a_tree(seed: int) -> None:
-    # RootlessNode.parent is refused a Tree for being non-null; Category is the
-    # same table with null=True, which is the first remedy the message names.
+    # Category is the same table with null=True, the first remedy the message names.
     build_shape(Shape(Table(Category, rows=_ROWS, name=Constant("c"), parent=_tree()), seed=seed))
 
     assert Category.objects.count() == _ROWS
@@ -462,7 +438,6 @@ def test_a_condition_no_row_lands_inside_loads_whatever_the_siblings_draw(seed: 
 
     assert Verdict.objects.count() == _ROWS
     assert Verdict.objects.filter(status="accepted").count() == 0
-    # Siblings do share a code: the condition is what keeps them apart.
     assert _shares_a_code_among_siblings()
     # The index is partial, so a copy is turned away only once it is accepted.
     first = Verdict.objects.filter(parent__isnull=False).first()
