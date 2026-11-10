@@ -398,12 +398,12 @@ how many companies there are.
 - **`Distinct` is offered only where a column of the constraint is not a key.** A key is
   filled by a `FanOut`, a `Paired` or a `Tree` and `Table` refuses a distribution on it, so
   a nullable key the shape leaves out is not a column to make `Distinct`. `(company, prev)`
-  with `prev` left out, `(owner, other)` over a `Paired` with `other` left out, and
-  `(other)` under `Q(state="x")` were offered one; each now offers what it still can, and
-  that loaded 20 times in 20. So are a tree beside a key left out, a tree beside a fan-out
-  with or without one, and a tree under a condition, and a fan-out beside a key left out is
-  offered the `Projection` alone, since `Table` refuses a `Derived` on a key as it does a
-  distribution. Beside a column that is not a key, `Distinct` is still offered and loads.
+  with `prev` left out, `(owner, other)` over a `Paired` with `other` left out, `(other)`
+  under `Q(state="x")`, a tree beside a key left out, a tree beside a fan-out with or
+  without one, and a tree under a condition are each offered what a key can take, and that
+  loaded 20 times in 20. A fan-out beside a key left out is offered the `Projection` alone,
+  since `Table` refuses a `Derived` on a key as it does a distribution. Beside a column that
+  is not a key, `Distinct` is still offered and loads.
 - **A cap of one is offered only where it can place every row**, or where the parents
   are not declared in this shape. `max_children=1` over
   fewer parents than rows cannot be partitioned, and the build refuses it before a row is
