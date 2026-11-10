@@ -1,5 +1,3 @@
-"""The declaration of a rule, and the four ways of writing one that will not do."""
-
 from __future__ import annotations
 
 import pytest
@@ -42,15 +40,13 @@ def test_a_q_with_no_model_is_refused() -> None:
 
 
 def test_a_sql_statement_with_a_model_beside_it_is_refused() -> None:
-    # A declaration whose model is read by nothing is a declaration that lies
-    # about what it checks.
+    # A declaration whose model is read by nothing is a declaration that lies about what it checks.
     with pytest.raises(InvalidShape, match="would be read by nothing"):
         Invariant("a statement and a model", Project, sql="SELECT 1")
 
 
 def test_a_q_is_rendered_faithfully_for_the_digest() -> None:
-    # Unlike a callable, a Q is data: two of them printing alike filter alike,
-    # so str is a rendering rather than an approximation.
+    # A Q is data, unlike a callable, so its str is a rendering rather than an approximation.
     one = Invariant("rule", Project, violated_by=Q(status="ACTIVE"))
     other = Invariant("rule", Project, violated_by=Q(status="COMPLETE"))
 
