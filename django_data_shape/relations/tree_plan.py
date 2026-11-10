@@ -1,5 +1,3 @@
-"""A tree resolved into one parent row index per row."""
-
 from __future__ import annotations
 
 from array import array
@@ -8,12 +6,7 @@ from array import array
 class TreePlan:
     """Which earlier row each row hangs from, decided once and answered in O(1).
 
-    Indices rather than keys, on purpose: the parent's key is the key this
-    table's own strategy assigns to that index, and turning one into the other
-    belongs where every other key of the row is made. ``-1`` marks a root,
-    because an ``array`` of machine integers holds a million parents in eight
-    megabytes where a list of ``int | None`` would take several times that.
-    """
+    Indices rather than keys: the key is what this table's strategy assigns that index."""
 
     def __init__(self, parents: array[int]) -> None:
         self._parents = parents
