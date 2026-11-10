@@ -1,5 +1,3 @@
-"""A column taken verbatim from the parent's."""
-
 from __future__ import annotations
 
 from django_data_shape.derivations.scope import Scope
@@ -8,19 +6,7 @@ from django_data_shape.derivations.scope import Scope
 class Copied:
     """``relation.field``, unchanged.
 
-    A ticket's face value is the unit price of the order it belongs to; a line's
-    currency is its invoice's. There is no arithmetic at all, which is what made
-    needing a lambda for it -- and losing the template-database cache with it --
-    annoying rather than merely unfortunate. See
-    :class:`~django_data_shape.derivations.product.Product`.
-
-    Worth saying what this is *not*, because the two are easy to confuse. A
-    denormalised copy is a column with its own statistics: the planner sees a
-    distribution over the child table rather than a join, which is the whole
-    reason schemas carry such columns and the reason a shaped database has to
-    reproduce them. Reading the parent's column through the join is a different
-    query with a different plan.
-    """
+    A ticket's face value is its order's unit price: there is no arithmetic at all."""
 
     def __init__(self, source: str) -> None:
         self._source = source

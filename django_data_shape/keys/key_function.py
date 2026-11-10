@@ -1,5 +1,3 @@
-"""Keys from a function the caller supplies."""
-
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -10,17 +8,7 @@ from django_data_shape.declaration.invalid_shape import InvalidShape
 class KeyFunction:
     """A caller's own deterministic mapping from row index to key.
 
-    The escape hatch for a key this package cannot infer -- a natural key, a
-    prefixed slug, an external identifier. Integer and UUID primary keys are
-    inferred and need none of this; anything else is declared rather than
-    guessed, because a guessed value in a semantic column is how a character
-    primary key once got loaded with the strings "1", "2" and "3".
-
-    The function must be a pure function of the row index. That is checked on a
-    sample at construction rather than trusted: a key that varies between calls
-    would break reproducibility, and it would break it silently, in the one
-    column every foreign key points at.
-    """
+    The escape hatch for a key this package cannot infer: a natural key, a prefixed slug."""
 
     def __init__(self, function: Callable[[int], object], *, sample: int = 64) -> None:
         first = [function(row) for row in range(sample)]

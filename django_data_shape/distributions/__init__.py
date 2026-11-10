@@ -1,5 +1,3 @@
-"""The declared value distributions."""
-
 from django_data_shape.distributions.bounded import Bounded
 from django_data_shape.distributions.constant import Constant
 from django_data_shape.distributions.distribution import Distribution

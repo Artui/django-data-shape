@@ -1,5 +1,3 @@
-"""UUID keys a database can compute for itself, so a projection can carry them."""
-
 from __future__ import annotations
 
 import hashlib
@@ -9,63 +7,13 @@ import uuid
 class Md5Keys:
     """A version 4 shaped UUID per row, derived in Python **and** in SQL.
 
-    The projection half of :class:`~django_data_shape.keys.uuid_keys.UuidKeys`,
-    and a separate strategy rather than a second meaning for that one. The two
-    produce different keys for the same row, so quietly making one become the
-    other where a SQL twin is needed would change every key in every world
-    already built, and would give one declaration two meanings depending on
-    which statement filled the table.
-
-    **Why md5 rather than blake2b.** A
-    :class:`~django_data_shape.declaration.projection.Projection` has no declared row count,
-    so its rows never pass through Python and its keys have to be assigned by
-    the ``INSERT ... SELECT`` that writes them -- which means the hash has to
-    exist on both sides and agree byte for byte. ``blake2b`` has no PostgreSQL
-    equivalent; ``md5`` is in the standard library and is a built-in function of
-    the server. That is the whole of the reason, and it is worth being plain
-    that **this is not a security choice**: nothing here authenticates anything,
-    the input is a table's own seed and row index, and md5's weakness is
-    collision resistance against an adversary who chooses the input. Nobody
-    chooses these inputs.
-
-    128 bits, of which 122 survive the version and variant stamp -- the same
-    space every application storing a v4 UUID already relies on, and far past
-    where birthday collisions matter for a test database.
-
-    ``usedforsecurity=False`` is passed because it has to be: on a FIPS build,
-    ``hashlib.md5`` without it raises rather than returning a digest, which
-    would make this strategy unusable on hosts that are otherwise fine.
-    """
+    The projection half of ``UuidKeys``, as its own strategy rather than a second meaning."""
 
     def key_for(self, row: int, stream: int) -> object:
         return uuid.UUID(bytes=bytes(_stamp(_digest(stream, row))))
 
     def key_sql(self, stream: int, row: str) -> str:
-        """The same digest, stamped the same way, computed by the server.
-
-        The two halves are checked against each other rather than argued about:
-        a test computes both for the same rows and compares them, which is the
-        only form of agreement that means anything here.
-
-        ``md5`` takes the same eight-byte big-endian pair Python hashes, turned
-        back into bytes by ``decode``, so neither side is hashing a rendering of
-        the other's input. The stamp is two ``overlay`` calls on the hex digest:
-        nibble 13 is the version and is always ``4``, and nibble 17 is the
-        variant, which keeps its low two bits and takes ``8`` in the high two.
-
-        **The stream is embedded as hex rather than converted by the server**,
-        and that is a fix rather than a preference. It used to be written
-        ``to_hex(<stream>::bigint)``, which asks PostgreSQL to re-derive a
-        number Python produced as *unsigned* -- and ``bigint`` is signed, so any
-        stream above 2^63 raised ``NumericValueOutOfRange`` before a row was
-        written. That is a coin flip per table, not a property of any schema:
-        the stream is a hash of the table and field names, so roughly half of
-        all table names land above the limit. It is a constant by the time this
-        statement is built, so nothing about it needs deriving at all.
-
-        ``row`` stays a conversion because it is genuinely an expression the
-        server evaluates, and a row index is far below the limit.
-        """
+        """The same digest, stamped the same way, computed by the server."""
         digest = f"md5(decode('{stream:016x}' || lpad(to_hex(({row})::bigint), 16, '0'), 'hex'))"
         variant = f"to_hex((('x' || substr({digest}, 17, 1))::bit(4)::int & 3) | 8)"
         return (
@@ -78,12 +26,7 @@ class Md5Keys:
         return True
 
     def canonical(self) -> object:
-        """Nothing to say: the digest is a function of the seed and the row. See ``Canonical``.
-
-        Empty like ``UuidKeys``' own, and not the same thing -- the strategy's
-        type name is part of the digest, so two shapes differing only in which
-        of them they use are two different worlds, which they are.
-        """
+        """Nothing to say: the digest is a function of the seed and the row. See ``Canonical``."""
         return ()
 
     def __repr__(self) -> str:
@@ -97,11 +40,7 @@ def _digest(stream: int, row: int) -> bytes:
 
 
 def _stamp(digest: bytes) -> bytearray:
-    """Make a raw digest a well-formed version 4 UUID.
-
-    Applications store v4 keys, so a test database holding something that merely
-    looked UUID-shaped would be unlike the thing it stands in for.
-    """
+    """Make a raw digest a well-formed version 4 UUID, as applications store them."""
     raw = bytearray(digest)
     raw[6] = (raw[6] & 0x0F) | 0x40
     raw[8] = (raw[8] & 0x3F) | 0x80
