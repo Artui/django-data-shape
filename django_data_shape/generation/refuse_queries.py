@@ -1,5 +1,3 @@
-"""The guard that makes "your code may not call the database" a fact."""
-
 from __future__ import annotations
 
 from contextlib import AbstractContextManager
@@ -15,32 +13,14 @@ _SQL_SHOWN = 200
 def refuse_queries(
     connection: Any, model: str, derivations: tuple[str, ...]
 ) -> AbstractContextManager[None]:
-    """Refuse any query issued on ``connection`` inside the block.
-
-    Wrapped around **generation**, never around the load. That split is what
-    makes the guard usable at all: on PostgreSQL the rows go into
-    ``cursor.copy()``, which is not a statement Django wraps, so the whole
-    streaming loop can sit inside one guard; on the portable path a chunk is
-    generated inside the guard and executed outside it. Either way the only
-    thing that can run a query in here is code the caller supplied.
-
-    The message names the model and its derivations rather than the one callable
-    at fault. Django hands a wrapper the SQL and not the Python frame that asked
-    for it, so naming the exact culprit would mean entering and leaving a
-    context manager per row per column -- a cost paid on every build so that a
-    rare failure reads slightly better. The statement itself is included
-    instead, which in practice identifies the caller immediately.
-    """
+    """Refuse any query issued on ``connection`` inside the block."""
     return connection.execute_wrapper(_Refuse(model, derivations))
 
 
 class _Refuse:
     """Django's execute-wrapper contract, with the state it needs to explain itself.
 
-    A class rather than a closure because ``connection.execute_wrappers`` is a
-    list of these, and one left behind by an exception is far easier to read
-    when its repr says which model was being built.
-    """
+    A class rather than a closure, since one left behind by an exception is far easier to read."""
 
     def __init__(self, model: str, derivations: tuple[str, ...]) -> None:
         self._model = model

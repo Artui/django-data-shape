@@ -28,7 +28,16 @@ from django_data_shape import (
     Zipf,
 )
 from django_data_shape.relations.resolve_tree import resolve_tree
-from tests.testapp.models import Company, Folder, Person
+from tests.testapp.models import (
+    Chain,
+    Company,
+    Folder,
+    Person,
+    Relay,
+    RootlessLink,
+    Successor,
+    TiedLink,
+)
 
 with isolate_apps("tests.testapp"):
 
@@ -278,7 +287,9 @@ def _assert_names_only_what_a_tree_accepts(message: str) -> None:
     assert "scope='group'" not in message
     assert "Paired(" not in message
     assert "PerParent(" not in message
-    assert "Distinct" in message
+    # Each caller's constraint is keys alone beside the tree, and Table refuses a distribution
+    # on a key, so there is no column to make Distinct.
+    assert "Distinct" not in message
     assert "Projection" in message
 
 
@@ -373,10 +384,17 @@ def test_a_flat_tree_beside_a_fan_out_in_a_conditional_uniqueness_is_accepted() 
     )
 
 
-def test_a_flat_tree_alone_under_a_uniqueness_stays_refused() -> None:
-    # A unique self-key is refused whatever fills it, on the field and spelled
-    # as a constraint alike, so the proof is not read for a tree with nothing
-    # beside it.
+def _refusal_alone(model: type[models.Model], rows: int, tree: Tree) -> str:
+    # Table itself refuses unique=True, so its construction is inside the block.
+    with pytest.raises(InvalidShape) as raised:
+        Shape(Table(model, rows=rows, previous=tree))
+    return str(raised.value)
+
+
+def test_a_flat_tree_alone_under_a_uniqueness_is_accepted() -> None:
+    # Every spelling of a unique self-key is one fact, so the proof that holds
+    # beside a draw holds with nothing beside it, as FanOut(max_children=1) does
+    # on a unique column. Through Shape, since Table cannot see a constraint.
     with isolate_apps("tests.testapp"):
 
         class Alone(models.Model):
@@ -390,14 +408,97 @@ def test_a_flat_tree_alone_under_a_uniqueness_stays_refused() -> None:
                     models.UniqueConstraint(fields=["previous"], name="one_link_alone"),
                 ]
 
-        message = _refusal(Table(Alone, rows=50, previous=_flat()))
+        Shape(Table(Alone, rows=50, previous=_flat()))
+    for model in (Chain, Relay, Successor):
+        Shape(Table(model, rows=50, previous=_flat()))
+        Shape(Table(model, rows=50, previous=Tree(roots=0.05, sizes=Skew({3: 1}))))
 
-    assert "one_link_alone" in message
+
+@pytest.mark.parametrize(
+    ("model", "names"),
+    [
+        (Chain, "one_link_after_each"),
+        (Relay, "unique_together ('previous',)"),
+        (Successor, "Successor.previous is unique"),
+    ],
+)
+def test_a_tree_of_many_sizes_alone_stays_refused_and_names_the_flat_tree(
+    model: type[models.Model], names: str
+) -> None:
+    message = _refusal_alone(model, 50, Tree(roots=0.2, sizes=Zipf()))
+
+    assert names in message
+    assert "previous=Tree(roots=0.2, sizes=Constant(1))" in message
+    assert "fill it after the build" in message
+
+
+@pytest.mark.parametrize("model", [Chain, Relay, Successor])
+def test_a_tree_of_two_sizes_alone_stays_refused(model: type[models.Model]) -> None:
+    message = _refusal_alone(model, 50, Tree(roots=0.2, sizes=Skew({1: 1, 2: 1})))
+
+    assert "sizes=Constant(1))" in message
+
+
+@pytest.mark.parametrize("model", [Chain, Relay, Successor])
+def test_a_table_too_small_for_siblings_is_accepted_alone(model: type[models.Model]) -> None:
+    # The arithmetic half of the proof, on each spelling: one child has no sibling.
+    Shape(Table(model, rows=2, previous=Tree(roots=0.5, sizes=Zipf())))
+
+
+@pytest.mark.parametrize("model", [Chain, Relay, Successor])
+def test_a_table_with_two_children_is_refused_alone(model: type[models.Model]) -> None:
+    message = _refusal_alone(model, 3, Tree(roots=0.1, sizes=Zipf()))
+
+    assert "sizes=Constant(1))" in message
+
+
+def test_a_unique_self_key_that_refuses_null_stays_refused_however_flat() -> None:
+    # A root is NULL and the first row is always one, whichever spelling makes
+    # the key unique, so no proof about children reaches this.
+    with isolate_apps("tests.testapp"):
+
+        class Required(models.Model):
+            previous = models.ForeignKey("self", on_delete=models.CASCADE, related_name="+")
+
+            class Meta:
+                app_label = "testapp"
+                constraints = [
+                    models.UniqueConstraint(fields=["previous"], name="one_required_link"),
+                ]
+
+        with pytest.raises(InvalidShape, match="Required.previous cannot be null"):
+            Table(Required, rows=50, previous=_flat())
+    with pytest.raises(InvalidShape, match="RootlessLink.previous cannot be null"):
+        Table(RootlessLink, rows=50, previous=_flat())
 
 
 _NEEDS_NULLS_DISTINCT = pytest.mark.skipif(
     django.VERSION < (5, 0), reason="UniqueConstraint(nulls_distinct=) arrived in Django 5.0"
 )
+
+
+@_NEEDS_NULLS_DISTINCT
+@pytest.mark.parametrize(
+    ("tree", "rows"),
+    [
+        (Tree(roots=0.05, sizes=Constant(1)), 300),
+        (Tree(roots=0.05, sizes=Zipf()), 300),
+        (Tree(roots=0.95, sizes=Zipf()), 20),
+    ],
+)
+def test_roots_counted_as_one_group_collide_alone(tree: Tree, rows: int) -> None:
+    # The roots hold one NULL between them, so the proof that a flat tree keeps a
+    # uniqueness is false here, and leaving the column out loads that NULL in
+    # every row.
+    message = _refusal(Table(TiedLink, rows=rows, previous=tree))
+
+    assert "one_tied_link_after_each" in message
+    assert "nulls_distinct=False" in message
+    assert "Projection" in message
+    # The refusal must not offer the shape it has just refused, or the other one.
+    assert "Constant(1))," not in message
+    assert "previous=Tree(" not in message
+    assert "fill it after the build" not in message
 
 
 @_NEEDS_NULLS_DISTINCT
@@ -456,7 +557,13 @@ def test_roots_counted_as_one_group_collide_beside_a_fan_out_in_a_conditional() 
 def test_nulls_counted_together_under_another_constraint_change_nothing_here() -> None:
     # The reading is per constraint, because the NULLs of one index say nothing
     # about another's.
-    Shape(Table(TwoRules, rows=300, parent=_flat(), name=Skew({"a": 1, "b": 1})))
+    # The second is declared because a column left out of it holds one NULL in every
+    # row, which no load survives.
+    Shape(
+        Table(
+            TwoRules, rows=300, parent=_flat(), name=Skew({"a": 1, "b": 1}), code=Sequential(1, 1)
+        )
+    )
 
 
 @_NEEDS_NULLS_DISTINCT
@@ -514,9 +621,22 @@ def test_a_tree_beside_a_fan_out_is_refused() -> None:
     assert "one_branch_per_pair" in message
     assert "Branch.parent is a Tree" in message
     assert "Branch.company is a fan-out" in message
-    assert "max_children=1" in message
+    # 200 rows over 50 companies: a cap of one cannot place them, and Shape refuses it.
+    assert "max_children=1" not in message
+    assert "Distinct" not in message
+    assert "Leaving parent out of the shape" in message
     assert "Constant(1)" in message
     _assert_names_only_what_a_tree_accepts(message)
+
+
+def test_a_tree_beside_a_fan_out_over_enough_parents_is_offered_a_cap_of_one() -> None:
+    # 200 rows over 300 companies, where the cap of one is accepted by the test below.
+    message = _refusal(
+        _companies(300), Table(Branch, rows=200, parent=_tree(), company=FanOut(Zipf()))
+    )
+
+    assert "one_branch_per_pair" in message
+    assert "max_children=1" in message
 
 
 def test_a_tree_beside_a_fan_out_with_a_cap_of_one_is_accepted() -> None:
@@ -810,7 +930,7 @@ def test_a_rule_kept_per_a_fan_out_outside_the_constraint_is_refused() -> None:
     assert "decided per company" in message
     assert "PerParent('parent'" not in message
     assert "scope='group'" not in message
-    assert "Distinct" in message
+    assert "Distinct" not in message
     assert "Projection" in message
 
 
@@ -929,7 +1049,9 @@ def test_two_trees_in_a_conditional_uniqueness_are_refused() -> None:
     assert "Crossed.right is a Tree" in message
 
 
-def test_a_conditional_uniqueness_over_no_tree_and_no_fan_out_stays_undecided() -> None:
+def test_a_conditional_uniqueness_over_no_tree_and_no_fan_out_is_refused() -> None:
+    # It used to be skipped, since there is no partition to offer a PerParent over. It cannot
+    # load at any seed: about 100 live rows over 2 tags, where the constraint allows 2.
     with isolate_apps("tests.testapp"):
 
         class Plain(models.Model):
@@ -946,9 +1068,18 @@ def test_a_conditional_uniqueness_over_no_tree_and_no_fan_out_stays_undecided() 
                     ),
                 ]
 
-        Shape(
-            Table(Plain, rows=200, tag=Skew({"a": 1, "b": 1}), status=Skew({"live": 1, "dead": 1}))
-        )
+        with pytest.raises(InvalidShape) as raised:
+            Shape(
+                Table(
+                    Plain, rows=200, tag=Skew({"a": 1, "b": 1}), status=Skew({"live": 1, "dead": 1})
+                )
+            )
+
+    message = str(raised.value)
+    assert "one_live" in message
+    assert "Plain.tag=Skew" in message
+    assert "No column of the constraint is partitioned" in message
+    assert "Projection" in message
 
 
 def test_a_conditional_uniqueness_over_a_tree_and_a_fan_out_names_the_fan_out() -> None:

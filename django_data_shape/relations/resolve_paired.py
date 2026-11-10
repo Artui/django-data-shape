@@ -1,5 +1,3 @@
-"""Turning a paired declaration into distinct partners inside every group."""
-
 from __future__ import annotations
 
 import math
@@ -34,24 +32,7 @@ def resolve_paired(
     field: str,
     connection: Any,
 ) -> PairedPlan:
-    """Read the partner table's real keys and choose distinct ones per group.
-
-    ``plan`` is the fan-out this pairs with, already resolved, because the
-    groups it produced are what the partners are chosen *within*. That ordering
-    is the whole mechanism: a group of size ``k`` takes ``k`` distinct partners,
-    so no two rows of one group share a partner and no two rows of different
-    groups share a pair.
-
-    **The refusal that only becomes decidable here.** The busiest group needs as
-    many distinct partners as it has rows, so the constraint is
-    ``max group size <= partners`` -- not ``rows <= groups x partners``, which
-    is the number a capacity check would compute and is far larger. A heavy tail
-    puts a large share of every edge on one group, so a declaration that looks
-    sparse can still be impossible: ``Zipf(1.2)`` over five thousand groups puts
-    21% of the edges on the top one. It cannot be checked before the partition
-    is resolved, so this is the one structural refusal that has to wait for the
-    build.
-    """
+    """Read the partner table's real keys and choose distinct ones per group."""
     named = named_keys(paired.parents, partner, table, field)
     keys = _read_partner_keys(partner, connection, named)
     _require_every_named_partner(named, keys, partner, table, field)
@@ -73,10 +54,6 @@ def resolve_paired(
             f"more {partner.__name__} rows, flatten {paired.relation}'s sizes, cap them with "
             f"max_children={len(keys)} on its FanOut, or ask for fewer rows here."
         )
-    # Nothing to place means nothing to weigh, the same guard the fan-out's own
-    # sizes carry. Reaching the zero-total refusal below with an empty table
-    # would refuse a shape that is merely empty, which is a legitimate thing to
-    # declare -- it is what an edge table nobody has written to looks like.
     weights = _weights(paired, keys, seed, table, field) if rows else [1.0] * len(keys)
     return PairedPlan(
         keys=keys,
@@ -90,18 +67,7 @@ def resolve_paired(
 def _read_partner_keys(
     partner: type[Model], connection: Any, named: tuple[object, ...] | None = None
 ) -> list[int]:
-    """The partner's real keys, queried rather than assumed.
-
-    The same correction a fan-out carries: a project may have built the partner
-    table with the ORM, so its keys are whatever the sequence handed out and a
-    child pointing at ``1..N`` would point at nothing.
-
-    ``named`` narrows through the database as a predicate rather than as a
-    filter applied afterwards, so an edge table pinned to one half of a partner
-    table reads that half instead of every key it is about to ignore. The keys
-    go out as parameters, so a value from a caller never reaches the statement
-    as text.
-    """
+    """The partner's real keys, queried rather than assumed."""
     pk_column = partner._meta.pk.column
     quote = connection.ops.quote_name
     statement = (
@@ -115,9 +81,6 @@ def _read_partner_keys(
             f"SELECT {quote(pk_column)} FROM {quote(partner._meta.db_table)} "
             f"WHERE {quote(pk_column)} IN ({placeholders}) ORDER BY {quote(pk_column)}"
         )
-        # Prepared by the key's own field, as the fan-out's narrowing is: SQLite
-        # has no binding for a UUID, so a raw one could not be narrowed there.
-        # Held on SQLite only, by test_a_uuid_partner_named_by_its_string_is_that_partner.
         params = tuple(partner._meta.pk.get_db_prep_value(key, connection) for key in named)
     with connection.cursor() as cursor:
         cursor.execute(statement, params)
@@ -131,22 +94,9 @@ def _require_every_named_partner(
     table: str,
     field: str,
 ) -> None:
-    """Every key ``parents=`` named has to be a row, or the narrowing is a lie.
-
-    The database does the narrowing, so a key matching nothing simply does not
-    come back -- and the edges that would have used it go to whatever else was
-    named instead, or the table comes out empty if it was the only one. Both are
-    silent, and both produce a world the declaration does not describe.
-
-    The same refusal a fan-out makes, and the likely causes are the same: a key
-    from another test, a factory row that was rolled back, or a list built from
-    a queryset filtered differently from the one in the reader's head. None of
-    them is visible in the shape.
-    """
+    """Every key ``parents=`` named has to be a row, or the narrowing is a lie."""
     if named is None:
         return
-    # Held on SQLite only, by test_a_uuid_partner_named_by_its_string_is_that_partner:
-    # PostgreSQL hands a UUID back as the UUID it was sent as.
     present = {partner._meta.pk.to_python(key) for key in keys}
     missing = [key for key in named if key not in present]
     if not missing:
@@ -163,41 +113,20 @@ def _require_every_named_partner(
 def _in_declared_order(
     named: tuple[object, ...] | None, keys: list[int], partner: type[Model]
 ) -> list[int]:
-    """Put named partners back in the order the declaration named them.
-
-    Weights below are assigned by *position*, and keys arrive ordered by primary
-    key because that is how they are read -- so without this the popularity of a
-    partner would follow the sort order of values nobody wrote down. The fan-out
-    carries the same correction for the same reason, and there it was measured:
-    one declaration gave the first-named parent 5, 11 or 79 rows across twelve
-    builds, because the sort order moved with the keys.
-    """
+    """Put named partners back in the order the declaration named them."""
     if named is None:
         return keys
-    # Keyed by the field's own reading of each key read back, because the raw
-    # route hands back the database's spelling -- SQLite stores a UUID as hex
-    # -- while `named` holds the field's reading. The keys returned are the ones
-    # read back, which are what the loader writes.
-    # Held on SQLite only, by test_a_uuid_partner_named_by_its_string_is_that_partner.
     to_python = partner._meta.pk.to_python
     present = {to_python(key): key for key in keys}
     return [present[key] for key in named if key in present]
 
 
 def _weights(paired: Paired, keys: list[int], seed: int, table: str, field: str) -> list[float]:
-    """A weight per partner, scattered across the key range rather than ordered.
-
-    Ordered weights would put a correlation between a partner's key and its
-    popularity into this table, and a correlated foreign key is planner-visible
-    -- the same reason a fan-out scatters its sizes.
-    """
+    """A weight per partner, scattered across the key range rather than ordered."""
     stream = field_stream(seed, table, f"{field}:weight")
     numeric: list[float] = []
     for index in range(len(keys)):
         weight = paired.weights.value(index, draw(stream, index))
-        # The same tower a fan-out's sizes are checked against, and for the same
-        # reason: a rounded distribution hands back a Decimal, which is a Number
-        # and deliberately not a Real.
         if isinstance(weight, bool) or not isinstance(weight, (numbers.Real, Decimal)):
             raise InvalidShape(
                 f"{table}.{field} needs numeric pairing weights, but {paired.weights!r} produced "
@@ -216,11 +145,7 @@ def _weights(paired: Paired, keys: list[int], seed: int, table: str, field: str)
 
 
 def _band_of(weights: list[float]) -> list[int]:
-    """Which weight band each partner falls in, heaviest band first.
-
-    No partners is not a band of zero, it is no bands -- ``max`` of nothing has
-    no answer and an empty table has no question.
-    """
+    """Which weight band each partner falls in, heaviest band first."""
     if not weights:
         return []
     heaviest = max(weights)

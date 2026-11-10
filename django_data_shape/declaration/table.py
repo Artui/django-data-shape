@@ -1,5 +1,3 @@
-"""One model's declared shape."""
-
 from __future__ import annotations
 
 from collections.abc import Mapping
@@ -22,6 +20,7 @@ from django_data_shape.distributions.distribution import Distribution
 from django_data_shape.keys.infer_key_strategy import infer_key_strategy
 from django_data_shape.keys.key_strategy import KeyStrategy
 from django_data_shape.relations.fan_out import FanOut
+from django_data_shape.relations.gives_no_row_two_children import gives_no_row_two_children
 from django_data_shape.relations.paired import Paired
 from django_data_shape.relations.tree import Tree
 from django_data_shape.utils import (
@@ -33,40 +32,14 @@ from django_data_shape.utils import (
     primary_key_field,
 )
 
+# What both refusals of a required key to this same table offer: neither a Tree
+# (its first row has no parent to point at) nor a FanOut (its keys are read from
+# a table still empty) fills one, and the wording is 0.25.1's, from shape_from_factory.
+_SELF_KEY_REMEDY = "Make the column null=True, or fill the table with a Projection."
+
 
 class Table:
-    """How many rows of one model, and how each column is distributed.
-
-    Field distributions are given as keyword arguments because that is the form
-    a reader scans fastest. ``fields=`` is the escape hatch, and it is not
-    optional politeness: a model may legitimately have a column called ``rows``
-    or ``model``, and Python's own argument binding would silently hand that
-    keyword to this signature instead. Without the mapping form those models
-    would simply be undeclarable.
-
-    ``statistics=`` maps a field name to the number of buckets the planner
-    should keep for that column::
-
-        Table(Order, rows=2_000_000, status=Skew(weights), statistics={"status": 500})
-
-    A target is a physical property of the column rather than of the
-    distribution, which is why it is declared beside the distributions and not
-    inside one: the same skew wants a different target in a table of two
-    thousand rows and a table of two million, and a caller's own distribution
-    would have to grow a parameter it has no use for. PostgreSQL keeps at most
-    ``target`` most-common values and ``target`` histogram bounds, and samples
-    300 times that many rows, so this is the dial that decides how much of a
-    declared shape the planner can actually record. A column left out keeps
-    whatever the schema gives it. See
-    :func:`~django_data_shape.loading.apply_statistics_targets.apply_statistics_targets`
-    for what the build does with it, including the one thing it refuses.
-
-    Every refusal below happens here, at declaration time, rather than during
-    the load. A shape that cannot describe a database should say so before it
-    has spent a minute generating rows, and the message should name the field --
-    a reader who has to re-derive which column was meant has been given an error
-    that knows more than it says.
-    """
+    """How many rows of one model, and how each column is distributed."""
 
     def __init__(
         self,
@@ -97,11 +70,7 @@ class Table:
         self._computation_order: tuple[str, ...] = ()
         self._validate()
 
-    # Read-only, because every rule in this class is enforced once, in
-    # __init__. Leaving the attributes writable meant a declaration could be
-    # edited afterwards into one that would have been refused -- and silently,
-    # since nothing re-runs the checks. A shape also has to stay hashable data
-    # for the template cache that comes later, which a mutable one cannot be.
+    # Read-only: every rule is enforced once in __init__, and a hashable shape must not change.
     @property
     def model(self) -> type[Model]:
         return self._model
@@ -112,11 +81,7 @@ class Table:
 
     @property
     def keys(self) -> KeyStrategy:
-        """How this table's primary keys are decided.
-
-        Never None by the time anyone can read it: _validate either inferred a
-        strategy from the primary key's type or refused the declaration.
-        """
+        """The key strategy for the primary key, never None once the table is validated."""
         return cast("KeyStrategy", self._keys)
 
     @property
@@ -126,12 +91,7 @@ class Table:
 
     @property
     def statistics(self) -> Mapping[str, int]:
-        """The per-column statistics targets this table asks the planner for.
-
-        Empty unless the declaration said otherwise, which means the columns
-        keep whatever target the schema gives them -- ``default_statistics_target``
-        for a column no migration has touched.
-        """
+        """The per-column statistics targets this table asks the planner for."""
         return MappingProxyType(self._statistics)
 
     @property
@@ -139,16 +99,8 @@ class Table:
         return str(self.model._meta.db_table)
 
     def columns(self) -> tuple[tuple[str, Field[Any, Any]], ...]:
-        """The declared fields, in a stable order, with their model fields.
-
-        Sorted by name rather than left in declaration order: the order decides
-        the column list of the ``COPY`` statement, and a shape whose generated
-        SQL changes when two keyword arguments are swapped would hash to a
-        different cache key for no reason.
-        """
+        """The declared fields in a stable order, sorted by name for the COPY column list."""
         meta = self.model._meta
-        # cast because get_field's return type covers reverse relations too,
-        # which _validate has already ruled out for every name reaching here.
         return tuple(
             (name, cast("Field[Any, Any]", meta.get_field(name))) for name in sorted(self.fields)
         )
@@ -163,23 +115,11 @@ class Table:
         )
 
     def computation_order(self) -> tuple[str, ...]:
-        """The declared derivations, dependencies first.
-
-        A second order over the same columns, and deliberately not the one
-        ``columns()`` returns. That one is sorted by name to keep the ``COPY``
-        statement stable; this one is a topological sort of what depends on
-        what. Computed once, when the declaration was validated, because a cycle
-        among derivations is a refusal and refusals belong at declaration time.
-        """
+        """The declared derivations, dependencies first: a second order, not columns()."""
         return self._computation_order
 
     def parent_fields(self) -> Mapping[str, tuple[str, ...]]:
-        """Which of a parent's columns this table's derivations read, per relation.
-
-        The build turns this into columns on the query that already reads the
-        parent's keys, so a child reaches its parent's values through the
-        fan-out it already declared rather than through a lookup per row.
-        """
+        """Which of a parent's columns this table's derivations read, per relation."""
         wanted: dict[str, set[str]] = {}
         for declared in self.fields.values():
             if not isinstance(declared, Derivation) or declared.scope is not Scope.PARENT:
@@ -190,11 +130,7 @@ class Table:
         return {relation: tuple(sorted(names)) for relation, names in wanted.items()}
 
     def _validate(self) -> None:
-        # First, because every check below reads ``_meta.concrete_fields`` and
-        # under multi-table inheritance that list spans two tables while this
-        # declaration is about one. Refusing here means the reader is told about
-        # the inheritance rather than about whichever column happened to be
-        # noticed first somewhere downstream.
+        # Inheritance first: every check below reads concrete fields that may span two tables.
         check_not_inherited(self.model)
         meta = self.model._meta
         known = {field.name: field for field in meta.concrete_fields}
@@ -229,10 +165,6 @@ class Table:
                 "be satisfied without a lookup, so it is not available to declare."
             )
 
-        # A relation takes a FanOut, or a Tree on its own table, and nothing else. A value distribution over a
-        # foreign key column would emit ids drawn from thin air, pointing at rows
-        # that may not exist -- the one thing referential integrity by
-        # construction exists to make impossible.
         mismatched = sorted(
             name
             for name, declared in self.fields.items()
@@ -275,28 +207,13 @@ class Table:
         self._check_pairings(known)
 
         self._resolve_defaults(known)
-        # After the defaults for the reason the derivation check is: a target on
-        # a column the model defaults rather than the caller declared is a
-        # target on a column this shape does fill, and before this point that
-        # column is not in ``fields`` to be recognised.
         self._check_statistics(known)
         self._check_satisfiable(known)
-        # After the defaults, not before: a derivation may legitimately read a
-        # column the model defaulted rather than the caller declared, and before
-        # this point that column is not in ``fields`` to be found.
         self._check_derivations(known)
         self._computation_order = order_derivations(self.model.__name__, self._fields)
 
     def _check_trees(self, known: dict[str, Field[Any, Any]]) -> None:
-        """A ``Tree`` fills a nullable, non-unique key to this same table, and nothing else.
-
-        Each condition is the arithmetic of the declaration rather than a
-        preference. A tree's parents are this table's own earlier rows, so on a
-        key to another table it would emit keys that table never had. Its roots
-        are NULL, and the first row is always one, so a column that refuses
-        NULL cannot hold any tree at all. And a unique column takes one child
-        per parent, which a tree exists to exceed.
-        """
+        """A ``Tree`` fills a nullable key to this same table, and nothing else."""
         for name, declared in sorted(self.fields.items()):
             if not isinstance(declared, Tree):
                 continue
@@ -313,29 +230,19 @@ class Table:
                 raise InvalidShape(
                     f"{where} cannot be null, and a tree's roots are the rows whose parent is "
                     "NULL. The first row is always one, since there is no earlier row for it to "
-                    "point at, so no tree fits a column that refuses NULL. Make the column "
-                    "null=True, or leave it out and fill it after the build."
+                    "point at, so no tree fits a column that refuses NULL. " + _SELF_KEY_REMEDY
                 )
-            if field.unique:
+            if field.unique and not gives_no_row_two_children(declared, self.rows):
                 raise InvalidShape(
                     f"{where} is unique, so each row may be the parent of one row at most, and "
                     f"{declared!r} spreads children over parents by weight, which gives some "
-                    "parents several. A chain of one-to-one links is not a tree this package "
-                    "builds; leave the column out and fill it after the build."
+                    "parents several. A tree whose sizes hold one value gives no row two children "
+                    f"and fills it: {name}=Tree(roots={declared.roots!r}, sizes=Constant(1)). Or "
+                    "leave the column out and fill it after the build."
                 )
 
     def _check_statistics(self, known: dict[str, Field[Any, Any]]) -> None:
-        """Refuse a statistics target on a column this shape does not fill.
-
-        A target is a promise about what the planner will record for a column,
-        and it can only be kept for a column that has values in it. The two ways
-        to ask for one that cannot be kept are naming a field the model does not
-        have, and naming one this shape leaves alone -- a nullable column nobody
-        declared holds nothing but NULLs, so a bigger sample of it describes
-        nothing more precisely.
-
-        The primary key counts as filled, because this package assigns it.
-        """
+        """Refuse a statistics target on a column this shape does not fill."""
         for name in sorted(self._statistics):
             where = f"{self.model.__name__}.{name}"
             if name not in known:
@@ -355,16 +262,7 @@ class Table:
             check_statistics_target(where, self._statistics[name])
 
     def _check_derivations(self, known: dict[str, Field[Any, Any]]) -> None:
-        """Refuse a derivation whose sources are not there to be read.
-
-        Every source name is resolvable here, at declaration time, and none of
-        it needs a connection: a row source is a column of this table, a parent
-        source is a column of a model reachable through a declared ``FanOut``,
-        and a rank source is a name the declaration invented and so cannot be
-        wrong. A source that cannot be resolved would otherwise surface as a
-        ``KeyError`` from inside the generator, naming neither the column that
-        asked nor the one it wanted.
-        """
+        """Refuse a derivation whose sources are not there to be read."""
         for name, declared in sorted(self._fields.items()):
             if not isinstance(declared, Derivation):
                 continue
@@ -436,21 +334,7 @@ class Table:
         field_name: str,
         column: Field[Any, Any],
     ) -> None:
-        """Refuse an ``After`` whose parent column is a different kind of thing.
-
-        Only ``After`` is checked, and deliberately not every parent-scoped
-        derivation: ``After`` *is* ``parent + offset`` written into this column,
-        so the two columns describe the same quantity by construction. A
-        ``Derived`` reading a parent column may legitimately convert -- turning
-        a timestamp into a count of days is an ordinary thing to declare -- and
-        a check that could not tell the two apart would refuse it.
-
-        The failure this prevents is silent rather than loud, which is why it
-        is worth a refusal at declaration time. ``date + timedelta`` is a
-        ``date``; the load accepts it, the rows arrive as naive midnights, and
-        the only complaint is Django's own per-row warning in the middle of a
-        build that prints thousands of lines.
-        """
+        """Refuse an ``After`` whose parent column is a different kind of thing."""
         parent_field = cast("Field[Any, Any]", parent._meta.get_field(field_name))
         parent_kind = offsettable_kind(parent_field)
         column_kind = offsettable_kind(column)
@@ -468,23 +352,7 @@ class Table:
         )
 
     def _check_group_sources(self, name: str, declared: Derivation) -> None:
-        """Refuse a group-scoped column whose groups are not there to be grouped by.
-
-        A group is a parent's share of the child range, so the source has to be
-        a ``FanOut`` declared on this table -- the same requirement a parent
-        source has, and for a sharper reason: a parent source with no fan-out
-        has nothing to read, while a group source with no fan-out has no
-        *partition*, and it is the partition that makes a per-group rule
-        computable at all.
-
-        A null share is refused for a reason that is not the parent case's. A
-        child with a NULL foreign key belongs to no group, so no per-group rule
-        says anything about it -- and PostgreSQL treats each NULL as distinct in
-        a unique index, so those rows are exempt from the very constraint this
-        exists to satisfy. Generating them would leave a share of the table
-        outside the rule while the declaration read as though it covered
-        everything.
-        """
+        """Refuse a group-scoped column whose groups are not there to be grouped by."""
         for source in declared.sources:
             fan_out = self._fields.get(source)
             if isinstance(fan_out, Tree):
@@ -513,40 +381,7 @@ class Table:
             self._check_group_order(name, declared)
 
     def _check_group_order(self, name: str, declared: PerParent) -> None:
-        """Refuse an ``order_by`` this package cannot make true.
-
-        ``order_by`` claims that the last row of a group *under that column's
-        ordering* is the last row of the group *as the fan-out partitioned it*.
-        It is checked rather than performed, because performing it would mean
-        sorting a group, and holding a group is the one thing streaming into
-        ``COPY`` cannot do.
-
-        Two conditions make the claim true, and both are decidable here.
-
-        The column has to climb with the row index -- it implements
-        :class:`~django_data_shape.distributions.ascending.Ascending` and says
-        so. A column filled by
-        :class:`~django_data_shape.derivations.after.After` or by a skew has no
-        order to be last in.
-
-        And the fan-out has to be ``placement="grouped"``, which is the case
-        this package spends most of its documentation warning about. Under
-        ``grouped`` a parent's children occupy consecutive row indices, so a
-        column climbing with the index climbs within every group and the last
-        position really is the greatest value. Under ``arrival`` the children
-        are interleaved *on purpose* -- that is what makes the physical layout
-        honest -- so the group's rows are scattered through the index and the
-        last position is an ordinary one of them.
-
-        **That is a genuine incompatibility rather than a missing feature.**
-        The two declarations say opposite things about the relationship between
-        a group and the row order, and the refusal names both ways out. Nothing
-        is lost from the plan by dropping it: PostgreSQL keeps no statistic
-        about which row of a group holds which value, so the selectivity, the
-        plan and the cost are identical either way. What ``order_by`` buys is
-        that the active project is the newest one, which is realism for the
-        application rather than for the planner.
-        """
+        """Refuse an ``order_by`` this package cannot make true."""
         column = declared.order_by
         ordering = self._fields.get(cast("str", column))
         if ordering is None:
@@ -575,14 +410,7 @@ class Table:
             )
 
     def _check_pairings(self, known: dict[str, Field[Any, Any]]) -> None:
-        """Every ``Paired`` has to name a fan-out in this same table.
-
-        The pairing is what makes an edge table buildable in one pass: the
-        fan-out partitions the rows, and the paired column takes distinct
-        partners inside each of its groups. So the name it gives has to be a
-        fan-out here -- not a relation filled some other way, not a column of
-        another table, and not itself.
-        """
+        """Every ``Paired`` has to name a fan-out in this same table."""
         for name, declared in sorted(self.fields.items()):
             if not isinstance(declared, Paired):
                 continue
@@ -614,38 +442,7 @@ class Table:
                 )
 
     def _check_satisfiable(self, known: dict[str, Field[Any, Any]]) -> None:
-        """Refuse a declaration the database provably cannot hold.
-
-        A ``Constant`` on a unique column with more than one row is not a subtle
-        problem: it is arithmetic, decidable here, and it used to be discovered
-        by the database partway through a load that had already written most of
-        a table. The same reasoning covers a ``Skew`` offering fewer values than
-        there are rows.
-
-        **Room is not the question, and that is the second refusal here.**
-        Having more values than rows makes the declaration *possible*, never
-        certain: a distribution draws per row rather than dealing a permutation,
-        so two rows taking the same value is a matter of the seed. Measured on
-        this very model -- five rows over fifty values, ten times the room,
-        loaded seventeen runs in twenty; ten rows over a hundred, the same
-        ratio, loaded ten. A shape that usually works is precisely the case
-        these refusals exist for, because the run it fails is somebody else's.
-
-        The two are ordered, and the order is the useful part: the arithmetic
-        answers first where it can, because "this cannot fit" is a different
-        instruction from "it fits and nothing arranges it".
-
-        Only single-column uniqueness is checked here. Multi-column constraints
-        need the whole shape -- how many parents a fan-out has to spread over is
-        not knowable from one table -- so they are
-        :func:`~django_data_shape.declaration.check_constraints.check_constraints`'s, and it
-        makes the same two refusals with the same reasoning.
-
-        **A ``FanOut`` on a unique column is deliberately not decided here**, and
-        it is the one gap left open. Whether a partition gives any parent two
-        rows depends on the parent's row count, which a table does not know; the
-        shape-level check has ``rows_of`` and answers it there.
-        """
+        """Refuse a declaration the database provably cannot hold."""
         for name, distribution in self.fields.items():
             field = known[name]
             if not field.unique:
@@ -658,15 +455,9 @@ class Table:
                         f"values, but {distribution!r} can only produce {available}. The database "
                         "would refuse this partway through the load."
                     )
-            # One row has no second row to collide with, whatever fills it --
-            # and a Constant on a unique column of one row is an ordinary thing
-            # to write.
             if self.rows < 2:
                 continue
-            # A partition is not a draw, and a derivation reads something other
-            # than its own row index. Both are left to the checks that can see
-            # what they depend on.
-            if isinstance(distribution, (FanOut, Derivation)):
+            if isinstance(distribution, (FanOut, Derivation, Tree)):
                 continue
             if isinstance(distribution, Distinct) and distribution.is_distinct_per_row():
                 continue
@@ -682,60 +473,19 @@ class Table:
             )
 
     def _resolve_defaults(self, known: dict[str, Field[Any, Any]]) -> None:
-        """Decide what happens to every field the caller did not declare.
-
-        The subtlety that makes this its own method: **a Django ``default=`` is
-        not a database default.** It is applied by ``save()``, and this package
-        never calls ``save()`` -- it streams tuples into ``COPY``. So a column
-        that is ``NOT NULL`` with a Python-level default has nothing behind it
-        at the database level, and omitting it from the load fails on a
-        not-null violation rather than quietly taking the default.
-
-        Filling it in with the same value ``save()`` would have written keeps
-        the caller's mental model true instead of making them restate a default
-        they already declared on the model.
-        """
+        """Fill each undeclared field: a Django ``default=`` is not a database default."""
         undeclared = [
             (name, field)
             for name, field in known.items()
             if name not in self.fields and not field.primary_key
         ]
 
-        # Omitting a required relation used to be accepted and then fail inside
-        # COPY with a not-null violation, so it is refused here instead.
-        #
-        # The message names the remedy rather than a limitation, and that is the
-        # correction rather than the check: it used to say relations were not
-        # supported and that fan-out was coming in the next release, which was
-        # true when it was written and had been wrong for every release since.
-        # Forgetting one foreign key is the commonest possible mistake, so this
-        # is the first thing many readers ever see the package say -- and what
-        # it said was that the package could not do the thing it is for.
-        # `has_db_default` rather than `has_default`, and the difference is the
-        # whole of the second fix here. A Python-level `default=` on a foreign
-        # key is applied by save(), which this package never calls, so it puts
-        # nothing behind the column -- and it used to exempt the column from
-        # this refusal *and* from the fill below, which skips relations. Neither
-        # half noticed it, and the load died inside COPY on the not-null
-        # violation this refusal exists to replace. A real db_default is DDL, so
-        # a column carrying one can be left out of the COPY and still be filled.
-        #
-        # Folding the default into a Constant, which is what happens to a scalar
-        # a few lines down, would be the wrong repair: a key that did not come
-        # out of the parent's table is a key drawn from nothing, which is
-        # exactly what declaring a value distribution on a relation is refused
-        # for.
         required_relations = sorted(
             name
             for name, field in undeclared
             if field.is_relation and not field.null and not has_db_default(field)
         )
         if required_relations:
-            # Saying the default is there and does nothing, rather than leaving
-            # the caller to read "this shape does not say which" as wrong. They
-            # did say: they wrote default= on the model, and every other tool
-            # they use honours it. A consumer hit exactly this and reported the
-            # message as describing a different bug.
             defaulted = sorted(name for name in required_relations if known[name].has_default())
             because = (
                 f" {', '.join(defaulted)} carries a default=, and a default is applied by save(), "
@@ -746,24 +496,33 @@ class Table:
                 if defaulted
                 else ""
             )
-            raise InvalidShape(
-                f"{self.model.__name__}.{', '.join(required_relations)} cannot be null, so every "
-                "row needs a parent and this shape does not say which."
-                f"{because} A relation is declared as "
-                f"a fan-out over the parent's real keys -- {required_relations[0]}=FanOut(Zipf()) "
+            own_table = [
+                name for name in required_relations if known[name].related_model is self.model
+            ]
+            elsewhere = [name for name in required_relations if name not in own_table]
+            remedy = (
+                f" A relation is declared as a fan-out over the parent's real keys -- "
+                f"{elsewhere[0]}=FanOut(Zipf()) "
                 "for the realistic heavy tail, FanOut(Uniform(1, 10)) for something flatter, and "
                 "FanOut(Zipf(), max_children=1) for a one-to-one. childless= is the share of "
                 "parents nobody references. The parent's "
                 "own table has to be built in the same shape or already loaded, because that is "
                 "where the keys are read from."
+                if elsewhere
+                else ""
+            )
+            if own_table:
+                remedy += (
+                    f" {', '.join(own_table)} points at {self.model.__name__} itself, and a "
+                    "FanOut reads its keys from a table still empty at load time, so it is "
+                    f"refused there. {_SELF_KEY_REMEDY}"
+                )
+            raise InvalidShape(
+                f"{self.model.__name__}.{', '.join(required_relations)} cannot be null, so every "
+                f"row needs a parent and this shape does not say which.{because}{remedy}"
             )
         undeclared = [(name, field) for name, field in undeclared if not field.is_relation]
 
-        # A callable default is refused rather than guessed. This package cannot
-        # know whether it varies per row -- ``uuid4`` does, ``dict`` does not --
-        # and both readings produce data the application would never have
-        # written: one duplicates a value meant to be unique, the other invents
-        # variation where the model promised none.
         callables = sorted(
             name for name, field in undeclared if field.has_default() and callable(field.default)
         )
@@ -792,18 +551,7 @@ class Table:
             )
 
     def canonical(self) -> object:
-        """Everything about this table that decides a row. See ``Canonical``.
-
-        The model's label as well as its table name, because a project can
-        rename either without touching the other and a digest that read only one
-        would call two schemas the same.
-
-        The fields are **sorted**, unlike a skew's weights: they become a
-        ``COPY`` column list that ``columns()`` sorts anyway, so declaration
-        order provably does not reach a single row, and sorting means two
-        spellings of one declaration share a cached database instead of building
-        it twice.
-        """
+        """Everything about this table that decides a row. See ``Canonical``."""
         return (
             str(self.model._meta.label),
             self.db_table,

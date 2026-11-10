@@ -7,6 +7,159 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.26.0] — 2026-11-10
+
+### Changed
+
+- **A `Tree` that gives no row two children fills a nullable unique self-key.**
+  `Tree(roots=0.05, sizes=Constant(1))` was refused on `unique=True`, a `OneToOneField`,
+  a `UniqueConstraint` and `unique_together` over the one column, though the proof that
+  keeps a uniqueness beside other columns holds for it alone, as `FanOut(max_children=1)`
+  holds on a unique key to another table. It now builds on Postgres under each spelling.
+  A tree whose sizes can give a row two children stays refused, and the refusal names
+  the flat `Tree`; one with at most one child is accepted whatever its sizes weigh. A
+  self-key that refuses NULL stays refused, and so does a tree of many roots under
+  `nulls_distinct=False`, whose roots collide among themselves.
+- **`shape_from_factory` writes that `Tree` for a nullable unique self-key,** with the
+  root share it measured, instead of a comment and a finding. A self-key that refuses
+  NULL keeps both, and a self-key under `nulls_distinct=False` now gets them too, naming
+  the one-root tree and a `Projection`, rather than a `Tree` a shape would refuse.
+
+### Fixed
+
+- **A condition naming a relation column is read as what that relation can write.** A
+  `FanOut`, `Tree` or `Paired` was compared to the condition's value as though it were
+  that value, which is never true, so `UniqueConstraint(fields=["company"],
+  condition=Q(owner=1))` over `owner=FanOut(Zipf())` was accepted and the load failed in
+  `COPY` at some seeds. It is refused now, with a message of its own that offers only what
+  builds for that declaration, because `PerParent` is refused on a relation. Accepted, and
+  loaded at several seeds: a key `parents=` leaves out, `Q(owner=None)` with no null share,
+  a NULL in a column of the constraint itself while each NULL is its own group, a single
+  key under `max_children=1` or flat sizes, a single key on a tree that gives no row two
+  children, and `Q(prev=None)` on one root. A key the parent does not have is refused
+  although it loads, since nothing reads a parent's keys before the build.
+- **A relation in a condition is read whatever groups the constraint.** The check above
+  stopped at a constraint with no `FanOut` and no `Tree` in it, so `Q(owner=1)` over a
+  drawn `label`, `Q(prev=1)` over one, and `Q(person=1)` over `(person)` with `person` a
+  `Paired` were accepted and the load failed in `COPY` at some seeds. They are refused
+  now, and everything the message offers loads over draws alone. `Q(company=1)` over
+  `(person)` with `person` paired on `company` is accepted wherever it stands, since one
+  company's partners are distinct.
+  `Q(owner=99)` and a key over a `Uniform(1, 10**9)` are refused although each loads.
+- **A `Paired` beside its own relation keeps a conditional uniqueness.** Its partners are
+  distinct inside each group, so `(company, person)` holds under any condition, and
+  `Q(status="on")` over that pair is no longer refused. `Q(person=1)` over `company` holds
+  for the same reason. Under `nulls_distinct=False` with a null share on the relation the
+  proof does not hold, and those are refused.
+- **`shape_from_factory` writes source that compiles beside a commented column.** A
+  column reported as `name=Sequential(...)  # every value distinct,` put the comma
+  inside the comment, so any column after it was a `SyntaxError`; the same held for a
+  `Skew({...})` over many values. The comma now comes before the comment.
+- **`shape_from_factory` says when a self-key sits in a composite uniqueness over
+  columns it draws.** `Folder`, unique on `(parent, name)`, with repeated names got
+  `parent=Tree(...)` and `name=Skew(...)` and no finding, and `Shape` then refused it.
+  A finding now names the constraint (or the `unique_together`) and the remedy: a
+  column distinct in every row, `max_children=1` on a key to another table, or a
+  `Projection`. A unique self-key gets none where the uniqueness keeps each NULL apart,
+  since its flat tree keeps the constraint; where they count as one value the roots are
+  one group, the flat tree keeps none of it, and the finding stands.
+- **A `UniqueConstraint` or `unique_together` that spells the attname is read.**
+  `fields=["parent_id"]` was not the column `parent`, so `shape_from_factory` wrote
+  `sizes=Zipf()` for a unique self-key, which `Shape` refuses. `fields=["parent_id",
+  "name"]` was read as columns the shape left out, and died in `COPY`. Both are read as
+  the fields they name.
+- **`Table`'s refusals on a required self-key offer a remedy it accepts.** The `Tree`
+  refusal told a non-null self-key to "leave it out and fill it after the build", and
+  the required-relation refusal then offered `FanOut(Zipf())` on a key to the same
+  table; both were refused in turn. Both now say what `shape_from_factory` has said
+  since 0.25.1: make the column `null=True`, or fill the table with a `Projection`.
+- **A column the shape leaves out is read as what the load leaves in it.** A literal
+  `db_default` holds one value in every row, and was read as a NULL that keeps rows
+  apart, so beside a `Tree` or a `FanOut` it was accepted and died in `COPY`. It now
+  counts as one value in every check, and is refused by name. `Now()` is read the same
+  way, since a table's rows arrive in one `COPY` and it is one instant across that
+  statement. Any other expression stays with the other two nets, since
+  `gen_random_uuid()` loads.
+- **A `unique=True` column left to a `db_default` of one value is refused.** No check
+  read that spelling, so a literal and `Now()` were accepted and died in `COPY` at the
+  second row. The refusal names a `Sequential` where one builds for the field's type,
+  and a `Projection` alone where none does.
+- **A condition reads a column left out too.** `Q(status=None)` over one puts every
+  row inside the condition, and so does `Q(status="on")` over a `db_default` of
+  `"on"`. Both were accepted and died in `COPY`; both are refused.
+- **`nulls_distinct=False` is read wherever a check assumed each NULL is its own
+  group.** A column left out holds one value there. A `FanOut` with a `null` share
+  has one more group, so its cap of one is no proof and the pigeonhole counts the
+  NULL as one more parent. Shapes resting on either died in `COPY` and are refused.
+- **A `FanOut` alone under a `UniqueConstraint` or a `unique_together` is refused**
+  as it is on a `unique=True` column, naming `max_children=1`, and no null share under
+  `nulls_distinct=False`. No check read that spelling, and `FanOut(Zipf())` died in
+  `COPY`.
+- **A `Distinct` column keeps a constraint whatever else is in it.**
+  `(company, code)` under a condition and `(company, person, code)` were refused
+  with `code=Sequential(1, 1)`, and both load.
+- **A flat `Tree` beside two fan-outs is accepted.** It was refused by the check for
+  the two fan-outs, which did not read the proof the others read, and it loads.
+- **One root is a proof under `nulls_distinct=False`.** A `Tree` with one root and
+  sizes of one value holds one NULL and no repeated key, and it was refused alone, beside
+  a draw or two fan-outs, and under a condition. It loads, and a refusal there now names
+  it as `roots=1/(rows + 1)`,
+  since `1/rows` reads as two roots at some counts, 11 and 13 among them. A tree of many
+  roots stays refused.
+- **A fan-out that gives no group two rows keeps a conditional constraint.**
+  `FanOut(Zipf(), max_children=1)` and flat sizes were refused under a condition with a
+  drawn or constant column, and both load. A `null` share under `nulls_distinct=False`
+  takes the proof away, and that stays refused.
+- **A shape of one row is accepted under any uniqueness that has room for it.** Two
+  rows are what a collision takes, and a drawn pair was refused at one row.
+- **A `FanOut` on a `unique=True` column is accepted at one row.** The same index
+  written as a `UniqueConstraint` was, and the field was refused for a skew that had
+  no second row to put on a parent. One check now decides both spellings, and it loads.
+- **A condition is read as it is spelled.** `Q(x__isnull=True)` was read as never met,
+  so over a column left out every row was inside and the load died in `COPY`; it is
+  `Q(x=None)` now. `__isnull=False` is met by any value, and a `Value` is the value it
+  wraps. An `F()` or another expression as the value was read as never met too, and
+  `Q(owner=F("boss"))` loaded 0 times in 20; it is now a member that may be met in any
+  row, so `Q(state=F("label"))` over a `state` that never holds a label is refused
+  although it loads.
+- **A conditional uniqueness that nothing partitions is refused.** A constraint over
+  draws alone, or a `Paired` alone, with a condition a row can meet, was skipped, and
+  seven such shapes loaded 0 times in 20. The refusal offers a `Distinct` column of the
+  constraint that is not a key, the condition column left out where it is nullable, and a
+  `Projection`, each loaded. A key the shape leaves out is no column to make `Distinct`,
+  so a constraint of keys alone is offered none. A derivation in the group stays with
+  the other two nets.
+- **Under `nulls_distinct=False` a refusal no longer offers a remedy that keeps a null
+  share**, and a `Paired` whose relation keeps one is refused: offered beside two fan-outs,
+  it loaded 0 times in 20. A cap of one is no longer offered over fewer parents than rows,
+  and one declared there beside a tree is refused at `Shape()`, where it was accepted and
+  failed in the build. `Constant(None)`, and a Python `default=None`, are read as a NULL
+  in every row, which keeps every row apart while each NULL is its own group and is one
+  value where they tie; the pigeonhole counted them as one value either way. A `PerParent`
+  offered under a condition over a fan-out with a null share says "over company with no
+  null share" as the others do, and loads with the share dropped.
+- **A uniqueness over a `Paired` that does not name its relation is refused.** `Paired`
+  keeps partners apart only inside each group of its relation, so `unique(owner)` with
+  `owner=Paired("company", ...)` over fifty companies was accepted and loaded 0 times in
+  20, alone, beside a drawn column, and with a null share counted as one group. It stays
+  accepted where the constraint names the relation or the relation has one parent. The
+  refusal offers a flat or capped `FanOut` where the partners can hold every row, the
+  column left out where its NULLs are apart, a `Distinct` column beside it, and a
+  `Projection`, each loaded.
+- **A tree refused over keys alone is no longer offered `Distinct`.** `Table` refuses a
+  distribution on a `FanOut`, `Tree` or `Paired`, so a tree beside a fan-out, two trees under
+  one uniqueness, and a tree under a condition, with no other column in the constraint, were
+  offered a remedy no declaration could spell. They keep the rest of what they offered. The
+  refusals new in this release offer `Distinct` only where a column of the constraint is not
+  a key.
+
+### Documentation
+
+- **What the constraint checks allow through and what they refuse without counting
+  are told apart**, in `docs/invariants.md` and the `check_constraints` docstring.
+  Both said every listed case was allowed through, and `Uniform(1, 9)` under
+  `Q(status="accepted")` is refused, because unknown is read as a yes.
+
 ## [0.25.1] — 2026-11-09
 
 ### Fixed
@@ -1857,7 +2010,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   into `COPY FROM STDIN`, which psycopg 2 cannot do without materialising them
   first.
 
-[Unreleased]: https://github.com/Artui/django-data-shape/compare/v0.25.1...HEAD
+[Unreleased]: https://github.com/Artui/django-data-shape/compare/v0.26.0...HEAD
+[0.26.0]: https://github.com/Artui/django-data-shape/compare/v0.25.1...v0.26.0
 [0.25.1]: https://github.com/Artui/django-data-shape/compare/v0.25.0...v0.25.1
 [0.25.0]: https://github.com/Artui/django-data-shape/compare/v0.24.0...v0.25.0
 [0.24.0]: https://github.com/Artui/django-data-shape/compare/v0.23.0...v0.24.0

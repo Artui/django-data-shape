@@ -1,5 +1,3 @@
-"""One world at one scale factor, undone when the block ends."""
-
 from __future__ import annotations
 
 from collections.abc import Generator
@@ -232,7 +230,7 @@ def scaled_world(shape: Shape, factor: int, *, using: str = DEFAULT_DB_ALIAS) ->
     ``setval`` is not transactional. Nothing here reads it -- keys are assigned,
     not drawn -- so the only visible effect is that a row created by the ORM
     after a world is torn down gets a larger id than it otherwise would.
-    """
+    """  # noqa: E501
     scaled = scaled_shape(shape, factor)
     connection = connections[using]
     depth = _OPEN_WORLDS.get(connection, 0)
@@ -243,45 +241,17 @@ def scaled_world(shape: Shape, factor: int, *, using: str = DEFAULT_DB_ALIAS) ->
             _empty_declared_tables(world, using)
             result = build(world, using=using, require_statistics=False)
             yield result.rows
-            # Rolling back on the way out rather than raising and swallowing
-            # an exception to get there: set_rollback is the supported way to
-            # leave an atomic block without keeping it. An exception from the
-            # caller's block never reaches this line and does not need to --
-            # atomic rolls back for exactly that case already.
             transaction.set_rollback(True, using=using)
     finally:
-        # Given back however the block ends, so the next world on this
-        # connection draws from the stream this one did -- the same keys, which
-        # a growth assertion over several factors relies on -- even after a
-        # block that raised
-        # (test_a_world_whose_block_raised_leaves_the_next_one_its_keys).
         _OPEN_WORLDS[connection] = depth
-        # After the rollback, never inside it. The rows are back and the
-        # sequences are not: ``setval`` is not transactional, so the counter
-        # still holds whatever the scaled build moved it to -- and a scaled
-        # world is usually *smaller* than a session world built over, which
-        # leaves it pointing at ids that have just come back. The next
-        # ``objects.create()`` then collides with a row the failing test never
-        # wrote, in a later test, which is about as far from the cause as a
-        # symptom gets.
-        #
-        # Recomputed from the rows rather than restored from a number captured
-        # on the way in, because the reset reads ``max(pk)`` of whatever is
-        # actually there: it is then correct in both directions, and correct
-        # too when the caller's block raised partway through the build.
+        # setval is not transactional, so sequences reset after the rollback, never inside it.
         _reset_declared_sequences(scaled, using)
 
 
 class _Reference(NamedTuple):
     """One foreign key into a table the world is about to empty.
 
-    ``sql`` is how a statement names the referencing table and ``table`` is how
-    a message does. They differ only off PostgreSQL, where the name comes from
-    introspection bare and has to be quoted; PostgreSQL's catalogue hands back
-    a name already quoted and qualified wherever the table needs it.
-    ``declared`` is the candidate's ``db_table`` as declared, on every backend,
-    which is what lets the refusal find the declaration it is about.
-    """
+    ``sql`` names the referencing table for a statement, ``table`` for a message."""
 
     sql: str
     table: str
@@ -290,95 +260,11 @@ class _Reference(NamedTuple):
 
 
 def _empty_declared_tables(shape: Shape, using: str) -> None:
-    """Remove the rows of the tables ``shape`` declares, and nothing else.
-
-    A world at a factor is the declared shape at that size and nothing else, so
-    rows already in those tables are not this world's -- and emptying them is
-    what lets a scaled world be built over a session world, which is the one
-    composition of this package's two pytest surfaces that an application with a
-    single model graph needs and could not have.
-
-    **Nothing is snapshotted, and nothing needs to be.** This runs inside the
-    atomic block ``scaled_world`` already rolls back, so whatever was there
-    comes back when the block ends -- the session world included.
-
-    Emptying rather than refusing is safe *only* here, and that is why it lives
-    in this function and not in ``build``. A bare ``build()`` keeps its refusal,
-    because it has no transaction of its own to undo and would be destroying
-    rows for good.
-
-    A table whose keys are :class:`~django_data_shape.keys.disjoint.Disjoint`
-    is left alone, mirroring the exemption ``build`` makes for the same reason
-    and read by the same helper (see :func:`_keeps_its_keys`): those keys
-    cannot collide with a caller's rows, so the hybrid this package documents
-    -- parents made by your code, children made here -- must keep working.
-    Nor with a session world's built from the same shape, since the world
-    draws them from a stream of its own (see :func:`_with_world_keys`). Unless
-    it points into what is emptied: see :func:`_candidates`.
-
-    **Only a declared table that holds a row needs emptying** -- a
-    *candidate* -- and a world with none issues no statement after the read
-    that found them empty, foreign-key checks included
-    (``test_a_world_over_empty_tables_issues_no_emptying_statement``).
-
-    **A row outside the declaration that references a candidate is refused**,
-    with :class:`~django_data_shape.scaling.shape_referenced.ShapeReferenced`
-    naming it, because removing the row it points at would leave it pointing at
-    nothing or take it along, and either changes a table the shape does not
-    declare. A reference counts only when it comes from a table that is not a
-    candidate (``test_declaring_the_fees_too_makes_their_rows_the_worlds``), goes
-    into one (``test_a_reference_left_null_is_no_reason_to_refuse``, and the
-    ``selected_fee`` assertion in
-    ``test_a_fee_the_caller_made_refuses_the_world_naming_its_column``) and has
-    every one of its columns set: a row with any of them null references
-    nothing (``test_a_reference_left_null_is_no_reason_to_refuse`` for one
-    column, ``test_a_composite_reference_with_one_column_null_references_nothing``
-    for several). Each of those conditions was mutated out and the test named
-    beside it failed, which a branch-coverage gate cannot show: a condition
-    deleted from a filter leaves every branch still taken.
-
-    **On PostgreSQL the emptying is one ``TRUNCATE`` when it can be**, because
-    that is the case a session world under a scaled world over the same graph
-    meets every time. ``TRUNCATE``'s unit is a set of tables closed under
-    foreign keys -- PostgreSQL refuses to truncate a table something outside
-    the statement references -- so the statement lists every table that
-    references a candidate, transitively, read from ``pg_constraint``: the set
-    ``CASCADE`` would have taken, named rather than implied. It runs only when
-    none of those tables holds a row, so truncating them removes nothing
-    (``test_a_world_declaring_a_child_leaves_the_callers_parent_alone``, where
-    the caller's club is such a row); and because the list is explicit, a list
-    that ever missed a table would be refused by PostgreSQL rather than
-    silently widened
-    (``test_over_a_session_world_the_emptying_is_one_truncate_naming_what_references_it``).
-    Otherwise some referencing table holds rows, and after the refusal check
-    the candidates are emptied by ``DELETE`` instead, children before parents
-    (``test_the_delete_route_empties_children_before_parents``), and on
-    PostgreSQL the pending checks are fired after them
-    (``test_a_violation_outside_the_declaration_surfaces_at_entry_on_either_route``).
-
-    **Off PostgreSQL the refusal is made through Django's introspection**,
-    which reads every table's foreign keys -- a cost paid only by a world whose
-    declared tables already hold rows, since one over empty tables stops at the
-    first read. It is the same rule, run before any ``DELETE`` as it is on
-    PostgreSQL, so a world's ``DELETE`` does not reach an undeclared table
-    through a database-level ``ON DELETE``, or leave its rows pointing at keys
-    the world then hands to rows of its own. The reading
-    differs in one place: introspection reports each column of a composite
-    foreign key on its own, so a composite key counts there as soon as any
-    column is set (``test_off_postgresql_a_composite_key_counts_when_any_column_is_set``).
-    Django never creates one.
-    """
+    """Remove the rows of the tables ``shape`` declares, and nothing else."""
     connection = connections[using]
     if all(_keeps_its_keys(table) for table in shape.tables):
-        # Nothing here is ever emptied on its own account, so there is nothing
-        # to read either: a shape declaring only Disjoint tables issues no
-        # statement at all
-        # (test_a_shape_whose_tables_all_keep_their_own_keys_empties_nothing).
         return
     with connection.cursor() as cursor:
-        # Every declared table in the one read, Disjoint ones included, because
-        # whether a Disjoint table holds rows decides whether it joins the
-        # candidates below -- and asking in the same statement costs nothing.
         held = _exists(
             cursor, [(connection.ops.quote_name(table.db_table), "") for table in shape.tables]
         )
@@ -389,139 +275,29 @@ def _empty_declared_tables(shape: Shape, using: str) -> None:
         if connection.vendor == "postgresql":
             closure, references = _referencing_closure(connection, cursor, candidates)
             if not any(_exists(cursor, [(name, "") for name in closure])):
-                # Fire the foreign-key checks still queued from the caller's
-                # own writes first. Django creates PostgreSQL foreign keys
-                # DEFERRABLE INITIALLY DEFERRED, so a child row written earlier
-                # in this transaction -- by a factory's SubFactory, typically --
-                # leaves its check pending until commit, and PostgreSQL refuses
-                # to TRUNCATE a table with pending trigger events. A parent row
-                # alone queues nothing, which is why only a caller who wrote a
-                # child ever saw the refusal.
-                #
-                # This moves *when* the checks run and nothing else: a row that
-                # genuinely violates a constraint now raises here, at world
-                # entry and under the constraint's name, rather than whenever
-                # the enclosing transaction next checks. check_constraints()
-                # ends with SET CONSTRAINTS ALL DEFERRED, which defers every
-                # deferrable constraint, one declared INITIALLY IMMEDIATE
-                # included, for the rest of the block and the caller's block
-                # with it (test_inside_the_block_every_deferrable_constraint_is_deferred,
-                # on both routes). It does not outlive the block, because the
-                # mode is transaction state and rolling the block back restores
-                # it with everything else
-                # (test_the_constraint_mode_the_world_set_does_not_outlive_it).
-                # Before the statement on this route, because TRUNCATE is what
-                # refuses; the DELETE route below fires them after its
-                # statements instead, for the build's ALTER TABLE.
                 connection.check_constraints()
-                # TRUNCATE is transactional on PostgreSQL, so it rolls back with
-                # the rest of the block. No CASCADE: the closure is listed, so
-                # PostgreSQL refuses a set that is not closed rather than
-                # widening it. RESTART IDENTITY is deliberately omitted, because
-                # a sequence reset is not transactional and would leave the
-                # counter behind the rows that came back.
                 listed = [connection.ops.quote_name(name) for name in candidates] + closure
                 cursor.execute(f"TRUNCATE {', '.join(listed)}")
                 return
         else:
             references = _referencing_tables(connection, cursor, candidates)
         _refuse_held_references(connection, cursor, references, shape, candidates)
-        # DELETE, because TRUNCATE cannot remove the declared rows here without
-        # taking a table that references them along: its unit is a set closed
-        # under references, and one of those tables holds rows that are not
-        # this world's. The refusal above has just established that none of
-        # those rows references a candidate, so removing every candidate row
-        # leaves them untouched and nothing dangling. Children before parents,
-        # in the declaration's own order reversed.
         for name in reversed(candidates):
             cursor.execute(f"DELETE FROM {connection.ops.quote_name(name)}")
         if connection.vendor == "postgresql":
-            # Fired after the DELETEs, where the TRUNCATE route fires them
-            # before its statement. DELETE itself is allowed with trigger events
-            # pending, so nothing here needs them first; they are fired so that
-            # both routes enter the block alike. A row outside the declaration
-            # that breaks a constraint raises here, under the constraint's
-            # name, as it does before a TRUNCATE
-            # (test_a_violation_outside_the_declaration_surfaces_at_entry_on_either_route),
-            # and every deferrable constraint is deferred for the rest of the
-            # block, which the rollback undoes
-            # (test_inside_the_block_every_deferrable_constraint_is_deferred).
-            #
-            # Every check the DELETEs queued passes -- each row they remove
-            # from a referenced table queues one: the refusal above has ruled
-            # out a reference from outside the declaration, and the children
-            # went first. One the caller queued on a row of a declared table is
-            # skipped, since the row is gone -- so an orphan there, which the
-            # TRUNCATE route raises for, is removed unchecked here
-            # (test_on_the_delete_route_an_orphan_in_a_declared_table_is_removed_unchecked).
-            # The build's ALTER TABLE ... SET STATISTICS, which PostgreSQL
-            # refuses while checks are queued, does not rest on this call:
-            # apply_statistics_targets fires them itself before any ALTER,
-            # because a world that empties nothing reaches it with the
-            # caller's checks still queued.
-            #
-            # Off PostgreSQL nothing refuses a pending check, and SQLite's
-            # version of this call scans every table in the database.
             connection.check_constraints()
 
 
 def _keeps_its_keys(table: Table | Projection) -> bool:
-    """Whether ``table`` builds beside rows already there rather than being emptied.
-
-    Answered by :func:`~django_data_shape.keys.is_disjoint.is_disjoint`, the
-    helper ``build`` asks before refusing a table for holding rows, so the two
-    cannot part: a strategy implementing ``Disjoint`` and answering no used to
-    be left in place here and then refused by the build with
-    :class:`~django_data_shape.loading.shape_not_empty.ShapeNotEmpty`
-    (``test_a_strategy_that_says_it_is_not_disjoint_is_emptied``).
-
-    A :class:`~django_data_shape.declaration.projection.Projection` has no
-    ``keys`` to ask, and its rows come from a statement, so it never does.
-    """
+    """Whether ``table`` builds beside rows already there rather than being emptied."""
     return is_disjoint(getattr(table, "keys", None))
 
 
 def _with_world_keys(shape: Shape, depth: int) -> Shape:
-    """``shape`` with every Disjoint table drawing its keys from the world's own stream.
-
-    ``UuidKeys`` and ``Md5Keys`` make each key from the row and a stream
-    derived from the seed and the table, and scaling keeps the seed, so a world
-    handing them the stream ``build()`` does makes the keys ``build()`` makes. Over a session
-    world built from the same shape, those are the session's -- in a table the
-    world leaves in place and builds beside -- and the build failed on the
-    primary key (``test_a_session_world_with_a_disjoint_root_sits_under_the_same_graph``).
-    So each such table draws from that stream XORed with ``_WORLD_KEYS`` and
-    the number of worlds already open on the connection, which is never the
-    stream ``build()`` uses for the same seed and table, and is another stream
-    for a world opened inside a world
-    (``test_a_world_inside_another_builds_beside_it_over_a_disjoint_table``).
-    A wrapper around the strategy rather than a parameter of ``build()``,
-    whose signature is public: the build hands every strategy the stream it
-    always has, and the wrapper turns it into the world's.
-
-    Every such table, emptied or not, and only those. Not the factor: row
-    ``i`` gets the same key at every factor, the way an integer key is ``i +
-    1`` at every factor (``test_a_worlds_disjoint_keys_are_the_same_at_every_factor``).
-    And nothing else: a table that is not Disjoint is emptied, so there is no
-    row of anybody else's for its keys to meet, and a
-    :class:`~django_data_shape.keys.key_function.KeyFunction` or any other
-    strategy keeps the stream ``build()`` gives it
-    (``test_only_a_strategy_that_says_it_is_disjoint_draws_from_the_worlds_stream``,
-    one case for each side of the line). A child needs nothing either, since
-    a fan-out reads its parents' keys from the table rather than computing
-    them (``test_a_worlds_children_point_at_its_own_disjoint_keys``).
-
-    The ``isinstance`` is the type's and holds a test too: a
-    :class:`~django_data_shape.declaration.projection.Projection` has no
-    ``keys``, and is emptied whatever its own keys are
-    (``test_disjoint_keys_are_not_offered_for_a_projected_table``).
-    """
+    """``shape`` with every Disjoint table drawing its keys from the world's own stream."""
     salt = _WORLD_KEYS ^ depth
     return Shape(
         *(
-            # The constructor scaled_shape uses, forwarding everything but the
-            # strategy as it stands. The declaration is validated again, and
-            # passes again: nothing it checks reads the keys.
             Table(
                 table.model,
                 rows=table.rows,
@@ -541,9 +317,7 @@ def _with_world_keys(shape: Shape, depth: int) -> Shape:
 class _WorldKeys:
     """A Disjoint strategy's keys, drawn from a stream of the world's own.
 
-    Still a Disjoint strategy, answering what the one it wraps answers, so the
-    build builds it beside the rows already there exactly as it would have.
-    """
+    Still a Disjoint strategy, answering what the one it wraps answers."""
 
     def __init__(self, keys: KeyStrategy, salt: int) -> None:
         self._keys = keys
@@ -557,42 +331,7 @@ class _WorldKeys:
 
 
 def _candidates(shape: Shape, holding: set[str]) -> list[str]:
-    """The declared tables to empty, in declaration order, given which hold rows.
-
-    Every declared table holding rows whose keys are not
-    :class:`~django_data_shape.keys.disjoint.Disjoint` -- and then every
-    Disjoint one holding rows that has a foreign key into that set, repeated
-    until nothing more joins. A Disjoint table is exempt from emptying because
-    its keys cannot collide with rows already there, which is a reason to
-    leave its rows beside the world's and no reason to leave them pointing at
-    parents the world removes. Its rows are declared rows, so removing them
-    stays inside the rule this function keeps; leaving them would make the
-    world refuse its own declaration, naming a table the shape declares as if
-    it were somebody else's.
-
-    Decided by schema and not row by row, like the ``TRUNCATE`` closure: a
-    Disjoint table joins when one of its model's foreign keys points into the
-    set, whatever its rows hold there. Read from the models rather than the
-    database, so it costs no statement -- and so a ``db_constraint=False`` key,
-    which the refusal reads past because the database holds no constraint for
-    it, still pulls its table in. A row referencing that table is then refused,
-    where by the database's keys alone there was nothing of the table's to
-    empty
-    (``test_a_key_the_database_does_not_enforce_still_joins_a_disjoint_table``).
-
-    Each condition fails a test of its own when it is removed, which a branch
-    gate cannot show. Joining every Disjoint table, rather than one with a key
-    into the set, fails
-    ``test_a_disjoint_parent_the_world_does_not_reach_keeps_its_rows``. Joining
-    one that holds no rows fails
-    ``test_an_empty_disjoint_table_carries_nothing_into_the_set``, where a
-    table holding rows would follow it in. Stopping after one round, so that
-    only keys into the first set count, fails
-    ``test_a_disjoint_table_reached_through_another_joins_too``. Without the
-    set difference the loop never ends, and
-    ``test_a_session_world_with_a_disjoint_child_sits_under_the_same_graph``
-    never returns.
-    """
+    """The declared tables to empty, in declaration order, given which hold rows."""
     tables = [table for table in shape.tables if table.db_table in holding]
     joined = {table.db_table for table in tables if not _keeps_its_keys(table)}
     while (
@@ -613,14 +352,7 @@ def _foreign_key_targets(table: Table | Projection) -> set[str]:
 
 
 def _exists(cursor: Any, probes: list[tuple[str, str]]) -> list[bool]:
-    """Whether each ``(table, condition)`` matches a row, in one statement.
-
-    One statement however many tables there are, so what a world costs stays
-    a property of the world rather than of the schema. No statement at all for
-    no probes, which is how a candidate nothing references costs one read
-    fewer: its closure is empty, and so is the question of whether it holds
-    rows (``test_and_one_fewer_where_nothing_references_the_declared_tables``).
-    """
+    """Whether each ``(table, condition)`` matches a row, in one statement."""
     if not probes:
         return []
     cursor.execute(
@@ -669,22 +401,12 @@ ORDER BY 1, foreign_key.confrelid::regclass::text, foreign_key.conname
 def _referencing_closure(
     connection: Any, cursor: Any, candidates: list[str]
 ) -> tuple[list[str], list[_Reference]]:
-    """The tables a ``TRUNCATE`` of ``candidates`` must list, and the keys into them.
-
-    PostgreSQL only, read in one recursive query over ``pg_constraint``. The
-    first half is every table referencing a candidate, transitively, named as
-    a statement can use it. The second is the foreign keys among them that
-    point *directly* into a candidate -- the only ones a ``DELETE`` of the
-    candidates could break, since a table referencing a candidate only through
-    another table is reached only through rows of that table.
-    """
+    """The tables a ``TRUNCATE`` of ``candidates`` must list, and the keys into them."""
     cursor.execute(
         _REFERENCING_CLOSURE,
         {"candidates": [connection.ops.quote_name(name) for name in candidates]},
     )
     keys = cursor.fetchall()
-    # Once per table, in the query's order, though a table holding several keys
-    # into the closure comes back once per key.
     closure = list(dict.fromkeys(referencing for referencing, *_ in keys))
     references = [
         _Reference(referencing, referencing, tuple(columns), candidates[position - 1])
@@ -695,21 +417,13 @@ def _referencing_closure(
 
 
 def _referencing_tables(connection: Any, cursor: Any, candidates: list[str]) -> list[_Reference]:
-    """Every foreign key into a candidate, off PostgreSQL, through introspection.
-
-    ``get_relations`` reads one table's foreign keys and is backend-neutral,
-    so this asks every table in the database which of its columns point into a
-    candidate. A candidate's own keys are skipped for the reason the PostgreSQL
-    query skips them.
-    """
+    """Every foreign key into a candidate, off PostgreSQL, through introspection."""
     introspection = connection.introspection
     references: list[_Reference] = []
     for name in introspection.table_names(cursor):
         if name in candidates:
             continue
         for column, relation in introspection.get_relations(cursor, name).items():
-            # By position, not by unpacking: the Django that added database
-            # ON DELETE returns it as a third element, older ones return two.
             if relation[1] in candidates:
                 references.append(
                     _Reference(connection.ops.quote_name(name), name, (column,), relation[1])
@@ -720,21 +434,7 @@ def _referencing_tables(connection: Any, cursor: Any, candidates: list[str]) -> 
 def _refuse_held_references(
     connection: Any, cursor: Any, references: list[_Reference], shape: Shape, candidates: list[str]
 ) -> None:
-    """Raise :class:`ShapeReferenced` if any row holds one of ``references``.
-
-    A row references something only when every column of the key is set --
-    PostgreSQL's default ``MATCH SIMPLE`` checks nothing for a row with any of
-    them null, and Django's keys are single columns, where the two readings
-    agree. Every reference that holds a row is named, not the first: a test
-    setup that made one undeclared child usually made several.
-
-    The ``Disjoint`` way out is offered only where taking it would work for
-    every declared table the message names, since each way out is offered as
-    one that ends the refusal on its own: where the primary key takes the keys
-    (see :func:`_disjoint_keys_fit`), and where the table has no foreign key
-    into another of ``candidates``, through which :func:`_candidates` would
-    pull it straight back into the set.
-    """
+    """Raise :class:`ShapeReferenced` if any row holds one of ``references``."""
     quote = connection.ops.quote_name
     held = _exists(
         cursor,
@@ -758,16 +458,6 @@ def _refuse_held_references(
     names = list(dict.fromkeys(reference.declared for reference in found))
     declared = " and ".join(names)
     by_name = {table.db_table: table for table in shape.tables}
-    # Every named table, not any: following the advice for one of two leaves
-    # the other's reference refused, so the advice would not be a way out
-    # (test_disjoint_keys_are_not_offered_unless_every_named_table_can_take_them).
-    # And none with a key into another candidate, because _candidates pulls a
-    # Disjoint table back into the set through exactly such a key, and the
-    # refusal comes back unchanged
-    # (test_disjoint_keys_are_not_offered_where_the_table_would_be_emptied_all_the_same).
-    # A key into itself does not count: a table the advice takes out of the
-    # set cannot pull itself back in
-    # (test_a_key_into_itself_does_not_withhold_disjoint_keys).
     emptied = set(candidates)
     disjoint = (
         f"give {declared} Disjoint keys (UuidKeys or Md5Keys), so the world builds beside the "
@@ -799,69 +489,22 @@ _DISJOINT_KEY = str(UuidKeys().key_for(0, 0))
 
 
 def _disjoint_keys_fit(table: Table | Projection) -> bool:
-    """Whether giving ``table`` Disjoint keys would take it out of the emptying.
-
-    Not for a :class:`~django_data_shape.declaration.projection.Projection`,
-    whose keys a scaled world never reads, so it is emptied whatever they are
-    (``test_disjoint_keys_are_not_offered_for_a_projected_table``); and not for
-    a table whose keys already are Disjoint, which is emptied only because it
-    references another candidate
-    (``test_disjoint_keys_are_not_offered_for_a_table_that_has_them``). Both
-    disjuncts were removed in turn and the test named beside each failed.
-    Disjoint as :func:`~django_data_shape.keys.is_disjoint.is_disjoint` reads
-    it, so a strategy implementing the protocol and answering no is emptied
-    like any other, and offered them
-    (``test_disjoint_keys_are_offered_for_a_strategy_that_says_it_is_not_disjoint``).
-
-    Otherwise only where the primary key accepts the keys those strategies
-    make, as the field's own validation decides. A ``UUIDField`` does, and so
-    does a text column that can hold a UUID's 36 characters
-    (``test_disjoint_keys_are_offered_for_a_character_key_that_holds_them``);
-    an integer key never does, and following the advice there used to fail at
-    the load, out of range for ``bigint`` on PostgreSQL and too large for an
-    ``INTEGER`` on SQLite (``test_a_fee_the_caller_made_refuses_the_world_naming_its_column``).
-
-    Two things are decided before the field is asked, and each was removed in
-    turn to watch the test named beside it fail. A primary key that is itself a
-    foreign key -- a one-to-one key into its parent -- never accepts them, and
-    is not asked, because asking runs ``ForeignKey.validate``'s existence query
-    on the router's database rather than the world's
-    (``test_disjoint_keys_are_not_offered_for_a_key_that_is_a_relation``, which
-    asserts that nothing reads the parent). And a field that refuses with
-    ``ValueError`` or ``TypeError``, where Django's contract is a
-    ``ValidationError``, is taken to refuse, rather than raising in place of
-    the refusal; each of the two is exercised on its own
-    (``test_a_key_field_refusing_outside_its_contract_still_refuses_the_world``),
-    since one ``except`` naming both is a single branch to the coverage gate.
-    """
+    """Whether giving ``table`` Disjoint keys would take it out of the emptying."""
     keys = getattr(table, "keys", None)
     if keys is None or is_disjoint(keys):
         return False
     field = primary_key_field(table.model)
     if field.is_relation:
-        # A primary key that is a foreign key holds its parent's keys, and a
-        # digest is never one of them. Asked anyway, the field would answer
-        # with ForeignKey.validate's existence query, run on the router's
-        # database whatever the world's is.
         return False
     try:
         field.clean(_DISJOINT_KEY, None)
     except (ValidationError, ValueError, TypeError):
-        # ValidationError is the contract. The other two are what a field
-        # breaking it raises from to_python, and either would otherwise escape
-        # in place of the refusal this is building.
         return False
     return True
 
 
 def _reset_declared_sequences(shape: Shape, using: str) -> None:
-    """Point every declared table's sequence at the rows it now holds.
-
-    A :class:`~django_data_shape.declaration.projection.Projection` is included: its rows
-    come from a statement rather than from generated keys, but it still has a
-    key column with a sequence behind it, and the rows it just lost were as real
-    as any other's.
-    """
+    """Point every declared table's sequence at the rows it now holds."""
     connection = connections[using]
     for table in shape.tables:
         reset_sequence(connection, table.model)

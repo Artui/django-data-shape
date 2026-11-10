@@ -141,7 +141,7 @@ target-version = "py310"
 
 [tool.ruff.lint]
 select = ["E", "F", "UP", "B", "SIM", "I", "TID"]
-ignore = ["E203", "E501", "E231", "F811", "E722", "E741", "UP040", "UP046", "UP047"]
+ignore = ["E203", "E231", "F811", "E722", "E741", "UP040", "UP046", "UP047"]
 
 [tool.ruff.lint.per-file-ignores]
 # I002 exempts the two file kinds that must not carry the future import: a
@@ -170,7 +170,7 @@ skip-magic-trailing-comma = false
 root = ["./django_data_shape"]
 
 [tool.bumpversion]
-current_version = "0.25.1"
+current_version = "0.26.0"
 allow_dirty = false
 commit = false
 tag = false

@@ -1,5 +1,3 @@
-"""Turning a declared fan-out into a partition over the parent keys that exist."""
-
 from __future__ import annotations
 
 import math
@@ -25,25 +23,7 @@ def resolve_fan_out(
     connection: Any,
     parent_fields: tuple[str, ...] = (),
 ) -> FanOutPlan:
-    """Read the parent's real keys and partition ``rows`` children across them.
-
-    The keys are **queried, not assumed**. An earlier design took them to be
-    the dense ``1..N`` range this package assigns, which is wrong in the case
-    that matters most: a project builds its fifty companies with the ORM -- where
-    the row count is small and the ORM is the right tool -- and asks this package
-    only for the two million orders. Their keys are then whatever the sequence
-    handed out, and a child pointing at ``1..50`` would point at nothing.
-
-    Reading them is also what makes referential integrity hold by construction
-    rather than by validation: every key emitted came out of the parent table.
-
-    ``parent_fields`` names the parent columns a derivation on the child reads.
-    They come back beside the keys, in the same order, so a child reaches its
-    parent's values through the partition rather than through a query of its
-    own. **The same correction applies to them as to the keys**: they are read
-    out of the parent table rather than recomputed from the parent's
-    declaration, so a parent this package never built works identically.
-    """
+    """Read the parent's real keys and partition ``rows`` children across them."""
     named = named_keys(fan_out.parents, parent, table, field)
     keys, parent_values = _read_parents(parent, parent_fields, connection, named)
     _require_every_named_parent(named, keys, parent, table, field)
@@ -80,44 +60,9 @@ def _in_declared_order(
     parent_values: dict[str, list[object]],
     parent: type[Model],
 ) -> tuple[list[int], dict[str, list[object]]]:
-    """Put named parents back in the order the declaration named them.
-
-    **The partition has to be a function of the declaration, and this is what
-    makes it one.** Keys arrive ordered by primary key because that is how they
-    are read, and the sizes below are assigned by *position* -- so without this
-    the weights followed the sort order of values nobody wrote down. With
-    integer keys that is merely surprising; with the UUID keys a factory row has
-    on a modern schema it means **the same shape builds differently every run**.
-    Measured before this existed: one declaration gave the first-named parent 5,
-    11 or 79 rows across twelve builds, because the sort order moved with the
-    keys.
-
-    That is the promise the whole package rests on -- two builds of one shape
-    agree, which is why ``UuidKeys`` derives rather than draws -- so a narrowing
-    that broke it was a defect rather than a preference.
-
-    **The weights are still scattered across positions**, and the reasoning for
-    that survives unchanged: it is a caller's *order* that decides which key
-    lands where, not their key values, so nothing here correlates a parent's key
-    with its child count. What it does mean is that reversing the list is a
-    different declaration, which is what a reader writing one would expect.
-
-    Parent values move with their keys, or a derivation would read the right
-    column off the wrong row. A key read back is matched to the one named
-    through the primary key's ``to_python``, because the raw route hands back
-    the database's spelling -- SQLite stores a UUID as hex -- while ``named``
-    holds the field's own reading of each key.
-    """
+    """Put named parents back in the order the declaration named them."""
     if named is None:
         return keys, parent_values
-    # `dict[object, int]` rather than the `list[int]` this module annotates its
-    # keys with, because that annotation is not true: a primary key is whatever
-    # the model declares, and the UUID case is exactly the one this function
-    # exists for. Widening it everywhere is a change of its own; narrowing here
-    # would be a lie that type-checks.
-    # Held only where the raw spelling differs, which is SQLite, by
-    # test_a_uuid_parent_named_as_itself_is_that_parent: PostgreSQL hands a UUID
-    # back as the UUID it was sent as.
     to_python = parent._meta.pk.to_python
     position: dict[object, int] = {to_python(key): index for index, key in enumerate(keys)}
     order = [position[key] for key in named]
@@ -134,33 +79,9 @@ def _require_every_named_parent(
     table: str,
     field: str,
 ) -> None:
-    """Every key ``parents=`` named has to be a row, or the narrowing is a lie.
-
-    The database does the narrowing, so a key that matches nothing simply does
-    not come back -- and the rows that would have pointed at it go to whatever
-    else was named instead, or the table comes out empty if it was the only one.
-    Both are silent, and both produce a world the declaration does not describe.
-
-    The likely causes are worth the message: a primary key from another test, a
-    factory whose row was rolled back, or a list built from a queryset that was
-    filtered differently from the one in the reader's head. None of them is
-    visible in the shape.
-
-    Inside :func:`~django_data_shape.scaling.scaled_world.scaled_world` a key
-    can vanish one more way, and the message names it: a world empties every
-    table its shape declares before building, so a parent table declared in the
-    same shape has lost the caller's rows by the time this reads it. That is the
-    only way left -- a world no longer empties a table its shape does not
-    declare -- and naming it keeps the refusal from blaming the caller's key
-    for the world's own emptying.
-
-    **Every missing key, not the first.** A list built from the wrong queryset is
-    wrong in several places at once, and finding that out one round trip at a
-    time is the slow way to learn it.
-    """
+    """Every key ``parents=`` named has to be a row, or the narrowing is a lie."""
     if named is None:
         return
-    # Held on SQLite only, by the same test as the reordering: see there.
     present = {parent._meta.pk.to_python(key) for key in keys}
     missing = [key for key in named if key not in present]
     if not missing:
@@ -186,46 +107,15 @@ def _read_parents(
     connection: Any,
     named: tuple[object, ...] | None = None,
 ) -> tuple[list[int], dict[str, list[object]]]:
-    """The parent's keys, and any of its columns a child derives from.
-
-    Two routes, and the split is not laziness. The keys alone come back through
-    one hand-written statement, which is what lets every branch of the partition
-    be covered by a stub connection -- the same reasoning as the backend gate,
-    where logic reachable only through a real database is logic the coverage
-    gate cannot see.
-
-    Values cannot take that route, because **a raw column is not a Python
-    value**: a cursor bypasses the field's own ``from_db_value``, and a key is
-    the one column where that never shows. Measured rather than assumed --
-    SQLite hands a raw ``DateTimeField`` back **naive** where the ORM hands back
-    an aware datetime, so ``After`` would compute an offset from a value six
-    hours from the one the application reads, under a warning nobody sees in a
-    passing run; and a ``JSONField`` comes back as text rather than as the dict
-    it is. Any field with a converter of its own is the same case, on every
-    backend. The ORM route hands a derivation the value the application would
-    have read.
-    """
+    """The parent's keys, and any of its columns a child derives from."""
     if not parent_fields:
         pk_column = parent._meta.pk.column
         quote = connection.ops.quote_name
-        # The narrowing is a predicate rather than a filter applied afterwards,
-        # so a shape pinned to one tenant reads one row instead of every key in
-        # a table it is about to ignore. The keys go out as parameters, which is
-        # what keeps a caller's own primary key off the statement text.
-        # One placeholder per key rather than a single one for the whole list.
-        # A driver is free to adapt a Python list to its own array syntax --
-        # psycopg 3 does, and `IN '{1,2}'` is a syntax error -- and `= ANY(%s)`,
-        # which would take the array, is PostgreSQL's alone. This package
-        # generates on every backend, so the portable form is the one to write.
         where = (
             ""
             if named is None
             else f" WHERE {quote(pk_column)} IN ({', '.join(['%s'] * len(named))})"
         )
-        # Prepared by the key's own field, as the ORM would: a raw parameter
-        # skips that, and SQLite has no binding for a UUID at all, so a UUID
-        # key named here could not be narrowed on that backend. Held on SQLite
-        # only, by test_a_uuid_parent_named_as_itself_is_that_parent.
         params = (
             None
             if named is None
@@ -239,11 +129,6 @@ def _read_parents(
             )
             return [row[0] for row in cursor.fetchall()], {}
 
-    # _base_manager rather than _default_manager: a project's default manager
-    # may filter, and a fan-out that silently skipped the parents somebody's
-    # manager hides would point children at a subset while reporting the whole.
-    # It is the manager Django itself uses to follow a relation, for the same
-    # reason.
     queryset = parent._base_manager.using(connection.alias)
     if named is not None:
         queryset = queryset.filter(pk__in=list(named))
@@ -260,17 +145,7 @@ def _read_parents(
 def _sizes(
     fan_out: FanOut, keys: list[int], rows: int, seed: int, table: str, field: str
 ) -> list[int]:
-    """How many children each parent gets, summing to exactly ``rows``.
-
-    The largest-remainder method rather than plain rounding, because rounding
-    each share independently does not add up: a thousand parents rounded down
-    lose hundreds of rows, and a partition that does not cover the range would
-    leave children pointing past the end of it.
-    """
-    # Nothing to place means nothing to weigh. Reaching the zero-total refusal
-    # below with an empty table would refuse a shape that is merely empty, which
-    # is a legitimate thing to declare -- it is what a parent with no children
-    # looks like.
+    """How many children each parent gets, summing to exactly ``rows``."""
     if rows == 0:
         return [0] * len(keys)
 
@@ -283,26 +158,6 @@ def _sizes(
             weights.append(0.0)
             continue
         weight = fan_out.sizes.value(index, draw(weight_stream, index))
-        # Checked rather than coerced. A size distribution handing back
-        # something that is not a number is a declaration mistake, and the
-        # alternative is a TypeError from inside the partition arithmetic that
-        # names neither the table nor the field.
-        #
-        # The test is a numeric *tower* and not a list of types, because the
-        # narrow version refused the spelling this package recommends:
-        # `Uniform(1, 10, places=0)` rounds through Decimal, and `places=0` is
-        # the natural way to say that a fan-out size is a count. It was refused
-        # by `isinstance(weight, (int, float))` while the next line already did
-        # `float(weight)` -- stricter than the arithmetic it was protecting.
-        #
-        # `numbers.Real` alone does not reach it: Decimal is `numbers.Number`
-        # and deliberately not `Real`, because mixing it with float is not
-        # something the tower wants to promise. So Decimal is named beside it,
-        # and Fraction and numpy scalars come along for free.
-        #
-        # `bool` stays out. It is an int and it is `Real`, and a distribution
-        # handing back True has almost certainly been written for a different
-        # column.
         if isinstance(weight, bool) or not isinstance(weight, (numbers.Real, Decimal)):
             raise InvalidShape(
                 f"{table}.{field} needs numeric fan-out sizes, but "
@@ -311,11 +166,6 @@ def _sizes(
                 "float, Decimal and Fraction all work, and the weights are normalised so their "
                 "scale does not matter."
             )
-        # A weight is a share of the rows, so one below zero takes rows away
-        # from the others and an infinite one leaves nothing to divide by. Both
-        # used to reach the arithmetic: a negative size gave partitions whose
-        # sizes did not add up to the rows, or were themselves negative, and
-        # under max_children the water-filling ran past its last parent.
         value = float(weight)
         if value < 0 or not math.isfinite(value):
             raise InvalidShape(
@@ -327,8 +177,6 @@ def _sizes(
         weights.append(value)
 
     total = sum(weights)
-    # Finite weights can still add up past what a float holds, and then every
-    # share is zero and the rows go wherever the rounding puts them.
     if not math.isfinite(total):
         raise InvalidShape(
             f"{table}.{field} draws fan-out sizes from {fan_out.sizes!r} whose sum over "
@@ -348,15 +196,6 @@ def _sizes(
     )
     sizes = [int(value) for value in exact]
     remainder = rows - sum(sizes)
-    # Hand the leftover rows to the parents with the largest fractional parts:
-    # the ones that were closest to earning another row.
-    #
-    # Under a cap this never lifts a parent past it, and never gives a row to a
-    # childless one, with no filter needed. A capped parent's share is the cap
-    # exactly and a childless one's is 0.0, so both have no fractional part,
-    # while the leftover is the sum of the fractional parts, each below 1 -- so
-    # at least that many parents have one, and they sort first. An uncapped
-    # share is at most the cap, so one with a fractional part is below it.
     order = sorted(range(len(sizes)), key=lambda i: exact[i] - sizes[i], reverse=True)
     for index in order[:remainder]:
         sizes[index] += 1
@@ -366,26 +205,10 @@ def _sizes(
 def _water_filled(
     weights: list[float], total: float, rows: int, fan_out: FanOut, table: str, field: str
 ) -> list[float]:
-    """Each parent's exact share of ``rows`` when no parent may exceed ``cap``.
-
-    Water-filling: the heaviest parent whose proportional share exceeds the cap
-    is fixed at it, the rows left are re-spread over the parents left by their
-    weights, and that repeats. Taking them heaviest first is what makes one pass
-    enough -- shares only grow as parents above them are fixed, and a parent
-    whose share fits does so with every lighter one fitting too, since a share
-    is proportional to its weight.
-
-    Refused rather than approximated when the parents that can hold rows cannot
-    hold them all. A childless parent has a weight of zero and holds nothing, so
-    the ceiling is the cap times the parents with a weight, not times the
-    parent table.
-    """
+    """Each parent's exact share of ``rows`` when no parent may exceed ``cap``."""
     cap = cast("int", fan_out.max_children)
     holding = [index for index, weight in enumerate(weights) if weight > 0]
     if rows > cap * len(holding):
-        # Only the remedies the declaration has: telling a reader with no
-        # childless share to lower it sends them looking for a setting they
-        # never made.
         remedies = (
             "Raise max_children, lower childless, or declare fewer rows."
             if fan_out.childless
@@ -398,24 +221,11 @@ def _water_filled(
         )
 
     exact = [0.0] * len(weights)
-    # Stable on ties, so equal weights are fixed in position order and the
-    # partition stays a function of the declaration.
     heaviest_first = sorted(holding, key=lambda index: weights[index], reverse=True)
-    # The weight left once the heaviest are fixed is summed from the light end,
-    # not kept by subtracting each capped weight from the total. Once the
-    # capped weights dwarf the rest, a subtraction cancels the light ones away
-    # and the shares come out against a wrong total: weights thirteen orders of
-    # magnitude apart gave one parent -4 rows, another one past the cap, and a
-    # third a division by zero. Summing small to large keeps what is left.
     left = [0.0] * (len(heaviest_first) + 1)
     for position in range(len(heaviest_first) - 1, -1, -1):
         left[position] = left[position + 1] + weights[heaviest_first[position]]
-    # Before anything is fixed the total is the one the uncapped path divides
-    # by, so a cap that never binds moves no row.
     left[0] = total
-    # This stops by the lightest parent at the latest. By then the weight left
-    # is that parent's own, added to zero and so exact, its share is every row
-    # left, and the refusal above is what keeps those within one cap.
     count, free_rows = 0, rows
     while weights[heaviest_first[count]] / left[count] * free_rows > cap:
         exact[heaviest_first[count]] = float(cap)

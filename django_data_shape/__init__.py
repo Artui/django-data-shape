@@ -1,5 +1,3 @@
-"""A realistically shaped test database from Django models."""
-
 from django_data_shape.backends.require_clone_strategy import require_clone_strategy
 from django_data_shape.backends.unsupported_backend import UnsupportedBackend
 from django_data_shape.databases.clone_database import clone_database

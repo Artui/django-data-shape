@@ -1,5 +1,3 @@
-"""Making the planner keep as much of a declared shape as it was asked for."""
-
 from __future__ import annotations
 
 from typing import Any, cast
@@ -34,67 +32,7 @@ WHERE a.attrelid = %s::regclass AND a.attnum > 0 AND NOT a.attisdropped
 
 
 def apply_statistics_targets(connection: Any, declaration: Table | Projection) -> None:
-    """Set the declared per-column targets, and refuse a shape the planner could not record.
-
-    ``ANALYZE`` has shipped since 0.1.0 and it is only half the story. What it
-    gathers is bounded by each column's *statistics target*: PostgreSQL keeps at
-    most that many most-common values and that many histogram bounds, and samples
-    300 times as many rows to find them. Everything past the target is collapsed
-    into one residual frequency, so a column with more distinct values than its
-    target has a shape the planner cannot see -- and this package exists to make
-    a declared shape visible.
-
-    **The target is declared, never inferred.** This function reads the
-    distributions only to refuse, and that distinction is the whole design.
-    Raising a target on the caller's behalf would be this package choosing how
-    the planner sees a column, silently, on evidence the declaration does not
-    contain: a hundred-value skew wants a hundred buckets in a table where those
-    hundred values are the query's predicate and wants far fewer where they are
-    not, and nothing in a distribution says which. So a shape that gets a
-    hundred-bucket histogram because ``default_statistics_target`` happens to be
-    a hundred is treated as different from one that asked for it -- not by
-    guessing at the second, but by making the first impossible to hold by
-    accident. Either the declaration can be recorded, or the build stops and
-    names the column.
-
-    **Which is a refusal that cannot happen at declaration time**, like
-    :class:`~django_data_shape.derivations.given.Given`'s missing case and a
-    :class:`~django_data_shape.declaration.projection.Projection` that inserts nothing. The
-    number it compares against lives in the server -- a column carries a target
-    set by a migration, and everything else falls back to a setting an operator
-    can change -- so the declaration alone cannot know it. It is still raised
-    before a single row is generated rather than after the load, because a
-    refusal that costs a two-million-row ``COPY`` first is a refusal nobody
-    thanks you for.
-
-    **The order matters and is easy to get backwards.** A target changed after
-    ``ANALYZE`` has run does nothing at all until the next one, exactly as
-    ``ANALYZE`` before a load leaves stale statistics behind. So this runs before
-    the rows, and the ``ANALYZE`` at the end of the build is the one that reads
-    it -- the ordering is owned by the library for the same reason the rest of
-    the sequence is.
-
-    **Checks still queued are fired before the first target is set.** PostgreSQL
-    refuses ``ALTER TABLE`` on a table with trigger events pending, and Django
-    creates its foreign keys ``DEFERRABLE INITIALLY DEFERRED``, so a row written
-    earlier in the same transaction into a table built beside it -- one with
-    :class:`~django_data_shape.keys.disjoint.Disjoint` keys, which the build
-    does not refuse for holding rows -- leaves its check queued on the table
-    about to be altered. So every check pending in the transaction is fired
-    first, and a row that breaks a constraint raises ``IntegrityError`` here,
-    naming it, rather than at commit. Only for a declaration with targets to
-    set: one declaring none issues no statement more. Firing them ends with
-    ``SET CONSTRAINTS ALL DEFERRED``, which stays in force for the rest of the
-    transaction, so a build inside a transaction of the caller's leaves every
-    deferrable constraint deferred until commit, one declared
-    ``INITIALLY IMMEDIATE`` included. Inside
-    :func:`~django_data_shape.scaling.scaled_world.scaled_world` that is rolled
-    back with the block.
-
-    Nothing happens on another backend. The branch is on the connection's vendor
-    rather than on a failed statement, so it is covered by passing a vendor
-    rather than by running the suite on the backend it skips.
-    """
+    """Set the declared per-column targets, and refuse a shape the planner could not record."""
     if connection.vendor != "postgresql":
         return
 
@@ -103,43 +41,13 @@ def apply_statistics_targets(connection: Any, declaration: Table | Projection) -
         name: _column(declaration.model._meta.get_field(name)) for name in declaration.statistics
     }
     with connection.cursor() as cursor:
-        # Quoted, as the query's comment says why: unquoted, a name with a
-        # capital or a dot in it is looked up as some other table
-        # (test_a_table_whose_name_needs_quoting_gets_its_target and
-        # test_nor_does_it_read_the_targets_of_the_table_its_name_folds_to),
-        # and quoted by quote_name rather than escaped, or a db_table written
-        # already quoted is looked up with its quotes as part of the name
-        # (test_a_db_table_written_already_quoted_is_looked_up_as_django_created_it).
         cursor.execute(_EFFECTIVE_TARGETS, [quote(declaration.db_table)])
         effective = {column: target for column, target in cursor.fetchall()}
         if isinstance(declaration, Table):
             _refuse_what_cannot_be_recorded(declaration, effective)
         if declaration.statistics:
-            # Fire the foreign-key checks still queued in this transaction
-            # before the first ALTER TABLE, because PostgreSQL refuses one on a
-            # table with trigger events pending. Django creates its foreign
-            # keys DEFERRABLE INITIALLY DEFERRED, so a row the caller wrote
-            # earlier in the transaction into a table built beside it -- one
-            # with Disjoint keys, which the build does not refuse for holding
-            # rows -- leaves its check queued on exactly the table being
-            # altered. Firing them changes when they run, not whether: a row
-            # that breaks a constraint raises IntegrityError here, under the
-            # constraint's name, rather than at commit
-            # (test_a_row_that_breaks_a_constraint_is_refused_before_the_target).
-            # The SET CONSTRAINTS ALL DEFERRED it ends with outlives the build
-            # (test_firing_them_defers_every_constraint_for_the_transaction),
-            # which leaves the caller's own INITIALLY IMMEDIATE constraints
-            # deferred too; no statement restores each constraint's own mode.
-            #
-            # Only where an ALTER follows, so a table declaring no target costs
-            # no statement more
-            # (test_no_check_is_fired_for_a_table_that_sets_no_target).
             connection.check_constraints()
         for name, target in sorted(declaration.statistics.items()):
-            # The target is interpolated rather than bound. ALTER TABLE takes no
-            # placeholders -- the value is part of the utility statement's own
-            # grammar -- and it is an integer inside PostgreSQL's own range,
-            # checked when the declaration was made.
             cursor.execute(
                 f"ALTER TABLE {quote(declaration.db_table)} "
                 f"ALTER COLUMN {quote(columns[name])} SET STATISTICS {target}"
@@ -147,15 +55,7 @@ def apply_statistics_targets(connection: Any, declaration: Table | Projection) -
 
 
 def _refuse_what_cannot_be_recorded(table: Table, effective: dict[str, int]) -> None:
-    """Refuse a bounded distribution with more values than its column can hold.
-
-    Only a :class:`~django_data_shape.distributions.bounded.Bounded`
-    distribution can be checked, which is the second job that protocol has done
-    and the reason it was worth having: a distribution drawing from a continuous
-    range simply does not answer, and is left alone rather than guessed at. The
-    same is true of a projected table, which declares no distributions at all --
-    its skew is whatever the table it copies from had.
-    """
+    """Refuse a bounded distribution with more values than its column can hold."""
     meta = table.model._meta
     for name in sorted(table.fields):
         distribution = table.fields[name]
@@ -177,13 +77,5 @@ def _refuse_what_cannot_be_recorded(table: Table, effective: dict[str, int]) -> 
 
 
 def _column(field: object) -> str:
-    """The column one declared field writes to.
-
-    ``cast`` twice rather than a guard, and for the reason the same helper in
-    ``projection.py`` gives: ``get_field`` is typed to include reverse
-    relations, which every name reaching here has already been checked not to
-    be, and ``column`` is Optional only in the stubs. Branching on either would
-    add a path no declaration can reach, which is how 100% branch coverage stops
-    being achievable honestly.
-    """
+    """The column one declared field writes to."""
     return cast("str", cast("Field[Any, Any]", field).column)

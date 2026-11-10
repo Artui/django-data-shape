@@ -531,14 +531,13 @@ class Seat(models.Model):
 class Booking(models.Model):
     """A model carrying every conditional constraint the pre-check cannot read.
 
-    One model rather than eight, because what is being tested is a set of
-    skips: a condition written over an expression rather than fields, one
-    grouped by a column no fan-out partitions, one joining two clauses with AND,
-    an OR whose branches name two different columns, a negated OR, an OR one of
-    whose branches is a comparison, a comparison written as a keyword argument,
-    and one written as a bare lookup expression -- plus a check constraint,
-    which is not a unique constraint at all. A declaration naming this model has
-    to be accepted whole.
+    One model rather than seven, because what is being tested is a set of
+    skips: a condition written over an expression rather than fields, one joining
+    two clauses with AND, an OR whose branches name two different columns, a
+    negated OR, an OR one of whose branches is a comparison, a comparison written
+    as a keyword argument, and one written as a bare lookup expression -- plus a
+    check constraint, which is not a unique constraint at all. A declaration
+    naming this model has to be accepted whole.
 
     Two used to be here and are not skips any more. ``state__in`` moved to
     :class:`Review`, and a nested ``Q(Q(a) | Q(b))`` over one column moved to
@@ -564,11 +563,6 @@ class Booking(models.Model):
                 models.functions.Lower("room"),
                 condition=models.Q(state="HELD"),
                 name="booking_over_an_expression",
-            ),
-            models.UniqueConstraint(
-                fields=["room"],
-                condition=models.Q(state="HELD"),
-                name="booking_grouped_by_a_plain_column",
             ),
             models.UniqueConstraint(
                 fields=["company"],
@@ -1338,6 +1332,178 @@ class Relay(models.Model):
         unique_together = [("previous",)]
 
 
+class RootlessLink(models.Model):
+    """A unique self-reference that refuses NULL: no tree has a first row to give it."""
+
+    previous = models.OneToOneField("self", on_delete=models.CASCADE, related_name="+")
+
+
+class TiedLink(models.Model):
+    """A unique self-reference whose NULLs count as one value, where Django can say so.
+
+    ``nulls_distinct`` arrived in Django 5.0, so below it this is a plain ``Chain``
+    and the tests reading the difference skip.
+    """
+
+    previous = models.ForeignKey("self", null=True, on_delete=models.CASCADE, related_name="+")
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["previous"],
+                name="one_tied_link_after_each",
+                **({"nulls_distinct": False} if django.VERSION >= (5, 0) else {}),
+            ),
+        ]
+
+
+class SpelledChain(models.Model):
+    """A unique self-reference whose constraint spells the attname, ``previous_id``.
+
+    Django accepts either spelling in ``UniqueConstraint(fields=)``, and a reader
+    comparing it to the field's ``name`` finds a different column.
+    """
+
+    previous = models.ForeignKey("self", null=True, on_delete=models.CASCADE, related_name="+")
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["previous_id"], name="one_spelled_link_after_each"),
+        ]
+
+
+class SpelledRelay(models.Model):
+    """The same, through ``unique_together``, which takes either spelling too."""
+
+    previous = models.ForeignKey("self", null=True, on_delete=models.CASCADE, related_name="+")
+
+    class Meta:
+        unique_together = [("previous_id",)]
+
+
+class SpelledFolder(models.Model):
+    """``Folder``'s uniqueness over ``(parent, name)``, spelled ``parent_id``."""
+
+    parent = models.ForeignKey("self", null=True, on_delete=models.CASCADE, related_name="+")
+    name = models.CharField(max_length=50)
+    code = models.CharField(max_length=50)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["parent_id", "name"], name="one_name_per_spelled_folder"
+            ),
+        ]
+
+
+class Mirror(models.Model):
+    """A self-key unique together with a key to another table."""
+
+    parent = models.ForeignKey("self", null=True, on_delete=models.CASCADE, related_name="+")
+    company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name="+")
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["parent", "company"], name="one_company_per_mirror"),
+        ]
+
+
+class NamedMirror(models.Model):
+    """``Mirror`` with a plain column in the uniqueness beside the key to another table."""
+
+    parent = models.ForeignKey("self", null=True, on_delete=models.CASCADE, related_name="+")
+    company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name="+")
+    name = models.CharField(max_length=50)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["parent", "company", "name"], name="one_named_company_per_mirror"
+            ),
+        ]
+
+
+class OnlyChild(models.Model):
+    """A one-to-one self-key unique together with a name: the key alone keeps it."""
+
+    parent = models.OneToOneField("self", null=True, on_delete=models.CASCADE, related_name="+")
+    name = models.CharField(max_length=50)
+    code = models.CharField(max_length=50)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["parent", "name"], name="one_name_per_only_child"),
+        ]
+
+
+class TiedOnlyChild(models.Model):
+    """A one-to-one self-key unique together with a name, where its NULLs count as one value.
+
+    The key alone keeps nothing here: every root's NULL is one group, so two roots with the
+    one name collide, which the flat tree that keeps ``OnlyChild`` cannot help. ``nulls_distinct``
+    arrived in Django 5.0; below it this is ``OnlyChild`` and difference-reading tests skip.
+    """
+
+    parent = models.OneToOneField("self", null=True, on_delete=models.CASCADE, related_name="+")
+    name = models.CharField(max_length=50)
+    code = models.CharField(max_length=50)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["parent", "name"],
+                name="one_name_per_tied_only_child",
+                **({"nulls_distinct": False} if django.VERSION >= (5, 0) else {}),
+            ),
+        ]
+
+
+class Coded(models.Model):
+    """A self-key beside a uniqueness that does not include it, by constraint and by tuple."""
+
+    parent = models.ForeignKey("self", null=True, on_delete=models.CASCADE, related_name="+")
+    name = models.CharField(max_length=50)
+    code = models.CharField(max_length=50)
+
+    class Meta:
+        unique_together = [("name", "code")]
+        constraints = [
+            models.UniqueConstraint(fields=["code", "name"], name="one_code_per_name"),
+        ]
+
+
+class Shelf(models.Model):
+    """``Folder``'s uniqueness through ``unique_together``, the other place Django keeps one."""
+
+    parent = models.ForeignKey("self", null=True, on_delete=models.CASCADE, related_name="+")
+    name = models.CharField(max_length=50)
+    code = models.CharField(max_length=50)
+
+    class Meta:
+        unique_together = [("parent", "name")]
+
+
+class SpelledShelf(models.Model):
+    """``Shelf`` with the key spelled by its attname, which ``unique_together`` keeps as written."""
+
+    parent = models.ForeignKey("self", null=True, on_delete=models.CASCADE, related_name="+")
+    name = models.CharField(max_length=50)
+    code = models.CharField(max_length=50)
+
+    class Meta:
+        unique_together = [("parent_id", "name")]
+
+
+class RootlessShelf(models.Model):
+    """``Shelf`` with a key that refuses NULL, so no tree can fill it and none is written."""
+
+    parent = models.ForeignKey("self", on_delete=models.CASCADE, related_name="+")
+    name = models.CharField(max_length=50)
+
+    class Meta:
+        unique_together = [("parent", "name")]
+
+
 class Sibling(models.Model):
     """A self-reference whose only uniqueness is conditional, so the column is not unique.
 
@@ -1416,5 +1582,84 @@ class Checked(models.Model):
                     if django.VERSION >= (5, 1)
                     else {"check": ~models.Q(parent=models.F("id"))}
                 ),
+            ),
+        ]
+
+
+class Limb(models.Model):
+    """A tree beside a fan-out under one uniqueness, as a real table.
+
+    ``(parent, company)`` is unique, so two children of one row may not sit in
+    one company. Real because the remedies a refusal names for this pair are
+    loads, and the declaration tests build no table.
+    """
+
+    parent = models.ForeignKey("self", null=True, on_delete=models.CASCADE, related_name="+")
+    company = models.ForeignKey(Company, null=True, on_delete=models.CASCADE, related_name="+")
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["parent", "company"], name="one_limb_per_pair"),
+        ]
+
+
+class Spur(models.Model):
+    """``Limb`` with a third column, which is what can keep the triple apart."""
+
+    parent = models.ForeignKey("self", null=True, on_delete=models.CASCADE, related_name="+")
+    company = models.ForeignKey(Company, null=True, on_delete=models.CASCADE, related_name="+")
+    label = models.CharField(max_length=50, null=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["parent", "company", "label"], name="one_spur_per_triple"
+            ),
+        ]
+
+
+class Rung(models.Model):
+    """Two self-keys under one uniqueness."""
+
+    left = models.ForeignKey("self", null=True, on_delete=models.CASCADE, related_name="+")
+    right = models.ForeignKey("self", null=True, on_delete=models.CASCADE, related_name="+")
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["left", "right"], name="one_rung_per_pair"),
+        ]
+
+
+class LabelledRung(models.Model):
+    """Two self-keys and a third column."""
+
+    left = models.ForeignKey("self", null=True, on_delete=models.CASCADE, related_name="+")
+    right = models.ForeignKey("self", null=True, on_delete=models.CASCADE, related_name="+")
+    label = models.CharField(max_length=50, null=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["left", "right", "label"], name="one_rung_per_triple"),
+        ]
+
+
+class Verdict(models.Model):
+    """A conditional uniqueness over a tree and a second column.
+
+    One accepted verdict per ``(parent, code)``: the rule is about the rows a
+    condition selects, so the table loads only if no two accepted rows share a
+    parent and a code.
+    """
+
+    parent = models.ForeignKey("self", null=True, on_delete=models.CASCADE, related_name="+")
+    code = models.CharField(max_length=50, null=True)
+    status = models.CharField(max_length=50, null=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["parent", "code"],
+                condition=models.Q(status="accepted"),
+                name="one_accepted_verdict",
             ),
         ]
