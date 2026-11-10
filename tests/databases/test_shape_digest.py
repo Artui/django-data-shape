@@ -1,5 +1,3 @@
-"""The cache key: same shape, same answer; different shape, different answer."""
-
 from __future__ import annotations
 
 import datetime
@@ -78,20 +76,13 @@ def test_one_shape_hashes_to_one_answer() -> None:
 def test_the_digest_is_hexadecimal_and_short_enough_to_name_a_database() -> None:
     digest = shape_digest(_orders())
 
-    # PostgreSQL identifiers stop at 63 bytes, and a template's name is a prefix
-    # plus this. A digest that did not fit would be found out by the database
-    # silently truncating it -- which is two shapes sharing a database.
+    # PostgreSQL identifiers stop at 63 bytes, and a template's name is a prefix plus this.
     assert len(digest) == 32
     assert set(digest) <= set("0123456789abcdef")
 
 
 def test_two_processes_with_different_hash_seeds_agree() -> None:
-    # The property the whole cache rests on, and the one Python's own hash()
-    # does not have: it is salted per interpreter run for strings and bytes, so
-    # a key built on it would be a different key in every process. Falsified by
-    # replacing the blake2b in shape_digest with hash() -- the two runs below
-    # then disagree and this fails, where every other test in this module still
-    # passes because they all live in one process.
+    # PYTHONHASHSEED is the only variable this test is actually about.
     script = textwrap.dedent(
         """
         import django
@@ -129,10 +120,6 @@ def test_two_processes_with_different_hash_seeds_agree() -> None:
             capture_output=True,
             check=True,
             text=True,
-            # The parent's environment with three keys forced, rather than a
-            # bare one: a stripped environment is purer and is also how a run
-            # breaks on a machine whose interpreter needs something in it.
-            # PYTHONHASHSEED is the only variable this test is actually about.
             env={
                 **os.environ,
                 "DJANGO_SETTINGS_MODULE": "tests.conftest_settings",
@@ -144,8 +131,6 @@ def test_two_processes_with_different_hash_seeds_agree() -> None:
     }
 
     assert len(answers) == 1
-    # And the same answer this process gives, so the two subprocesses agreeing
-    # with each other but not with the suite cannot pass either.
     assert answers == {
         shape_digest(
             Shape(
@@ -174,19 +159,13 @@ def test_the_order_of_a_skews_weights_moves_it_because_it_moves_the_data() -> No
     forwards = Skew({"a": 0.9, "b": 0.1})
     backwards = Skew({"b": 0.1, "a": 0.9})
 
-    # The evidence for the digest's choice rather than an assertion about the
-    # digest alone: the cumulative bounds are laid out in declaration order, so
-    # one draw lands on different values. A digest that sorted the weights would
-    # hand these two databases one cache key.
+    # A digest that sorted the weights would hand these two databases one cache key.
     assert forwards.value(0, 0.05) != backwards.value(0, 0.05)
     assert shape_digest(_orders(status=forwards)) != shape_digest(_orders(status=backwards))
 
 
 def test_the_order_the_fields_were_written_in_does_not() -> None:
-    # The other half of the same decision. Field order becomes a sorted COPY
-    # column list before a row is generated, so it provably cannot reach the
-    # data -- and hashing it would mean building the same database twice because
-    # two keyword arguments were swapped.
+    # The other half of the same decision.
     one = Shape(
         Table(Order, rows=5, status=Constant("a"), total=Constant(1), created_at=Constant(_AWARE))
     )
@@ -198,10 +177,7 @@ def test_the_order_the_fields_were_written_in_does_not() -> None:
 
 
 def test_the_order_the_tables_were_written_in_does_move_it() -> None:
-    # Unlike fields, and for a reason: a raw projection names nothing it reads,
-    # so several of them are ordered after everything and fall back to
-    # declaration order. That can reach the data, so the safe answer is a
-    # different key and a second build.
+    # That can reach the data, so the safe answer is a different key and a second build.
     company = Table(Company, rows=3, name=Constant("acme"))
     account = Table(Account, rows=3, signed_up_at=Constant(_AWARE), plan=Constant("free"))
 
@@ -220,12 +196,7 @@ def test_the_order_the_tables_were_written_in_does_move_it() -> None:
         pytest.param(
             Constant({"a": "sb"}),
             Constant({"as": "b"}),
-            # The pair that pins the length prefix rather than merely benefiting
-            # from it. Every other case here is separated by its kind byte, so a
-            # digest that dropped the lengths still told them apart; these two
-            # differ only in where the boundary falls, and the kind byte of the
-            # second string is absorbable into the first. Without the length
-            # this is one byte stream and two databases.
+            # The pair that pins the length prefix rather than merely benefiting from it.
             id="a boundary that would otherwise shift",
         ),
         pytest.param(Constant(("a",)), Constant({"a": None}), id="a sequence is not a mapping"),
@@ -256,17 +227,11 @@ def test_the_order_the_tables_were_written_in_does_move_it() -> None:
     ],
 )
 def test_every_kind_of_value_reaches_the_digest(one: object, other: object) -> None:
-    # One parametrisation rather than a test per leaf type, because the claim is
-    # the same claim every time: a value this package can read has to change the
-    # answer, or a declaration could be edited without the cache noticing.
     assert shape_digest(_orders(total=one)) != shape_digest(_orders(total=other))
 
 
 def test_the_same_value_twice_is_the_same_digest() -> None:
-    # The other direction, and it is not implied by the test above: an encoding
-    # that mixed in something incidental -- an object's address, an interpreter
-    # counter -- would pass every inequality test in this module and never hit
-    # the cache.
+    # An address or interpreter counter mixed into the digest would never hit the cache.
     assert shape_digest(_orders(total=Constant(Decimal("1.50")))) == shape_digest(
         _orders(total=Constant(Decimal("1.50")))
     )
@@ -387,9 +352,7 @@ def test_a_shared_rank_and_its_direction_reach_the_digest() -> None:
 
 
 def test_the_key_strategy_reaches_the_digest() -> None:
-    # Two builds with different key strategies produce different primary keys
-    # and therefore different foreign keys everywhere. A digest that ignored the
-    # strategy would be the clearest possible way to serve the wrong database.
+    # Different key strategies give different keys everywhere, so the digest must differ.
     inferred = Shape(Table(Company, rows=5, name=Constant("acme")))
     explicit = Shape(Table(Company, rows=5, name=Constant("acme"), keys=SequentialKeys()))
     other = Shape(Table(Company, rows=5, name=Constant("acme"), keys=UuidKeys()))
@@ -399,9 +362,7 @@ def test_the_key_strategy_reaches_the_digest() -> None:
 
 
 def test_a_statistics_target_reaches_the_digest() -> None:
-    # It changes what the planner records, which is the only thing this package
-    # claims to change at all. A template built without one is not the database
-    # a declaration asking for one describes.
+    # A template built without one is not the database a declaration asking for one describes.
     assert shape_digest(_orders()) != shape_digest(
         Shape(
             Table(
@@ -466,11 +427,7 @@ def test_a_projections_parameters_reach_the_digest() -> None:
 
 
 def test_a_derivation_wrapping_a_callable_is_refused_by_name() -> None:
-    # The decision this module exists to record. There is no honest digest of a
-    # function: two lambdas share a name, and identical bytecode returns
-    # something else when a constant it reads is edited elsewhere. Every one of
-    # those failures agrees while the data has changed, which is the direction a
-    # cache key must never be wrong in.
+    # The decision this module exists to record.
     shape = Shape(
         Table(
             Order,
@@ -486,8 +443,6 @@ def test_a_derivation_wrapping_a_callable_is_refused_by_name() -> None:
         shape_digest(shape)
 
     message = str(raised.value)
-    # It has to name where, or a reader is told a whole shape is unhashable and
-    # left to find which column did it.
     assert "'note'" in message
     assert Order._meta.db_table in message
     assert "Derived" in message
@@ -501,9 +456,7 @@ def test_a_key_function_is_refused_by_name() -> None:
 
 
 def test_a_value_this_package_cannot_read_is_refused_by_name() -> None:
-    # The same rule one level down. A Constant holding an object with no
-    # canonical form is a value that decides a column, and leaving it out of the
-    # key would mean two different tables sharing a cached database.
+    # The same rule one level down.
     shape = _orders(total=Constant(object()))
 
     with pytest.raises(UnhashableShape) as raised:
@@ -526,10 +479,7 @@ class _CountingDistribution:
 
 
 def test_a_consumers_own_declaration_can_join_in() -> None:
-    # The way out of the refusal, and the reason it is a protocol rather than a
-    # list of this package's own classes: a distribution written elsewhere that
-    # is genuinely a function of its parameters can say so, and then a shape
-    # using it caches like any other.
+    # A distribution written elsewhere can declare itself a function of its parameters and cache.
     assert shape_digest(_orders(total=_CountingDistribution(1))) == shape_digest(
         _orders(total=_CountingDistribution(1))
     )
@@ -539,17 +489,14 @@ def test_a_consumers_own_declaration_can_join_in() -> None:
 
 
 def test_a_declaration_that_merely_describes_itself_the_same_way_is_still_distinct() -> None:
-    # The type's own name is in the digest, so a caller's one-parameter
-    # distribution and this package's cannot collide by describing themselves
-    # with the same parts.
+    # The type's name is in the digest, so two types describing themselves alike do not collide.
     assert shape_digest(_orders(total=_CountingDistribution(3))) != shape_digest(
         _orders(total=Zipf(3))
     )
 
 
 def test_no_two_of_the_shapes_in_this_module_share_a_key() -> None:
-    # A sweep rather than another pair, because collision is the failure that
-    # matters and pairwise tests only rule out the pairs somebody thought of.
+    # Pairwise tests only rule out the pairs somebody thought of, so this sweeps every shape.
     shapes = [
         _orders(),
         _orders(rows=101),

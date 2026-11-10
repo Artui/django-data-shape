@@ -1,5 +1,3 @@
-"""A template the application finishes: its own code run once over a world, and cached."""
-
 from __future__ import annotations
 
 import secrets
@@ -42,18 +40,12 @@ COMPANY = Company._meta.db_table
 
 
 def _shape(seed: int = 41) -> Shape:
-    # Every name a placeholder, the way a column the application owns is
-    # declared: loadable, and wrong until the step has run.
+    # A column the application owns, declared as a placeholder until the step has run.
     return Shape(Table(Catalogue, rows=400, name=Constant("placeholder")), seed=seed)
 
 
 def _replay(using: str) -> None:
-    """What an application's own code does to a finished world, in two statements.
-
-    It rewrites a column the shape declared, so the statistics the build
-    gathered describe values that are no longer there, and it fills a table the
-    shape never named, which no per-table ``ANALYZE`` would reach.
-    """
+    """What an application's own code does to a finished world, in two statements."""
     with connections[using].cursor() as cursor:
         cursor.execute(
             f"UPDATE {CATALOGUE} SET name = CASE WHEN id % 4 = 0 THEN 'cog' ELSE 'widget' END"
@@ -83,12 +75,7 @@ def _derive(made: list[str], template: str, step: Callable[[str], object], key: 
 
 
 def _read(made: list[str], template: str, statement: str) -> list[tuple[object, ...]]:
-    """What a database cloned from ``template`` holds, read with no Django connection.
-
-    A clone rather than the template itself, because a finished template
-    refuses connections; and psycopg rather than an alias, so what is read is
-    the database and not Django's settings read back.
-    """
+    """What a database cloned from ``template`` holds, read with no Django connection."""
     target = f"derived_read_{secrets.token_hex(4)}"
     clone_database(template, target)
     made.append(target)
@@ -119,13 +106,7 @@ def _database(name: str) -> tuple[int, bool] | None:
 
 
 def _partials(parent: str, key: str = "replay-1") -> list[str]:
-    """The working copy a derivation of ``parent`` under ``key`` would leave, if one is there.
-
-    Named from the parent and the key rather than listed from the server: every
-    suite on a server shares the prefix, and a list of all partials failed
-    whenever another suite had a build in flight, which says nothing about this
-    package. A partial any process left under this derivation's name is found.
-    """
+    """The working copy a derivation of ``parent`` under ``key`` would leave, if one is there."""
     partial = f"{TEMPLATE_PREFIX}{_derived_key(parent, key)}{PARTIAL_SUFFIX}"
     with connection.cursor() as cursor:
         cursor.execute("SELECT datname FROM pg_database WHERE datname = %s", [partial])
@@ -139,16 +120,14 @@ def test_the_step_runs_over_a_copy_and_its_writes_are_the_template(made: list[st
 
     assert _names_in(made, derived) == [("cog", 100), ("widget", 300)]
     assert _read(made, derived, f"SELECT count(*) FROM {COMPANY}") == [(300,)]
-    # The parent is a copy's source, never its subject: the build under the step
-    # is still there to derive from with another key.
+    # The parent is a copy's source, never its subject: the build stays there to derive from.
     assert _names_in(made, parent) == [("placeholder", 400)]
 
 
 def test_the_statistics_describe_the_world_after_the_step(made: list[str]) -> None:
     derived = _derive(made, _template(made), _replay, key="replay-1")
 
-    # The declared column: the build analyzed it while it held only the
-    # placeholder, so statistics that were not gathered again would still say so.
+    # And the table the shape never named.
     values = _read(
         made,
         derived,
@@ -158,8 +137,6 @@ def test_the_statistics_describe_the_world_after_the_step(made: list[str]) -> No
     assert values != []
     assert "widget" in str(values[0][0])
     assert "placeholder" not in str(values[0][0])
-    # And the table the shape never named. Only an ANALYZE of the whole
-    # database reaches it, which is the reason it is not one per declared table.
     assert _read(made, derived, f"SELECT count(*) FROM pg_stats WHERE tablename = '{COMPANY}'") != [
         (0,)
     ]
@@ -178,8 +155,7 @@ def test_asking_twice_runs_the_step_once(made: list[str]) -> None:
 
     again = derive_template(parent, step, key="replay-1")
 
-    # The oid, as for template_database: a rebuild makes the same rows under the
-    # same name, so only the database's own identity tells a hit from a miss.
+    # Only the database's oid tells a hit from a miss: a rebuild keeps the same name.
     assert again == first
     assert _database(again) == oid
     assert runs == ["default"]
@@ -235,8 +211,7 @@ def test_the_step_is_handed_the_alias_pointed_at_the_copy(made: list[str]) -> No
 
     derived = _derive(made, parent, step, key="look-1")
 
-    # The copy, under its working name, and open to connections while the step
-    # runs, because the step has to connect to it.
+    # The copy is open to connections while the step runs, because the step has to connect.
     assert seen == [("default", f"{derived}{PARTIAL_SUFFIX}", True)]
     assert connection.settings_dict["NAME"] == original
 
@@ -327,9 +302,7 @@ def test_it_can_copy_with_the_servers_own_strategy(made: list[str]) -> None:
     ],
 )
 def test_a_parent_this_package_did_not_finish_is_refused(parent: str) -> None:
-    # The derived name is a digest of the parent's name, which keeps up with the
-    # data only when the name is itself a digest of everything under it. A
-    # database of the caller's own keeps its name while its rows change.
+    # A database of the caller's own keeps its name while its rows change.
     def never(using: str) -> None:
         raise AssertionError("a refused parent runs no step")
 
@@ -355,8 +328,7 @@ def test_a_strategy_it_cannot_take_is_refused_before_anything_is_looked_up(
     parent = _template(made)
     _derive(made, parent, _replay, key="replay-1")
 
-    # A hit: the derived template is there, so only a check made before the
-    # lookup refuses, and a miss would be refused by the clone in any case.
+    # A hit would serve the derived template, so only a check made before the lookup refuses.
     with pytest.raises(ValueError, match="clone strategy"):
         derive_template(parent, _replay, key="replay-1", strategy="fast")
 
