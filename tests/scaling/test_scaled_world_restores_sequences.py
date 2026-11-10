@@ -1,15 +1,3 @@
-"""A scaled world must leave the identity sequence agreeing with the rows.
-
-Emptying the declared tables inside the rolled-back transaction restores the
-rows, because the database undoes it. It does not restore the **sequence**:
-``setval`` is not transactional, so the counter keeps whatever the scaled build
-moved it to -- and a scaled world is usually *smaller* than the session world it
-was built over, which leaves the counter pointing at ids that came back.
-
-The symptom is an `IntegrityError` on a primary key, in a later test, for a row
-the failing test never wrote.
-"""
-
 from __future__ import annotations
 
 import pytest
@@ -33,8 +21,6 @@ def test_the_sequence_matches_the_rows_that_came_back() -> None:
         assert Company.objects.count() == 5
 
     assert Company.objects.count() == 50
-    # The next key the database hands out has to be free. Before this fix the
-    # counter sat at 6, and this create collided with a row that had come back.
     created = Company.objects.create(name="after")
 
     assert created.pk > 50

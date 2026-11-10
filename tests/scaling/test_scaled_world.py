@@ -1,5 +1,3 @@
-"""A world at one factor: built, handed over, and undone."""
-
 from __future__ import annotations
 
 import contextlib
@@ -74,10 +72,7 @@ def test_the_world_exists_inside_the_block_and_is_gone_after() -> None:
     with scaled_world(_orders(rows=10), 3):
         assert Order.objects.count() == 30
 
-    # The half that is easy to skip and the reason the harness is a context
-    # manager at all: a world that outlived its block would be the next factor's
-    # starting state, and the second measurement would be taken against the
-    # first world plus the second.
+    # A world that outlived its block would be the next factor's starting state.
     assert Order.objects.count() == 0
 
 
@@ -92,8 +87,7 @@ def test_a_second_factor_starts_from_an_empty_table() -> None:
         with scaled_world(_orders(rows=10), factor) as rows:
             counts.append(rows)
 
-    # What a growth assertion actually runs, in miniature: the same declaration
-    # at two sizes, each measured against a database holding only its own world.
+    # Each factor is measured against a database holding only its own world.
     assert counts == [10, 100]
 
 
@@ -106,10 +100,7 @@ def test_a_failure_inside_the_block_leaves_nothing_behind() -> None:
 
 
 def test_the_enclosing_transaction_survives_the_teardown() -> None:
-    # Undoing a world must not undo the test around it. The rollback is to the
-    # savepoint the world was built inside, so a row written before the block is
-    # still there afterwards and the connection is still usable -- which is not
-    # what a caller would get from marking the whole transaction for rollback.
+    # Undoing a world must not undo the test around it.
     before = Company.objects.create(name="written by the test")
 
     with scaled_world(_orders(rows=10), 1):
@@ -120,10 +111,6 @@ def test_the_enclosing_transaction_survives_the_teardown() -> None:
 
 
 def test_the_fan_out_keeps_its_shape_at_a_larger_factor() -> None:
-    # Scaling every table is what makes two worlds differ only in size. Children
-    # per parent is the number that would move if the parent table were held
-    # fixed, and the childless tail is the part of the declaration a subset of
-    # one build would quietly remove.
     measured = []
     for factor in (1, 4):
         with scaled_world(_graph(), factor):
@@ -132,20 +119,14 @@ def test_the_fan_out_keeps_its_shape_at_a_larger_factor() -> None:
             measured.append((Session.objects.count() / parents, childless / parents))
 
     assert measured[0][0] == measured[1][0] == 10.0
-    # A band rather than the declared 0.3 itself: the childless decision is a
-    # draw per parent index, so a hundred parents land a couple of standard
-    # deviations either side of it and pinning the number would be asserting on
-    # the seed. What the band does catch is the two failures that matter -- a
-    # tail that vanished, and a tail that is only there at one of the two sizes.
+    # Scaling every table is what makes two worlds differ only in size.
     for _, childless_share in measured:
         assert 0.1 < childless_share < 0.5
 
 
 @pytest.mark.django_db(transaction=True)
 def test_it_also_undoes_a_world_it_opened_the_transaction_for() -> None:
-    # The other half of the claim that one implementation is correct in both
-    # places: with no enclosing atomic block there is no savepoint to roll back
-    # to, so the same exit rolls back the transaction the world was built in.
+    # With no savepoint to return to, exit rolls back the transaction the world opened.
     with scaled_world(_orders(rows=10), 2) as rows:
         assert rows == 20
 
@@ -240,12 +221,7 @@ def _wrapped_statements(shape: Shape, factor: int, alias: str) -> int:
     connection.vendor != "postgresql", reason="the COPY route needs PostgreSQL to be measured"
 )
 def test_building_a_world_costs_the_same_on_postgres_at_every_factor() -> None:
-    # The half that makes a capture around the block merely wrong rather than
-    # catastrophic: one COPY loads a table however many rows it carries, so the
-    # overhead is that, the read of which declared tables hold rows, the
-    # emptiness check, the statistics-target read, the parent key read, the two
-    # sequence resets, the ANALYZE and the savepoints -- none of which depend on
-    # how many rows there are.
+    # One COPY loads a table however many rows it carries, so the overhead is fixed.
     shape = _graph(companies=10, sessions=_ROWS_PER_INSERT)
 
     assert _statements(shape, 1, DEFAULT_DB_ALIAS) == _POSTGRES_STATEMENTS
@@ -256,11 +232,7 @@ def test_building_a_world_costs_the_same_on_postgres_at_every_factor() -> None:
     connection.vendor != "postgresql", reason="the COPY route needs PostgreSQL to be measured"
 )
 def test_and_over_a_session_world_the_emptying_adds_a_fixed_handful() -> None:
-    # The composition the pytest page recommends, where the declared tables
-    # already hold rows when each world starts. Emptying them is the read of
-    # what references them, the check that none of that holds rows, the two
-    # constraint-mode statements and one TRUNCATE -- none of it per row, so the
-    # count is still the same at every factor.
+    # Emptying declared tables that already hold rows costs a fixed handful of statements.
     build(_graph(companies=7, sessions=7), require_statistics=False)
     shape = _graph(companies=10, sessions=_ROWS_PER_INSERT)
 
@@ -272,10 +244,7 @@ def test_and_over_a_session_world_the_emptying_adds_a_fixed_handful() -> None:
     connection.vendor != "postgresql", reason="the COPY route needs PostgreSQL to be measured"
 )
 def test_and_one_fewer_where_nothing_references_the_declared_tables() -> None:
-    # The handful depends on the schema, not only on the world: the read of
-    # whether any referencing table holds rows is skipped when there is no
-    # referencing table to read. Measured as a difference over one shape, so
-    # it is the emptying alone and not the rest of a world's cost.
+    # The handful depends on the schema: no referencing table means one fewer read.
     shape = _orders(rows=10)
     over_empty = _statements(shape, 1, DEFAULT_DB_ALIAS)
     build(_orders(rows=7), require_statistics=False)
@@ -292,10 +261,7 @@ def test_and_one_fewer_where_nothing_references_the_declared_tables() -> None:
     connection.vendor != "postgresql", reason="the COPY route needs PostgreSQL to be measured"
 )
 def test_and_a_capture_built_on_execute_wrapper_sees_two_fewer() -> None:
-    # The second figure the docstring quotes, and the one a consumer counting
-    # through the hook rather than the debug cursor will read. It was quoted
-    # here as eleven long after it stopped being true, because nothing measured
-    # it.
+    # It was quoted here as eleven long after it stopped being true, because nothing measured it.
     shape = _graph(companies=10, sessions=_ROWS_PER_INSERT)
 
     assert _wrapped_statements(shape, 1, DEFAULT_DB_ALIAS) == _WRAPPED_STATEMENTS
@@ -306,11 +272,7 @@ _SPELLED_OUT = {4: "four", 5: "five", 17: "seventeen", 19: "nineteen"}
 
 
 def test_the_figure_the_prose_quotes_is_the_one_measured() -> None:
-    # The PostgreSQL figure is quoted in three places a consumer reads, and it
-    # had drifted in all three -- sixteen in two, fourteen in the third -- while
-    # the constant above moved twice. Prose cannot be measured, but it can be
-    # held to the measurement: move the constant and this names every page that
-    # still quotes the old number.
+    # The quoted figure drifted in three places, so it is held to the measured constant.
     figure = f"{_SPELLED_OUT[_POSTGRES_STATEMENTS]} statements"
     quoted_in = {
         "scaled_world": scaled_world.__doc__ or "",
@@ -319,9 +281,6 @@ def test_the_figure_the_prose_quotes_is_the_one_measured() -> None:
     }
 
     assert [name for name, text in quoted_in.items() if figure not in " ".join(text.split())] == []
-    # The cost of emptying a session world's tables first, quoted in the same
-    # three places beside it -- both figures, because which one a world pays
-    # depends on whether another table references the declared ones.
     emptying = (
         f"{_SPELLED_OUT[_EMPTYING_STATEMENTS]} more where another table references them, "
         f"{_SPELLED_OUT[_UNREFERENCED_EMPTYING_STATEMENTS]} where none does"
@@ -329,42 +288,26 @@ def test_the_figure_the_prose_quotes_is_the_one_measured() -> None:
     assert [
         name for name, text in quoted_in.items() if emptying not in " ".join(text.split())
     ] == []
-    # And the execute_wrapper figure, which only the scaled_world docstring
-    # quotes, held to its own constant.
     wrapped = f"is {_SPELLED_OUT[_WRAPPED_STATEMENTS]}, because ``COPY``"
     assert wrapped in " ".join((scaled_world.__doc__ or "").split())
 
 
 @pytest.mark.django_db(databases=["default", "not_postgres"])
 def test_and_a_cost_that_grows_with_the_factor_where_there_is_no_copy() -> None:
-    # The half a growth assertion has to know about. Every insert here is a
-    # wrapped statement, one per chunk, so a capture opened around the world
-    # measures the loader's curve rather than the subject's -- and it is a curve
-    # with the same shape as the one being asserted about, which is the worst
-    # possible confound.
+    # The half a growth assertion has to know about.
     shape = _graph(companies=10, sessions=_ROWS_PER_INSERT)
 
     at_one = _statements(shape, 1, "not_postgres")
     at_five = _statements(shape, 5, "not_postgres")
 
     assert at_one == _PORTABLE_STATEMENTS
-    # Four more chunks of sessions; the ten companies still fit in one.
     assert at_five == _PORTABLE_STATEMENTS + 4
 
 
 def test_a_scaled_world_is_checked_against_the_rules_the_shape_declared() -> None:
-    """The symptom the declaration-level fix exists to prevent.
-
-    Dropping the invariants left this call succeeding: the world built, the
-    rule that says it is impossible never ran, and a growth assertion went on to
-    measure a database its own declaration had already ruled out. Nothing raised
-    and nothing warned, which is why it needs a test at this level and not only
-    at the level of the shape that comes back.
-    """
+    """The symptom the declaration-level fix exists to prevent."""
     impossible = Invariant("every company is a violation", sql="SELECT id FROM testapp_company")
     shape = Shape(Table(Company, rows=4, name=Constant("acme")), invariants=(impossible,))
 
-    # entered through an ExitStack rather than a ``with`` body, because the
-    # build raises on the way in and a body would be a line that never runs.
     with pytest.raises(InvariantViolated), contextlib.ExitStack() as entering:
         entering.enter_context(scaled_world(shape, 1))

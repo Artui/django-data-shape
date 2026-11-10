@@ -1,15 +1,3 @@
-"""A projection's ceiling has to move with the factor, or it fires at scale.
-
-`scaled_shape` multiplies every table's row count and passed a `Projection`
-through untouched, which is right for its *count* -- that grows because the
-tables it reads did -- and wrong for a declared ceiling, which is a number in the
-same units and did not move.
-
-The consumer that asked for `max_rows` hit this on the first run: a ceiling
-sized for the world as written refused every growth assertion, because those
-build the same declaration at a larger factor.
-"""
-
 from __future__ import annotations
 
 import pytest
@@ -76,13 +64,7 @@ def test_the_original_declaration_is_not_mutated() -> None:
 
 
 def test_a_scaled_world_builds_under_a_ceiling_sized_for_factor_one() -> None:
-    """The consumer's case, end to end.
-
-    Every table scales by the same factor, so a parent has the same number of
-    children at every factor and the projection grows linearly -- which is why
-    multiplying the ceiling by the factor is the right arithmetic and not an
-    approximation of one.
-    """
+    """The consumer's case, end to end."""
     at_one = _measure(1)
 
     with scaled_world(_shape(max_rows=at_one * 2), 10, using=connection.alias):

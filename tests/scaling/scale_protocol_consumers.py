@@ -1,14 +1,3 @@
-"""Implementations of the scale protocol that a consumer might actually write.
-
-Not collected by pytest: this file exists to be **type-checked**, by
-``tests/test_scale_protocol.py``, which runs ``ty`` over it. The protocol's whole
-promise is that a package which has never installed this one can satisfy it with
-a five-line callable, and that promise is a type-level claim -- so the only test
-that can hold it is a type-level one. Without this the protocol shipped rejecting
-the very implementations its docstring offered, because ``ty`` matches a
-parameter's *name* unless it is positional-only.
-"""
-
 from __future__ import annotations
 
 from collections.abc import Generator
@@ -19,10 +8,7 @@ from django_data_shape import Constant, ScaleProtocol, Shape, Table, scaled_worl
 from tests.testapp.models import Company
 
 
-# The one from the documentation: a consumer on a backend this package refuses,
-# who builds their world with the ORM. The parameter is deliberately not called
-# ``factor`` -- a protocol that only accepted that spelling would be a protocol
-# about our naming rather than about the shape of the call.
+# A consumer on a refused backend builds rows with the ORM, and names its parameter freely.
 @contextmanager
 def hand_rolled(n: int) -> Generator[int]:
     made = [Company(name="acme") for _ in range(100 * n)]
@@ -32,11 +18,7 @@ def hand_rolled(n: int) -> Generator[int]:
         made.clear()
 
 
-# The one a consumer writes *first*, and the one the docstring's "five-line
-# callable" sentence actually describes: it builds rows and yields nothing,
-# because it has rows rather than a count. This is the reproduction of the
-# second time the protocol's prose promised more than its type allowed -- before
-# the yield was widened, ty rejected exactly this.
+# It builds rows and yields nothing, because it has rows rather than a count.
 @contextmanager
 def bare_world(n: int) -> Generator[None]:
     made = [Company(name="acme") for _ in range(100 * n)]
