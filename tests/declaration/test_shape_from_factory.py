@@ -7,27 +7,42 @@ flat world this package exists to argue against, so the value is in saying so.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 
+import django
 import pytest
 from django.db import connection
 from django.db.models import Model
 
 import django_data_shape
-from django_data_shape import InvalidShape, Table, Tree, shape_from_factory
+from django_data_shape import Constant, InvalidShape, Shape, Table, Tree, build, shape_from_factory
 from tests.testapp.models import (
     Category,
     Chain,
     Checked,
+    Coded,
     Company,
     Exclusive,
     Folder,
+    Mirror,
+    NamedMirror,
+    OnlyChild,
     Project,
     Relay,
+    RootlessLink,
     RootlessNode,
+    RootlessShelf,
     Session,
+    Shelf,
     Sibling,
+    SpelledChain,
+    SpelledFolder,
+    SpelledRelay,
+    SpelledShelf,
     Successor,
+    TiedLink,
+    TiedOnlyChild,
 )
 
 pytestmark = [
@@ -37,6 +52,11 @@ pytestmark = [
         reason="it runs a factory against a database and rolls it back",
     ),
 ]
+
+
+_NEEDS_NULLS_DISTINCT = pytest.mark.skipif(
+    django.VERSION < (5, 0), reason="UniqueConstraint(nulls_distinct=) arrived in Django 5.0"
+)
 
 
 def _sub_factory() -> Session:
@@ -366,9 +386,7 @@ def test_a_root_share_that_rounds_to_one_is_written_in_full() -> None:
     ("model", "why"),
     [
         (RootlessNode, "a key that refuses NULL has no first row to point at"),
-        (Successor, "a unique key cannot give a row several children"),
-        (Chain, "a unique key cannot give a row several children"),
-        (Relay, "a unique key cannot give a row several children"),
+        (RootlessLink, "a key that refuses NULL has no first row to point at"),
     ],
 )
 def test_a_self_key_no_shape_can_fill_is_a_comment_and_a_finding_not_a_tree(
@@ -386,31 +404,31 @@ def test_a_self_key_no_shape_can_fill_is_a_comment_and_a_finding_not_a_tree(
         calls["n"] += 1
         # A required self-key is pointed at a row that is never committed: the
         # call runs in a transaction that is rolled back, and the constraint is
-        # deferred, so nothing checks it.
-        if model is RootlessNode:
-            return model.objects.create(**{link: 1})  # type: ignore[attr-defined]
-        previous = model.objects.last()  # type: ignore[attr-defined]
-        return model.objects.create(**{link: previous.pk if previous else None})  # type: ignore[attr-defined]
+        # deferred, so nothing checks it. A unique one needs a new row each call.
+        key = 1 if model is RootlessNode else calls["n"]
+        return model._default_manager.create(**{link: key})
 
     report = shape_from_factory(factory, samples=10)
 
     field = link.removesuffix("_id")
     assert "Tree(" not in report
     assert "FanOut(" not in report
-    assert f"    # {field}: no shape can fill this" in report
+    assert f"    # {field}: nothing written here" in report
     assert f"{model.__name__}.{field}: {why}" in report
     assert f"{field}=" not in report
+    # Being unique is no longer why nothing fills it.
+    assert "a unique key cannot" not in report
 
 
 def _report_over_a_self_key_no_shape_can_fill(model: type[Model]) -> str:
-    """The report for a factory over one of the self-keyed models whose key gets a comment."""
+    """The report for a factory linking each row to the one before, or a required key to a row."""
 
     def factory() -> Model:
         if model is RootlessNode:
             # Never committed: the call is rolled back and the constraint deferred.
             return model.objects.create(parent_id=1)  # type: ignore[attr-defined]
-        previous = model.objects.last()  # type: ignore[attr-defined]
-        return model.objects.create(previous=previous)  # type: ignore[attr-defined]
+        previous = model._default_manager.order_by("pk").last()
+        return model._default_manager.create(previous=previous)
 
     return shape_from_factory(factory, samples=10)
 
@@ -432,28 +450,76 @@ def test_a_self_key_that_refuses_null_is_not_told_to_be_left_out() -> None:
 
 
 @pytest.mark.parametrize("model", [Successor, Chain, Relay])
-def test_a_nullable_unique_self_key_is_still_told_to_be_left_out(model: type[Model]) -> None:
-    # Leaving a nullable column out is a shape, so for these the remedy is true.
+def test_a_nullable_unique_self_key_is_written_as_a_flat_tree_not_told_to_be_left_out(
+    model: type[Model],
+) -> None:
+    # A tree that gives no row two children fills it, as FanOut(max_children=1)
+    # fills a unique key to another table, so the comment and its remedy are gone.
     report = _report_over_a_self_key_no_shape_can_fill(model)
 
-    assert "Leave it out and fill it after the build." in report
-    assert "null=True" not in report
-    assert "Projection" not in report
+    assert "previous=Tree(roots=0.1, sizes=Constant(1))," in report
+    assert "1 of 10 rows had no parent" in report
+    assert "nothing written here" not in report
+    assert "Leave it out and fill it after the build." not in report
+    assert "Zipf" not in report
 
 
 @pytest.mark.parametrize("model", [Successor, Chain, Relay])
-def test_a_report_with_a_comment_where_the_self_key_was_is_source_table_accepts(
+def test_a_report_over_a_unique_self_key_is_source_a_shape_builds(
     model: type[Model],
 ) -> None:
-    # The comment is where a declaration would have been, and the rest still
-    # builds: these self-keys are nullable, so leaving one out is a shape.
-    def factory() -> Model:
-        previous = model.objects.last()  # type: ignore[attr-defined]
-        return model.objects.create(previous=previous)  # type: ignore[attr-defined]
+    # Through Shape and build rather than Table alone: Table cannot see a
+    # constraint, so it accepted Chain and Relay even while Shape refused them.
+    report = _report_over_a_self_key_no_shape_can_fill(model)
 
-    report = shape_from_factory(factory, samples=10)
+    table = _built(report, model, rows=200)
 
-    assert isinstance(_built(report, model), Table)
+    assert isinstance(table.fields["previous"], Tree)
+    build(Shape(table))
+    links = [row for row in model._default_manager.values_list("previous_id", flat=True) if row]
+    assert len(links) == 180
+    assert len(links) == len(set(links))
+
+
+@pytest.mark.parametrize("model", [Successor, Chain, Relay])
+def test_a_unique_self_key_always_left_null_is_the_figure_table_offers_and_a_finding(
+    model: type[Model],
+) -> None:
+    report = shape_from_factory(model._default_manager.create, samples=20)
+
+    assert "previous=Tree(roots=0.05, sizes=Constant(1))," in report
+    assert f"{model.__name__}.previous: every row was left without a parent" in report
+    assert "sizes=Zipf()" not in report
+    assert isinstance(_built(report, model).fields["previous"], Tree)
+    Shape(_built(report, model))
+
+
+@_NEEDS_NULLS_DISTINCT
+def test_a_self_key_whose_nulls_count_as_one_is_still_a_comment_and_a_finding() -> None:
+    # One root is all that fits, and its share depends on the rows, which the report
+    # leaves as rows=..., so it names that tree and cannot write it. The column left
+    # out holds one NULL many times, so that is not what the report may offer.
+    report = _report_over_a_self_key_no_shape_can_fill(TiedLink)
+
+    assert "previous=" not in report
+    assert "    # previous: nothing written here" in report
+    assert "TiedLink.previous: a constraint counting every NULL as one value" in report
+    assert "Tree(roots=1/(rows + 1), sizes=Constant(1))" in report
+    assert "Projection" in report
+    assert "no shape can fill" not in report
+    assert "null=True" not in report
+
+
+@_NEEDS_NULLS_DISTINCT
+def test_the_tree_the_finding_names_under_nulls_counted_as_one_is_accepted() -> None:
+    # The finding is true at the rows it describes, and false one root later. Rows 11 is
+    # where roots=1/rows is already two roots, so the finding writes 1/(rows + 1).
+    rows = 11
+    Shape(Table(TiedLink, rows=rows, previous=Tree(roots=1 / (rows + 1), sizes=Constant(1))))
+    with pytest.raises(InvalidShape):
+        Shape(Table(TiedLink, rows=rows, previous=Tree(roots=1 / rows, sizes=Constant(1))))
+    with pytest.raises(InvalidShape):
+        Shape(Table(TiedLink, rows=rows, previous=Tree(roots=2 / rows, sizes=Constant(1))))
 
 
 def _chain_with_roots(n: int) -> int | None:
@@ -472,7 +538,7 @@ def test_a_key_in_a_composite_unique_constraint_is_not_unique_on_its_own() -> No
     report = shape_from_factory(_tree_factory(Folder, _chain_with_roots), samples=20)
 
     assert "parent=Tree(roots=0.25, sizes=Zipf())" in report
-    assert "no shape can fill" not in report
+    assert "nothing written here" not in report
 
 
 def test_a_conditional_unique_constraint_does_not_make_the_key_unique() -> None:
@@ -536,3 +602,321 @@ def test_a_relation_to_another_table_is_reported_exactly_as_before() -> None:
         "# Read at 20 samples. A larger run sees more of the tail, so the numbers above "
         "move with it."
     )
+
+
+def _one_code(n: int) -> str:
+    return "c"
+
+
+def _named_factory(
+    model: type[Model],
+    name: Callable[[int], str],
+    *,
+    code: Callable[[int], str] = lambda n: f"k{n}",
+) -> Callable[[], Model]:
+    """A tree factory whose ``n``th row is called ``name(n)``, to make a column distinct or not.
+
+    ``code`` is each row's own unless given: a model with a uniqueness over
+    ``code`` needs one that does not repeat with ``name``.
+    """
+    made: list[Model] = []
+
+    def factory() -> Model:
+        n = len(made) + 1
+        parent = made[n - 2] if n > 1 and _chain_with_roots(n) is not None else None
+        row = model.objects.create(  # type: ignore[attr-defined]
+            name=name(n), code=code(n), parent=parent
+        )
+        made.append(row)
+        return row
+
+    return factory
+
+
+def _the_finding_about(report: str, column: str) -> str:
+    """The one finding line the report wrote about ``Model.column``."""
+    (line,) = (one for one in report.splitlines() if one.startswith(f"#   - {column}:"))
+    return line
+
+
+def _compiles(report: str) -> None:
+    """The report is source: it has to parse, whatever it says."""
+    compile(report, "<report>", "exec")
+
+
+@pytest.mark.parametrize("model", [Folder, SpelledFolder, Shelf])
+def test_source_over_columns_that_are_all_distinct_compiles(model: type[Model]) -> None:
+    """Fails without the comma moved before the comment: it landed inside it.
+
+    ``name=Sequential(...)  # every value distinct,`` left the next column
+    without a separator, so a model with a column after it was a SyntaxError.
+    The 0.25.1 tests all used repeated names, so none reached this line.
+    """
+    report = shape_from_factory(
+        _named_factory(model, lambda n: f"n{n}", code=_one_code), samples=20
+    )
+
+    assert "name=Sequential(...),  # every value distinct\n" in report
+    _compiles(report)
+
+
+@pytest.mark.parametrize("model", [Folder, SpelledFolder, Shelf])
+def test_source_over_a_column_with_many_values_compiles(model: type[Model]) -> None:
+    """The other commented declaration of ``_describe``, which had the same defect."""
+    report = shape_from_factory(
+        _named_factory(model, lambda n: f"n{n % 15}", code=_one_code), samples=40
+    )
+
+    assert "name=Skew({...}),  # 15 distinct values, top share" in report
+    _compiles(report)
+
+
+def test_every_declaration_in_a_report_keeps_its_comma_outside_its_comment() -> None:
+    companies = [Company.objects.create(name=f"c{i}") for i in range(4)]
+    report = shape_from_factory(lambda: _shared_parent(companies), samples=20)
+
+    # A column without a comment, unchanged.
+    assert "    label=Constant('s'),\n" in report
+    _compiles(report)
+
+
+@pytest.mark.parametrize(
+    ("model", "uniqueness"),
+    [
+        (Folder, "one_name_per_folder"),
+        (SpelledFolder, "one_name_per_spelled_folder"),
+        (Shelf, "unique_together ('parent', 'name')"),
+    ],
+)
+def test_a_self_key_under_a_composite_uniqueness_over_repeated_values_is_a_finding(
+    model: type[Model], uniqueness: str
+) -> None:
+    """The report wrote ``Tree`` beside ``Skew`` with nothing said, and ``Shape`` refuses that."""
+    report = shape_from_factory(
+        _named_factory(model, lambda n: f"n{n % 3}", code=_one_code), samples=20
+    )
+
+    finding = next(
+        line
+        for line in report.splitlines()
+        if line.startswith(f"#   - {model.__name__}.parent:") and uniqueness in line
+    )
+    assert "name is declared as a draw" in finding
+    assert "Sequential" in finding
+    assert "Projection" in finding
+    # The finding is true: the source as written is the one Shape refuses.
+    with pytest.raises(InvalidShape, match="is a Tree beside"):
+        Shape(_built(report, model))
+
+
+@pytest.mark.parametrize("model", [Folder, SpelledFolder, Shelf])
+def test_a_self_key_under_a_composite_uniqueness_over_distinct_values_needs_no_finding(
+    model: type[Model],
+) -> None:
+    """A pair is distinct as soon as either half is, so ``Sequential`` keeps the constraint."""
+    report = shape_from_factory(
+        _named_factory(model, lambda n: f"n{n}", code=_one_code), samples=20
+    )
+
+    assert "declared as a draw" not in report
+    assert "one_name_per" not in report
+    assert "unique_together" not in report
+
+
+def test_a_self_key_beside_a_relation_in_the_uniqueness_is_still_a_finding() -> None:
+    """A relation is written as a fan-out, never as a column distinct in every row.
+
+    Fails without ``not field.is_relation`` in ``_is_distinct``: every call here
+    gets a company of its own, so the values are all different, and a fan-out
+    over them is still a draw.
+    """
+    made: list[Mirror] = []
+
+    def factory() -> Mirror:
+        row = Mirror.objects.create(
+            company=Company.objects.create(name="c"), parent=made[-1] if made else None
+        )
+        made.append(row)
+        return row
+
+    report = shape_from_factory(factory, samples=20)
+
+    assert "company=FanOut(Zipf())" in report
+    finding = _the_finding_about(report, "Mirror.parent")
+    # A key to another table is a fan-out, which Table refuses to fill with Sequential, so
+    # the remedy is a cap of one that gives no parent two rows, and a Projection.
+    assert "company is a fan-out" in finding
+    assert "company is declared as a draw" not in finding
+    assert "max_children=1" in finding
+    assert "Sequential" not in finding
+    assert "Projection" in finding
+    assert "Shape refuses" in finding
+    assert "Table refuses" not in finding
+    # The finding is true: the source as written is refused, and with the cap it is not.
+    companies = Table(Company, rows=100, name=Constant("c"))
+    with pytest.raises(InvalidShape):
+        Shape(companies, _built(report, Mirror))
+    capped = report.replace("company=FanOut(Zipf())", "company=FanOut(Zipf(), max_children=1)")
+    Shape(companies, _built(capped, Mirror))
+
+
+def test_a_self_key_beside_a_key_and_a_plain_column_in_the_uniqueness_gets_both_remedies() -> None:
+    made: list[NamedMirror] = []
+
+    def factory() -> NamedMirror:
+        row = NamedMirror.objects.create(
+            company=Company.objects.create(name="c"),
+            parent=made[-1] if made else None,
+            name="same",
+        )
+        made.append(row)
+        return row
+
+    report = shape_from_factory(factory, samples=20)
+
+    finding = _the_finding_about(report, "NamedMirror.parent")
+    assert "company is a fan-out" in finding
+    assert "name is declared as a draw" in finding
+    assert "company max_children=1" in finding
+    assert "make name distinct in every row (Sequential does)" in finding
+
+
+def test_a_unique_self_key_needs_no_finding_about_a_composite_uniqueness() -> None:
+    """The flat tree it writes gives no row two children, so ``(parent, name)`` holds.
+
+    Fails without ``unique`` in ``_composite_finding``: the names repeat, so the finding
+    told the caller to make them distinct on a source ``Shape`` accepts. Under NULLs counted
+    as one value the flat tree keeps nothing, which is the test below.
+    """
+    report = shape_from_factory(
+        _named_factory(OnlyChild, lambda n: f"n{n % 3}", code=_one_code), samples=20
+    )
+
+    assert "parent=Tree(roots=" in report
+    assert "sizes=Constant(1)" in report
+    assert "unique together" not in report
+    assert "one_name_per_only_child" not in report
+    Shape(_built(report, OnlyChild))
+
+
+@_NEEDS_NULLS_DISTINCT
+def test_a_unique_self_key_under_nulls_counted_as_one_is_a_finding() -> None:
+    """The flat tree keeps no uniqueness the roots take part in, because their NULLs are one value.
+
+    Five roots in twenty rows, every root named differently and every other row alike: the
+    source the report wrote was refused by ``Shape`` with no word of it, and with the check
+    off it loaded 0 of 20. Fails without ``apart`` in ``_composite_finding``.
+    """
+    report = shape_from_factory(
+        _named_factory(TiedOnlyChild, lambda n: f"r{n}" if n % 4 == 1 else "same", code=_one_code),
+        samples=20,
+    )
+
+    assert "parent=Tree(roots=0.25, sizes=Constant(1))" in report
+    finding = _the_finding_about(report, "TiedOnlyChild.parent")
+    assert "one_name_per_tied_only_child" in finding
+    assert "name is declared as a draw" in finding
+    assert "Sequential" in finding
+    assert "Projection" in finding
+    # The finding is true: the source as written is the one Shape refuses, and the remedy
+    # it names is accepted.
+    with pytest.raises(InvalidShape, match="is a Tree beside"):
+        Shape(_built(report, TiedOnlyChild))
+    distinct = re.sub(r"name=Skew\(.*\),", "name=Sequential(1, 1),", report)
+    assert distinct != report
+    Shape(_built(distinct, TiedOnlyChild))
+
+
+@pytest.mark.parametrize("model", [SpelledChain, SpelledRelay])
+def test_a_uniqueness_spelled_with_the_attname_still_makes_the_self_key_unique(
+    model: type[Model],
+) -> None:
+    """Fails without ``get_field(...).name``: ``previous_id`` is not ``previous``.
+
+    Unread, the key got ``sizes=Zipf()``, which ``Shape`` refuses on a unique column.
+    """
+    report = _report_over_a_self_key_no_shape_can_fill(model)
+
+    assert "previous=Tree(roots=0.1, sizes=Constant(1))," in report
+    assert "Zipf" not in report
+    Shape(_built(report, model))
+
+
+def test_a_uniqueness_that_leaves_the_self_key_out_is_no_finding_about_it() -> None:
+    """Fails without ``field.name in names`` in either loop of ``_composite_uniqueness``."""
+    report = shape_from_factory(
+        _named_factory(Coded, lambda n: f"n{n % 3}", code=lambda n: f"k{n // 3}"), samples=20
+    )
+
+    assert "unique together" not in report
+    assert "one_code_per_name" not in report
+    assert "unique_together" not in report
+
+
+@pytest.mark.parametrize("model", [Chain, Relay, SpelledChain])
+def test_a_uniqueness_over_the_self_key_alone_is_no_composite_finding(
+    model: type[Model],
+) -> None:
+    """Fails without ``len(names) > 1``: a column alone is not unique *together* with nothing."""
+    report = _report_over_a_self_key_no_shape_can_fill(model)
+
+    assert "unique together" not in report
+
+
+def test_a_composite_unique_together_spelled_with_the_attname_is_a_finding() -> None:
+    """Fails with ``unique_together`` read as written: ``parent_id`` is not ``parent``.
+
+    Unread, the report wrote ``Tree`` beside ``Skew`` with nothing said, which ``Shape``
+    refuses. The finding names the columns by field name, whichever way ``Meta`` spelled them.
+    """
+    report = shape_from_factory(
+        _named_factory(SpelledShelf, lambda n: f"n{n % 3}", code=_one_code), samples=20
+    )
+
+    finding = _the_finding_about(report, "SpelledShelf.parent")
+    assert "unique_together ('parent', 'name') makes (parent, name) unique together" in finding
+    with pytest.raises(InvalidShape, match="is a Tree beside"):
+        Shape(_built(report, SpelledShelf))
+
+
+def test_a_self_key_with_no_declaration_gets_no_finding_about_a_composite_uniqueness() -> None:
+    """Fails without ``declaration is not None`` at the call in ``_render``.
+
+    A key that refuses NULL is written as a comment, not a tree, so a finding about a tree
+    beside a draw would describe source the report never wrote. Each call points at a key of
+    its own, deferred and rolled back, so ``(parent, name)`` holds while ``name`` repeats.
+    """
+    calls = {"n": 0}
+
+    def factory() -> Model:
+        calls["n"] += 1
+        return RootlessShelf.objects.create(parent_id=calls["n"], name="same")
+
+    report = shape_from_factory(factory, samples=10)
+
+    assert "    # parent: nothing written here" in report
+    assert "a key that refuses NULL has no first row to point at" in report
+    assert "unique together" not in report
+
+
+def test_every_composite_finding_ends_with_a_full_stop() -> None:
+    """A finding is a sentence, and one naming only keys ended at ``sql=`` without its stop."""
+    made: list[Mirror] = []
+
+    def factory() -> Mirror:
+        row = Mirror.objects.create(
+            company=Company.objects.create(name="c"), parent=made[-1] if made else None
+        )
+        made.append(row)
+        return row
+
+    keys_only = _the_finding_about(shape_from_factory(factory, samples=20), "Mirror.parent")
+    plain_only = _the_finding_about(
+        shape_from_factory(
+            _named_factory(Shelf, lambda n: f"n{n % 3}", code=_one_code), samples=20
+        ),
+        "Shelf.parent",
+    )
+
+    assert keys_only.endswith("columns= and sql=.")
+    assert plain_only.endswith("columns= and sql=.")

@@ -22,6 +22,7 @@ from django_data_shape.distributions.distribution import Distribution
 from django_data_shape.keys.infer_key_strategy import infer_key_strategy
 from django_data_shape.keys.key_strategy import KeyStrategy
 from django_data_shape.relations.fan_out import FanOut
+from django_data_shape.relations.gives_no_row_two_children import gives_no_row_two_children
 from django_data_shape.relations.paired import Paired
 from django_data_shape.relations.tree import Tree
 from django_data_shape.utils import (
@@ -32,6 +33,11 @@ from django_data_shape.utils import (
     offsettable_kind,
     primary_key_field,
 )
+
+# What both refusals of a required key to this same table offer: neither a Tree
+# (its first row has no parent to point at) nor a FanOut (its keys are read from
+# a table still empty) fills one, and the wording is 0.25.1's, from shape_from_factory.
+_SELF_KEY_REMEDY = "Make the column null=True, or fill the table with a Projection."
 
 
 class Table:
@@ -288,14 +294,19 @@ class Table:
         self._computation_order = order_derivations(self.model.__name__, self._fields)
 
     def _check_trees(self, known: dict[str, Field[Any, Any]]) -> None:
-        """A ``Tree`` fills a nullable, non-unique key to this same table, and nothing else.
+        """A ``Tree`` fills a nullable key to this same table, and nothing else.
 
         Each condition is the arithmetic of the declaration rather than a
         preference. A tree's parents are this table's own earlier rows, so on a
         key to another table it would emit keys that table never had. Its roots
         are NULL, and the first row is always one, so a column that refuses
         NULL cannot hold any tree at all. And a unique column takes one child
-        per parent, which a tree exists to exceed.
+        per parent, which only a tree that gives no row two children keeps.
+
+        A unique index keeps each NULL its own group, so here the roots do not
+        collide, and the proof needs nothing else from this column. A
+        ``UniqueConstraint`` can say otherwise, and is decided by
+        :func:`~django_data_shape.declaration.check_constraints.check_constraints`.
         """
         for name, declared in sorted(self.fields.items()):
             if not isinstance(declared, Tree):
@@ -313,15 +324,15 @@ class Table:
                 raise InvalidShape(
                     f"{where} cannot be null, and a tree's roots are the rows whose parent is "
                     "NULL. The first row is always one, since there is no earlier row for it to "
-                    "point at, so no tree fits a column that refuses NULL. Make the column "
-                    "null=True, or leave it out and fill it after the build."
+                    "point at, so no tree fits a column that refuses NULL. " + _SELF_KEY_REMEDY
                 )
-            if field.unique:
+            if field.unique and not gives_no_row_two_children(declared, self.rows):
                 raise InvalidShape(
                     f"{where} is unique, so each row may be the parent of one row at most, and "
                     f"{declared!r} spreads children over parents by weight, which gives some "
-                    "parents several. A chain of one-to-one links is not a tree this package "
-                    "builds; leave the column out and fill it after the build."
+                    "parents several. A tree whose sizes hold one value gives no row two children "
+                    f"and fills it: {name}=Tree(roots={declared.roots!r}, sizes=Constant(1)). Or "
+                    "leave the column out and fill it after the build."
                 )
 
     def _check_statistics(self, known: dict[str, Field[Any, Any]]) -> None:
@@ -665,8 +676,8 @@ class Table:
                 continue
             # A partition is not a draw, and a derivation reads something other
             # than its own row index. Both are left to the checks that can see
-            # what they depend on.
-            if isinstance(distribution, (FanOut, Derivation)):
+            # what they depend on, and a tree here has passed _check_trees.
+            if isinstance(distribution, (FanOut, Derivation, Tree)):
                 continue
             if isinstance(distribution, Distinct) and distribution.is_distinct_per_row():
                 continue
@@ -746,16 +757,33 @@ class Table:
                 if defaulted
                 else ""
             )
-            raise InvalidShape(
-                f"{self.model.__name__}.{', '.join(required_relations)} cannot be null, so every "
-                "row needs a parent and this shape does not say which."
-                f"{because} A relation is declared as "
-                f"a fan-out over the parent's real keys -- {required_relations[0]}=FanOut(Zipf()) "
+            # A key to this same table is refused a FanOut, which reads its keys from
+            # a table still empty at load time, so the remedy for it is the one a
+            # Tree on a required key is given and not the sentence for the rest.
+            own_table = [
+                name for name in required_relations if known[name].related_model is self.model
+            ]
+            elsewhere = [name for name in required_relations if name not in own_table]
+            remedy = (
+                f" A relation is declared as a fan-out over the parent's real keys -- "
+                f"{elsewhere[0]}=FanOut(Zipf()) "
                 "for the realistic heavy tail, FanOut(Uniform(1, 10)) for something flatter, and "
                 "FanOut(Zipf(), max_children=1) for a one-to-one. childless= is the share of "
                 "parents nobody references. The parent's "
                 "own table has to be built in the same shape or already loaded, because that is "
                 "where the keys are read from."
+                if elsewhere
+                else ""
+            )
+            if own_table:
+                remedy += (
+                    f" {', '.join(own_table)} points at {self.model.__name__} itself, and a "
+                    "FanOut reads its keys from a table still empty at load time, so it is "
+                    f"refused there. {_SELF_KEY_REMEDY}"
+                )
+            raise InvalidShape(
+                f"{self.model.__name__}.{', '.join(required_relations)} cannot be null, so every "
+                f"row needs a parent and this shape does not say which.{because}{remedy}"
             )
         undeclared = [(name, field) for name, field in undeclared if not field.is_relation]
 

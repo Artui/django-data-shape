@@ -236,10 +236,10 @@ def test_the_current_period_is_the_one_with_no_end() -> None:
 
 
 def test_the_database_is_the_net_the_pre_check_cannot_be() -> None:
-    # A conditional constraint grouped by a plain column: there is no partition
-    # here to satisfy it with, so the pre-check skips it by design and says so.
-    # This is what the skip costs, and it is the failure the pre-check exists to
-    # replace where it can -- an index violation from inside the load.
+    # A conditional constraint over an expression, Lower(room): the pre-check
+    # does not read what an expression computes, so it skips it by design and
+    # says so. This is what the skip costs, and it is the failure the pre-check
+    # exists to replace where it can -- an index violation from inside the load.
     shape = Shape(
         _companies(5),
         Table(
@@ -253,7 +253,7 @@ def test_the_database_is_the_net_the_pre_check_cannot_be() -> None:
         seed=1,
     )
 
-    with pytest.raises(IntegrityError):
+    with pytest.raises(IntegrityError, match="booking_over_an_expression"):
         build_shape(shape)
 
 
