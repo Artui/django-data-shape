@@ -1,5 +1,3 @@
-"""The fixture replaces a test database pytest-django made, and nothing else."""
-
 from __future__ import annotations
 
 from collections.abc import Iterator

@@ -1,5 +1,3 @@
-"""A test reaching a finished world: the test database replaced by a clone of a template."""
-
 from __future__ import annotations
 
 from collections.abc import Iterator
@@ -52,11 +50,6 @@ def _finished_world(using: str) -> str:
     _made.append(template)
     finished = derive_template(template, _replay, key="replay-1", using=using)
     _made.append(finished)
-    # On a warm machine both calls above are hits, which touch only a nodb
-    # cursor and leave the connection pytest-django opened attached to the test
-    # database; on this cold run the derive's miss closed it. Reopened so the
-    # fixture meets the warm state, where dropping the test database fails
-    # unless the fixture closes it first.
     connections[using].ensure_connection()
     return finished
 
@@ -102,8 +95,7 @@ def test_and_the_planner_sees_it_as_the_step_left_it(finished: str) -> None:
 def test_the_fixture_hands_back_the_template_it_cloned(finished: str) -> None:
     assert FINISHED_TEMPLATE.fullmatch(finished)
     assert finished == _made[-1]
-    # The test database is a clone under pytest-django's own name for it, never
-    # the template, which refuses connections.
+    # The test database is a clone under pytest-django's name, never the template.
     assert connections[ALIAS].settings_dict["NAME"] != finished
 
 
@@ -114,6 +106,5 @@ def test_a_test_may_write_into_the_finished_world(finished: str) -> None:
 
 
 def test_and_the_next_test_does_not_see_what_it_wrote(finished: str) -> None:
-    # The clone is the test database pytest-django set up, so its db fixture
-    # wraps each test in a transaction over it as over any other.
+    # The clone is the test database, so its db fixture wraps each test in a transaction.
     assert Company.objects.using(ALIAS).count() == 300
