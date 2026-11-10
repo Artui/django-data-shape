@@ -1,5 +1,3 @@
-"""Keys the caller supplies, checked rather than trusted."""
-
 from __future__ import annotations
 
 import itertools
@@ -18,9 +16,7 @@ def test_it_uses_the_function() -> None:
 def test_a_function_that_is_not_pure_is_refused() -> None:
     counter = itertools.count()
 
-    # Checked on a sample rather than trusted. A key that varies between calls
-    # breaks reproducibility silently, in the one column every foreign key
-    # points at.
+    # Checked on a sample rather than trusted.
     with pytest.raises(InvalidShape, match="pure function of the row index"):
         KeyFunction(lambda row: next(counter))
 

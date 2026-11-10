@@ -1,15 +1,3 @@
-"""The documentation's code blocks are checked, not trusted.
-
-Two of them shipped as syntax errors, in the README and in the relations page,
-and both would have failed the moment a reader pasted them. A docs example is
-the first code anybody runs, so it gets the same treatment as the package: a
-guard rather than a convention.
-
-Only the syntax is checked. Executing them would need a database and a consumer
-project, and the failure this exists to catch -- a snippet that cannot parse --
-does not need either.
-"""
-
 from __future__ import annotations
 
 import ast
@@ -27,8 +15,7 @@ def _documents() -> list[Path]:
 
 
 def test_the_documents_are_where_this_test_thinks_they_are() -> None:
-    # Without this the parametrised test below passes by finding nothing, which
-    # is the failure mode of every test that discovers its own inputs.
+    # Without this the parametrised test below passes by finding nothing.
     names = {path.name for path in _documents()}
 
     assert {"README.md", "index.md", "relations.md"} <= names
@@ -46,8 +33,7 @@ def test_every_python_block_parses(document: Path) -> None:
 
 
 def test_the_install_command_survives_a_shell_that_globs() -> None:
-    # zsh expands square brackets and reports "no matches found", so an unquoted
-    # extra in the install line fails for anyone on the default macOS shell.
+    # zsh expands square brackets and reports 'no matches found' on an unquoted extra.
     readme = (_ROOT / "README.md").read_text()
 
     assert "pip install 'django-data-shape[postgres]'" in readme

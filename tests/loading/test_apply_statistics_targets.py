@@ -1,5 +1,3 @@
-"""Statistics targets: what the planner is asked to keep, and what it refuses to miss."""
-
 from __future__ import annotations
 
 from types import SimpleNamespace
@@ -38,19 +36,12 @@ _WIDE = 150
 
 
 def _wide_skew(values: int = _WIDE) -> Skew:
-    # Descending weights rather than equal ones, so this is a skew rather than a
-    # uniform categorical: the most-common-value list is what the assertions
-    # below read, and a flat column is the one shape it may legitimately decline
-    # to fill.
+    # Descending weights make a skew, so the most-common-value list has something to read.
     return Skew({f"code-{index:03d}": float(values - index) for index in range(values)})
 
 
 def _target(model: type, column: str) -> int:
-    """The target PostgreSQL will actually use for one column, default included.
-
-    The table is named quoted, because ``regclass`` input is read as an
-    identifier: unquoted, a capital in the name folds and a dot splits it.
-    """
+    """The target PostgreSQL will actually use for one column, default included."""
     with connection.cursor() as cursor:
         cursor.execute(
             "SELECT COALESCE(NULLIF(attstattarget, -1), "
@@ -68,16 +59,8 @@ def _default_target() -> int:
 
 
 def _sequence_value(model: type) -> int:
-    """Where this table's identity sequence has been left.
-
-    Read rather than assumed: ``setval`` is not transactional and a
-    transactional test's truncation does not reset sequences, so the value at
-    the start of a test is whatever the run has done to it so far.
-    """
+    """Where this table's identity sequence has been left."""
     with connection.cursor() as cursor:
-        # In two steps because pg_get_serial_sequence returns the sequence's
-        # name as text, and a name is not a relation until it is written into
-        # the FROM clause.
         cursor.execute(
             "SELECT pg_get_serial_sequence(%s, 'id')",
             [connection.ops.quote_name(model._meta.db_table)],
@@ -99,27 +82,9 @@ def _most_common(model: type, column: str) -> int:
 
 
 def _fresh(model: type, column: str) -> None:
-    """Put one table back to the state a test is entitled to assume it is in.
-
-    Nothing this module touches is rolled back between tests. A statistics
-    target is DDL that commits with the build; ``pg_statistic`` rows survive the
-    truncation a transactional test does at teardown; and a sequence moved by
-    ``setval`` stays moved because ``setval`` is not transactional. So a test
-    that merely asserted its precondition would be asserting whatever the test
-    before it happened to leave -- and one that assumed a precondition would
-    pass on another test's work.
-
-    This establishes the state and then checks it, which is the only version of
-    the two that survives a mutation to the code under test. Both halves have
-    been earned here: a mutation moving the target to after the ``ANALYZE``
-    passed every one of these assertions until this function existed, because
-    the previous test had already set the target and moved the sequence.
-    """
-    # Quoted, for the reason _target gives: some of these tables are named so
-    # that only the quoted form finds them.
+    """Put one table back to the state a test is entitled to assume it is in."""
     table = connection.ops.quote_name(model._meta.db_table)
     with connection.cursor() as cursor:
-        # -1 is PostgreSQL's own spelling of "back to default_statistics_target".
         cursor.execute(f"ALTER TABLE {table} ALTER COLUMN {column} SET STATISTICS -1")
         cursor.execute("SELECT pg_get_serial_sequence(%s, 'id')", [table])
         cursor.execute(f"ALTER SEQUENCE {cursor.fetchone()[0]} RESTART WITH 1")
@@ -149,18 +114,7 @@ def test_a_declared_target_reaches_the_column() -> None:
 
 
 def test_and_the_planner_records_more_of_the_shape_because_of_it() -> None:
-    # The assertion that makes the one above worth having. A target the database
-    # accepted and then ignored would satisfy pg_attribute and change nothing
-    # the planner sees, so what is measured here is the most-common-value list
-    # itself.
-    #
-    # Falsifiable two ways, and both matter: with the ALTER removed the list
-    # stops at the default hundred, and with it moved to after the ANALYZE it
-    # stops at a hundred as well -- a target changed after statistics are
-    # gathered does nothing until the next gathering, which is the same ordering
-    # trap as analyze-then-load. The second of those only fails because _fresh
-    # puts the column's target back first; without it this test inherited the
-    # target the test above had left behind and passed either way.
+    # The assertion that makes the one above worth having.
     _fresh(Bucketed, "code")
 
     build_shape(
@@ -185,18 +139,7 @@ def test_a_shape_the_planner_could_not_record_is_refused_by_name() -> None:
 
 
 def test_the_refusal_happens_before_a_single_row_is_loaded() -> None:
-    # A build refused after a two-million-row COPY is a refusal nobody thanks
-    # you for, and the ordering that makes this true is the same ordering the
-    # ALTER needs -- both belong before the load rather than beside the ANALYZE.
-    #
-    # An empty table proves nothing on its own: the build runs in a transaction,
-    # so rows written and then refused are rolled back and the table is empty
-    # either way. The sequence is the one trace a load leaves that a rollback
-    # cannot remove -- setval is not transactional -- so it is what this reads.
-    # And it is put back to one first rather than compared against itself,
-    # because the test above already builds this table: without that, a load
-    # that did happen moved the sequence to exactly where the previous test had
-    # left it, and the comparison held.
+    # A refusal after a two-million-row COPY is one nobody thanks you for.
     _fresh(Narrowed, "code")
 
     with pytest.raises(InvalidShape):
@@ -207,8 +150,7 @@ def test_the_refusal_happens_before_a_single_row_is_loaded() -> None:
 
 
 def test_declaring_the_target_is_what_makes_the_same_shape_buildable() -> None:
-    # The pair the design rests on: the identical declaration is refused above
-    # and accepted here, and the only difference is that this one asked.
+    # The identical declaration is refused without the target and accepted with it.
     _fresh(Narrowed, "code")
 
     build_shape(
@@ -219,10 +161,7 @@ def test_declaring_the_target_is_what_makes_the_same_shape_buildable() -> None:
 
 
 def test_a_distribution_that_cannot_count_its_values_is_left_alone() -> None:
-    # Only a Bounded distribution can be checked, and a fan-out is not one --
-    # nor is a distribution drawing from a continuous range. They are treated as
-    # unbounded rather than as suspicious, which is the same reading Bounded was
-    # written for.
+    # A fan-out or a continuous range is treated as unbounded, not as suspicious.
     build_shape(
         Shape(
             Table(Template, rows=10, name=Constant("t")),
@@ -272,11 +211,7 @@ def test_a_projection_takes_a_target_like_any_other_table() -> None:
     "model", [CasedTable, DottedTable], ids=["a capital in the name", "a dot in the name"]
 )
 def test_a_table_whose_name_needs_quoting_gets_its_target(model: type) -> None:
-    # The column targets are looked up through regclass, whose input is read
-    # as an identifier, so the name has to reach it the way Django wrote it
-    # into CREATE TABLE: quoted. Unquoted, a capital folds to lower case and a
-    # dot splits the name into a schema and a table, and the build stopped on a
-    # relation or a schema that does not exist before a row was written.
+    # regclass reads the name as an identifier, so it must be quoted as Django wrote it.
     _fresh(model, "code")
 
     build_shape(Shape(Table(model, rows=500, code=_wide_skew(), statistics={"code": 300}), seed=8))
@@ -285,12 +220,7 @@ def test_a_table_whose_name_needs_quoting_gets_its_target(model: type) -> None:
 
 
 def test_nor_does_it_read_the_targets_of_the_table_its_name_folds_to() -> None:
-    # The quiet half of the same mistake. Folded, testapp_CasedTable names
-    # testapp_casedtable, and where a table of that name is in reach the lookup
-    # read *its* targets instead -- here a target generous enough that a shape
-    # the cased table's own column cannot record went through unrefused. A
-    # temporary table, because the session's temporary schema is searched
-    # first and goes with the connection if the cleanup below never runs.
+    # The quiet half of the same mistake.
     _fresh(CasedTable, "code")
     with connection.cursor() as cursor:
         cursor.execute("CREATE TEMPORARY TABLE testapp_casedtable (code varchar(20))")
@@ -308,11 +238,7 @@ def test_nor_does_it_read_the_targets_of_the_table_its_name_folds_to() -> None:
 def test_a_db_table_written_already_quoted_is_looked_up_as_django_created_it(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # Django's quote_name passes a name that starts and ends with a double
-    # quote through unchanged, which is how a project spells a schema-qualified
-    # table: db_table = '"schema"."table"'. The lookup is quoted by the same
-    # function rather than escaped, so it names whatever CREATE TABLE named --
-    # an escaping quote would look for a table whose name holds the quotes.
+    # Django passes a pre-quoted db_table through, so the lookup quotes it the same way.
     _fresh(CasedTable, "code")
     monkeypatch.setattr(CasedTable._meta, "db_table", '"testapp_CasedTable"')
 
@@ -337,13 +263,7 @@ def _sessions_of(event: Event, statistics: dict[str, int] | None) -> Shape:
 
 
 def test_a_target_is_set_over_rows_the_caller_wrote_in_the_same_transaction() -> None:
-    # The sessions are UUID-keyed, so the build goes ahead beside the caller's
-    # session rather than refusing it -- and that session left its foreign-key
-    # check queued on the table, since Django creates PostgreSQL keys
-    # DEFERRABLE INITIALLY DEFERRED. PostgreSQL refuses ALTER TABLE on a table
-    # with checks still queued, so the target is set only once they are fired.
-    # One transaction around both, because this module's tests commit each
-    # statement, and a committed write has nothing left queued.
+    # Django's deferred foreign-key check is still queued on the table when the build runs.
     with transaction.atomic():
         template = Template.objects.create(name="caller")
         event = Event.objects.create(template=template, name="caller")
@@ -364,9 +284,7 @@ def test_a_target_is_set_over_rows_the_caller_wrote_in_the_same_transaction() ->
 
 
 def test_no_check_is_fired_for_a_table_that_sets_no_target() -> None:
-    # Only a table that declares statistics= issues an ALTER TABLE, so only
-    # its build has a reason to fire the queued checks. Firing them for every
-    # table would move every statement count a capture around a build sees.
+    # Firing them for every table would move every statement count a capture around a build sees.
     with transaction.atomic():
         template = Template.objects.create(name="caller")
         event = Event.objects.create(template=template, name="caller")
@@ -381,9 +299,7 @@ def test_no_check_is_fired_for_a_table_that_sets_no_target() -> None:
 
 
 def test_a_row_that_breaks_a_constraint_is_refused_before_the_target() -> None:
-    # Firing the queued checks changes when they run, not whether: a session
-    # pointing at no event, written by the caller, would have failed at commit
-    # and now fails here, under the constraint's name, before anything is set.
+    # Firing the queued checks changes when a bad row fails, not whether.
     with transaction.atomic():
         template = Template.objects.create(name="caller")
         event = Event.objects.create(template=template, name="caller")
@@ -405,11 +321,7 @@ def test_a_row_that_breaks_a_constraint_is_refused_before_the_target() -> None:
 
 
 def test_firing_them_defers_every_constraint_for_the_transaction() -> None:
-    # What the docstring owns up to: SET CONSTRAINTS ALL DEFERRED is the last
-    # statement of the firing and stays in force after the build, so a
-    # constraint declared INITIALLY IMMEDIATE accepts a bad row until commit.
-    # A temporary table rather than a model, because Django creates no such
-    # constraint by default.
+    # A temporary table rather than a model, because Django creates no such constraint by default.
     with transaction.atomic():
         with connection.cursor() as cursor:
             cursor.execute("CREATE TEMPORARY TABLE shape_parent (id integer PRIMARY KEY)")
@@ -437,8 +349,7 @@ _SQLITE = SimpleNamespace(vendor="sqlite")
 
 @pytest.mark.django_db
 def test_nothing_is_asked_of_a_backend_that_has_no_such_thing() -> None:
-    # No cursor is opened at all, which is what the stub proves: a statement
-    # against a connection this simple would raise.
+    # No cursor is opened, so a statement against this stub would raise.
     apply_statistics_targets(
         _SQLITE, Table(Bucketed, rows=5, code=Constant("a"), statistics={"code": 200})
     )

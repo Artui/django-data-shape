@@ -1,5 +1,3 @@
-"""The version is a public, single-sourced fact."""
-
 from __future__ import annotations
 
 import django_data_shape

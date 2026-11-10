@@ -1,11 +1,3 @@
-"""Building a self-referential tree: a foreign key that points at its own table.
-
-``Tree`` is reached through the package's namespace inside each test rather
-than imported at the top, and the model is one main already has, so that against
-a tree without the feature this module still collects and fails on its
-assertions -- a module that dies at import proves nothing about the feature.
-"""
-
 from __future__ import annotations
 
 from collections import Counter
@@ -51,15 +43,11 @@ def test_a_self_referential_foreign_key_builds_an_acyclic_tree_with_its_root_sha
             seed=11,
         )
     )
-    # Committed by the transactional test, so the deferred foreign keys were
-    # checked at commit: every parent named is a row of the table.
     parents = _parents()
     assert len(parents) == 2_000
     roots = [key for key, parent in parents.items() if parent is None]
-    # ceil(2000 * 0.05): the root count is exact, not a draw that lands near it.
     assert len(roots) == 100
-    # Acyclic by construction: every parent key is below its child's key, so
-    # following parents strictly descends and has to stop at a root.
+    # ceil(2000 * 0.05): the root count is exact, not a draw that lands near it.
     assert all(parent < key for key, parent in parents.items() if parent is not None)
     with connection.cursor() as cursor:
         cursor.execute(
@@ -79,14 +67,7 @@ def test_a_self_referential_foreign_key_builds_an_acyclic_tree_with_its_root_sha
 
 
 def test_the_parent_column_climbs_with_the_table_as_the_rule_makes_it() -> None:
-    """The statistic docs/relations.md states, and why it is not a flattering one.
-
-    Every parent is an earlier row, so the parent column can only climb as the
-    table goes on: ``pg_stats.correlation`` comes out high. That is what a
-    production tree looks like too, a row being inserted after the row it
-    hangs from, so it is the honest value rather than the clustered layout a
-    fan-out's ``placement="grouped"`` produces.
-    """
+    """The statistic docs/relations.md states, and why it is not a flattering one."""
     build_shape(
         Shape(
             Table(
@@ -106,18 +87,7 @@ def test_the_parent_column_climbs_with_the_table_as_the_rule_makes_it() -> None:
 
 
 def test_the_children_are_not_gathered_under_the_lowest_keys() -> None:
-    """Weight is keyed on a row's position, so the families sit where it fell.
-
-    The obvious construction -- each child picks an earlier row by weight --
-    makes the first rows the largest parents purely because every later row
-    could pick them. Measured over seeds 0 to 7 of this declaration it puts
-    28% to 48% of the children under the first tenth of the keys and 11% to 22%
-    under the last half; this one puts 10% to 23% and 39% to 50%, against a fair
-    share of 10% and 50%. A single ``Zipf`` whale can hold a fifth of the table,
-    which is why the bounds are wide. What is left of the gap is the rule's
-    price rather than the construction's: the last rows have too few rows after
-    them to take the children their weights ask for.
-    """
+    """Weight is keyed on a row's position, so the families sit where it fell."""
     build_shape(
         Shape(
             Table(
@@ -146,9 +116,7 @@ class _Words:
 
 
 def test_sizes_refused_inside_the_load_leave_the_connection_usable() -> None:
-    # A tree is resolved inside generation, so a bad size is refused from
-    # inside COPY rather than before it, as a fan-out's is. It still arrives as
-    # the refusal, with the load rolled back and the connection still usable.
+    # It still arrives as the refusal, with the load rolled back and the connection still usable.
     with pytest.raises(django_data_shape.InvalidShape, match="needs numeric tree sizes"):
         build_shape(
             Shape(
@@ -165,8 +133,7 @@ def test_sizes_refused_inside_the_load_leave_the_connection_usable() -> None:
 
 @pytest.mark.parametrize("seed", range(5))
 def test_a_flat_tree_beside_a_draw_loads_under_its_uniqueness(seed: int) -> None:
-    # One name for every row collides among any siblings at all, so a load here
-    # is the claim the declaration check stands on: no row has two children.
+    # No row has two children, which is the claim the declaration check stands on.
     build_shape(
         Shape(
             Table(

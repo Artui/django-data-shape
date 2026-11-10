@@ -1,5 +1,3 @@
-"""The mechanism itself: a caller's function over sources in a named scope."""
-
 from __future__ import annotations
 
 import operator
@@ -18,9 +16,7 @@ def test_it_computes_from_the_sources_it_was_given() -> None:
 def test_the_sources_arrive_in_declaration_order() -> None:
     derived = Derived("a", "b", compute=lambda a, b: f"{a}-{b}")
 
-    # Not sorted, unlike the column order: a function's arguments are
-    # positional, so the one order the caller controls has to be the one they
-    # wrote.
+    # A function's arguments are positional, so the caller's written order must hold.
     assert derived.value(row=0, draw=0.0, sources=("first", "second")) == "first-second"
 
 
@@ -29,8 +25,7 @@ def test_the_default_scope_is_this_row() -> None:
 
 
 def test_a_scope_may_be_named_as_a_plain_string() -> None:
-    # The declaration is data a reader scans, so "parent" has to work as well as
-    # Scope.PARENT -- the same reason FanOut takes placement as a string.
+    # The declaration is data a reader scans, so 'parent' works as well as Scope.PARENT.
     assert Derived("account.plan", compute=str, scope="parent").scope is Scope.PARENT
 
 
@@ -40,8 +35,7 @@ def test_an_unknown_scope_is_refused_and_the_options_listed() -> None:
 
 
 def test_a_derivation_with_no_sources_is_refused() -> None:
-    # A column computed from nothing is a Constant, and saying it with a
-    # callable hides that from the planner-facing half of the vocabulary.
+    # A column computed from nothing is a Constant, and a callable would hide that.
     with pytest.raises(InvalidShape, match="at least one source"):
         Derived(compute=str)
 
@@ -52,17 +46,14 @@ def test_something_that_is_not_callable_is_refused() -> None:
 
 
 def test_it_satisfies_the_derivation_protocol() -> None:
-    # The protocol is what the resolver depends on; the faces are just
-    # declarations over it, and a consumer's own class is as good as ours.
+    # The resolver depends on the protocol, so a consumer's own class is as good as ours.
     assert isinstance(Derived("x", compute=str), Derivation)
 
 
 def test_a_distribution_is_not_a_derivation() -> None:
     from django_data_shape import Constant
 
-    # Both produce a value, and that is deliberately not enough: a distribution
-    # is the marginal shape of a column and a derivation is not, so nothing that
-    # enumerates distributions may pick one of these up by accident.
+    # A distribution is the marginal shape of a column, so nothing may pick a derivation up.
     assert not isinstance(Constant(1), Derivation)
 
 

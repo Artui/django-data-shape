@@ -1,16 +1,3 @@
-"""A projection's size is a product, and `max_rows` is how a declaration bounds it.
-
-`Projection` has no `rows=` on purpose: its cardinality comes from the join,
-which is what reproduces a correlation a `FanOut` on the child would destroy.
-The consequence is that the largest table in a database can be the one nobody
-declared a size for -- a consumer measured 2,413,223 rows against a declaration
-whose largest number was 300,000, because both sides of the join fan out over
-the same parents and the busy parents multiply.
-
-`max_rows` is checked *before* the insert, so a declaration that has run away
-costs a count rather than the ten minutes of writing the rows.
-"""
-
 from __future__ import annotations
 
 import pytest
@@ -63,12 +50,9 @@ def test_a_projection_over_its_ceiling_is_refused_before_it_inserts() -> None:
     message = str(excinfo.value)
     assert "testapp_eventsession" in message
     assert "max_rows=3" in message
-    # The count it would have written, so the reader can decide whether the
-    # ceiling is wrong or the declaration is.
     assert "would insert" in message
 
-    # Nothing was written: the refusal is the point, and a half-filled table
-    # would be worse than the runaway it prevents.
+    # The refusal reports the count, so the reader can judge the ceiling or the declaration.
     assert EventSession.objects.count() == 0
 
 
@@ -97,18 +81,13 @@ def test_a_ceiling_below_one_is_refused_at_declaration(bad: int) -> None:
 
 
 def test_a_ceiling_that_is_not_a_whole_number_is_refused() -> None:
-    """`True` is an int as far as isinstance is concerned, and a ceiling of one
-    row is never what a caller meant by it."""
+    """True is an int to isinstance, and a ceiling of one row is never what a caller meant."""
     with pytest.raises(InvalidShape, match="max_rows"):
         Projection(EventSession, per=Event, copying=TemplateSession, max_rows=True)
 
 
 def _raw(*, max_rows: int) -> Shape:
-    """The escape hatch, whose count has to wrap rather than count a join.
-
-    This package cannot know what a caller's statement is one row per, so the
-    only honest count is the caller's own select with `count(*)` around it.
-    """
+    """The escape hatch, whose count has to wrap rather than count a join."""
     return Shape(
         Table(Template, rows=4, name=Constant("t")),
         Table(

@@ -1,5 +1,3 @@
-"""Rows, not model instances."""
-
 from __future__ import annotations
 
 import datetime
@@ -38,17 +36,14 @@ def _order(rows: int) -> Table:
 def test_primary_keys_are_a_dense_range_from_one() -> None:
     keys = [row[0] for row in generate_rows(_order(5), seed=0)]
 
-    # Dense and from 1 because this package assigns them: it is what will let a
-    # child's foreign key be satisfied without a lookup, and what makes a
-    # self-referential tree acyclic by construction.
+    # Dense keys let a child's foreign key be satisfied without a lookup.
     assert keys == [1, 2, 3, 4, 5]
 
 
 def test_columns_follow_the_stable_column_order() -> None:
     first = next(iter(generate_rows(_order(1), seed=0)))
 
-    # (pk, channel, created_at, status, total) -- the sorted order columns()
-    # promises, with the model's own default filled in for channel.
+    # The sorted order columns() promises, with the model's default filled in for channel.
     assert first == (1, "web", 0, "complete", 1)
 
 
@@ -57,8 +52,7 @@ def test_zero_rows_generates_nothing() -> None:
 
 
 def test_it_streams_rather_than_materialising() -> None:
-    # A million tuples is real memory and psycopg writes them one at a time, so
-    # building the list first would buy nothing but peak RSS.
+    # A million tuples is real memory, and psycopg writes them one at a time.
     rows = generate_rows(_order(1_000_000), seed=0)
 
     assert next(iter(rows))[0] == 1
@@ -75,12 +69,7 @@ def test_a_different_seed_produces_different_rows() -> None:
 
 
 def _plan(rows: int) -> FanOutPlan:
-    """Two parents, each owning half the child range, with their own columns.
-
-    Built by hand rather than resolved, so the generator can be exercised
-    without a connection -- which is the same property the fan-out partition has
-    and the reason it is worth keeping.
-    """
+    """Two parents, each owning half the child range, with their own columns."""
     return FanOutPlan(
         keys=[10, 20],
         starts=[0, rows // 2],
@@ -135,18 +124,13 @@ def test_a_derived_column_is_computed_after_the_ones_it_reads() -> None:
 
     rows = list(generate_rows(table, seed=3, plans={"account": _plan(8)}))
 
-    # Sorted by name, total comes before unit_price, so a generator following
-    # the column order would multiply by an unfilled slot. Every row agreeing is
-    # what says the two orders are actually separate.
+    # Every row agreeing is what says the two orders are actually separate.
     quantities = _column(table, rows, "quantity")
     prices = _column(table, rows, "unit_price")
     assert _column(table, rows, "total") == [q * p for q, p in zip(quantities, prices, strict=True)]
 
 
 def test_two_columns_on_one_rank_are_extreme_in_the_same_rows() -> None:
-    # Unrounded on purpose: rounding to whole units puts two hundred rows into a
-    # hundred buckets, and then an ordering test is comparing tie-breaks rather
-    # than ranks.
     table = _tickets(
         200,
         quantity=Aligned("size", Uniform(1, 100)),
@@ -157,9 +141,7 @@ def test_two_columns_on_one_rank_are_extreme_in_the_same_rows() -> None:
     quantities = _column(table, rows, "quantity")
     prices = _column(table, rows, "unit_price")
 
-    # Both are monotonic in the shared draw, so the orderings are identical --
-    # not merely correlated. Independent marginals give a database that is
-    # realistic per column and unrealistic per entity.
+    # Independent marginals give a database that is realistic per column and unrealistic per entity.
     by_quantity = sorted(range(200), key=lambda i: (quantities[i], i))
     by_price = sorted(range(200), key=lambda i: (prices[i], i))
     assert by_quantity == by_price
@@ -181,8 +163,7 @@ def test_a_rank_is_not_the_column_of_the_same_name() -> None:
         created_at=Sequential(0, 1),
     )
 
-    # A rank called "total" must not silently be the "total" column's own draw,
-    # or a declaration would align a column to itself and be told nothing.
+    # A rank named like a column must not silently share that column's own draw.
     assert _column(ranked, list(generate_rows(ranked, seed=0)), "total") != _column(
         unranked, list(generate_rows(unranked, seed=0)), "total"
     )
@@ -193,9 +174,7 @@ def test_a_parent_scoped_derivation_reads_the_owning_parents_value() -> None:
 
     rows = list(generate_rows(table, seed=1, plans={"account": _plan(4)}))
 
-    # Grouped placement, two parents, four rows: the first two belong to the
-    # first account and the last two to the second, which is what makes this
-    # assertable without a database.
+    # Grouped placement with two parents is assertable without a database.
     assert _column(table, rows, "severity") == ["low", "low", "high", "high"]
     opened = _column(table, rows, "opened_at")
     assert all(_SIGNED_UP <= at < _SIGNED_UP + datetime.timedelta(days=10) for at in opened[:2])

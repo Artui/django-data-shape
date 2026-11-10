@@ -1,16 +1,3 @@
-"""A projected table's own columns, written as expressions the database evaluates.
-
-A projection copies from the source or takes a model default, and a projected
-table's *measure* column -- the one every query filters and averages on -- is
-neither. The refusal for that case is correct, and the only legal answer it
-leaves is the wrong one: a model default fills the whole table with one value,
-which is `n_distinct = 1` and the exact shape a planner cannot use. This
-library building a table it has made unplannable is the failure worth naming.
-
-`values=` keeps the derived join, the derived columns and the key strategy, and
-writes an expression for the one column that needs one.
-"""
-
 from __future__ import annotations
 
 import pytest
@@ -66,16 +53,7 @@ def test_a_projected_column_can_be_an_expression_over_the_join() -> None:
 
 
 def test_the_modulo_operator_reaches_the_database_as_an_operator() -> None:
-    """A literal `%` survives, and it takes an escape the caller does not write.
-
-    The statement carries a parameter sequence -- empty here, still a sequence --
-    so psycopg and Django's SQLite wrapper both interpolate it, and an unescaped
-    `%` is an incomplete placeholder. The error names the driver and nothing in
-    the shape, which is the worst place for a declaration to fail.
-
-    `%` is also the portable spelling of modulo, integer on both backends where
-    `mod()` is a REAL on SQLite, so it is the one a caller reaches for first.
-    """
+    """A literal `%` survives, and it takes an escape the caller does not write."""
     build(_shape("({per}.id * 31 + {source}.id * 17) % 5 + 1"), require_statistics=False)
 
     values = {float(value) for value in EventSession.objects.values_list("channel", flat=True)}
@@ -84,18 +62,11 @@ def test_the_modulo_operator_reaches_the_database_as_an_operator() -> None:
 
 
 def test_the_derived_join_is_kept() -> None:
-    """The whole point: `sql=` also works and costs the derived form.
-
-    A projection written with `sql=` has a hand-written join that can drift from
-    the model graph afterwards, and a key strategy that has to be spelled out.
-    `values=` gives up neither.
-    """
+    """The whole point: `sql=` also works and costs the derived form."""
     build(_shape(), require_statistics=False)
 
     rows = EventSession.objects.count()
     assert rows > 0
-    # Copied columns still come from the source, keys still come from the
-    # strategy, and the join is still the one derived from the model graph.
     assert EventSession.objects.exclude(title="").count() == rows
     assert EventSession.objects.filter(event__isnull=True).count() == 0
 
@@ -133,15 +104,13 @@ def test_values_are_refused_beside_a_raw_statement() -> None:
 
 
 def test_the_expression_reaches_the_digest() -> None:
-    """Two declarations differing only in the expression build different
-    databases, so a cache key that agreed would serve one for the other."""
+    """Two declarations differing only in the expression are two databases, so keys differ."""
     assert shape_digest(_shape("1")) != shape_digest(_shape("2"))
 
 
 @pytest.mark.parametrize("bad", ["", "   ", None, 7])
 def test_an_empty_expression_is_refused_at_declaration(bad: object) -> None:
-    """A statement the database refuses, raised far from the declaration that
-    caused it, is the failure this avoids."""
+    """Refusing at declaration avoids a database error raised far from the cause."""
     with pytest.raises(InvalidShape, match="SQL expression"):
         SqlValue(bad)  # type: ignore[arg-type]
 

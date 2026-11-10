@@ -1,5 +1,3 @@
-"""The least interesting distribution, named plainly on purpose."""
-
 from __future__ import annotations
 
 from decimal import Decimal
@@ -21,8 +19,7 @@ def test_places_rounds_to_an_exact_decimal() -> None:
     uniform = Uniform(0, 500, places=2)
     value = uniform.value(0, 1 / 3)
 
-    # Decimal rather than float: a numeric(10, 2) column rejects binary float
-    # noise, and COPY hands the value over as text.
+    # A numeric(10, 2) column rejects binary float noise, and COPY sends text.
     assert isinstance(value, Decimal)
     assert value == Decimal("166.67")
 
@@ -45,8 +42,7 @@ def test_it_reads_back_as_what_was_declared() -> None:
 
 
 def test_nan_or_infinite_bounds_are_refused() -> None:
-    # Same shape of bug as Skew's: ``high <= low`` is False for NaN, so the
-    # range was accepted and then returned NaN for every row.
+    # high <= low is False for NaN, so the range was accepted and returned NaN for every row.
     with pytest.raises(InvalidShape, match="finite bounds"):
         Uniform(0, float("inf"))
     with pytest.raises(InvalidShape, match="finite bounds"):
@@ -58,15 +54,11 @@ def test_places_zero_fills_an_integer_column() -> None:
 
 
 def test_a_range_wider_than_the_default_decimal_precision_still_rounds() -> None:
-    # Python's default decimal context carries 28 significant digits and
-    # rounding past it raises InvalidOperation -- which used to surface from
-    # inside the COPY loop, on a numeric(30, 2) column that would have taken the
-    # value happily.
+    # Rounding past 28 significant digits raised inside the COPY loop.
     assert Uniform(0, 1e27, places=2).value(0, 0.5) == Decimal("500000000000000000000000000.00")
     assert Uniform(0, 1e40, places=2).value(0, 0.5) == Decimal("5" + "0" * 39 + ".00")
 
 
 def test_rounding_follows_the_literal_a_reader_wrote() -> None:
-    # repr() rather than the float itself: Decimal(2.675) takes the full binary
-    # expansion and rounds to 2.67, where the literal 2.675 reads as 2.68.
+    # repr() gives the literal: Decimal(2.675) would round to 2.67, where 2.675 reads 2.68.
     assert Uniform(2.675, 2.6750001, places=2).value(0, 0.0) == Decimal("2.68")

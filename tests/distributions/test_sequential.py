@@ -1,5 +1,3 @@
-"""The distribution whose value is a function of position alone."""
-
 from __future__ import annotations
 
 import datetime
@@ -22,9 +20,7 @@ def test_it_walks_a_timeline() -> None:
 
 
 def test_the_draw_is_ignored() -> None:
-    # The point of this distribution is correlation with the key, so its value
-    # must not depend on the random draw at all. If it did, the column would
-    # scatter and the planner would cost an index scan over it differently.
+    # Its value must not depend on the draw, or the planner would cost an index scan wrongly.
     sequential = Sequential(0, 1)
 
     assert sequential.value(5, 0.0) == sequential.value(5, 0.999)
@@ -40,8 +36,7 @@ def test_it_says_whether_it_climbs_with_the_row() -> None:
 
 
 def test_it_says_so_in_the_columns_own_units() -> None:
-    # A date column steps by a timedelta, and zero has to come from the step
-    # itself rather than from a literal that assumes which kind it is.
+    # A date steps by a timedelta, so zero must come from the step, not a literal.
     forwards = Sequential(datetime.datetime(2020, 1, 1), datetime.timedelta(days=1))
     backwards = Sequential(datetime.datetime(2020, 1, 1), datetime.timedelta(days=-1))
 

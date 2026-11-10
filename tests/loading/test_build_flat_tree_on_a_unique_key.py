@@ -1,11 +1,3 @@
-"""A flat tree loading into a unique self-key, on the database that enforces it.
-
-The declaration tests stop at ``Shape()``. This is the load an exemption is owed:
-0.25.1 found an exemption accepted by arithmetic and dying in ``COPY``, so every
-spelling of the uniqueness builds here at several seeds, and a duplicate is then
-inserted to show that the index was there to refuse one.
-"""
-
 from __future__ import annotations
 
 import pytest
@@ -85,8 +77,7 @@ def test_a_scaled_flat_tree_still_keeps_the_uniqueness(model: type[Model]) -> No
 def test_a_scale_that_gives_a_row_siblings_is_refused_by_the_copy_it_makes(
     model: type[Model],
 ) -> None:
-    # One child of a skew has no sibling at two rows, and has at twenty, so the
-    # proof is read again rather than carried over from the smaller table.
+    # The proof is read again at twenty rows rather than carried over from the smaller table.
     small = Shape(Table(model, rows=2, previous=Tree(roots=0.5, sizes=Zipf())))
 
     with pytest.raises(InvalidShape, match="sizes=Constant"):
@@ -95,8 +86,7 @@ def test_a_scale_that_gives_a_row_siblings_is_refused_by_the_copy_it_makes(
 
 @pytest.mark.parametrize("model", _SPELLINGS)
 def test_the_index_a_flat_tree_loaded_past_refuses_a_second_child(model: type[Model]) -> None:
-    # What makes the builds above evidence: a tree that broke the rule would have
-    # met this index inside COPY.
+    # A tree that broke the rule would have met this index inside COPY.
     build_shape(Shape(Table(model, rows=50, previous=Tree(roots=0.05, sizes=Constant(1)))))
     taken = next(parent for parent in _links(model).values() if parent is not None)
 

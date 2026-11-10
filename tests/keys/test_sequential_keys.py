@@ -1,13 +1,10 @@
-"""Dense integer keys."""
-
 from __future__ import annotations
 
 from django_data_shape import SequentialKeys
 
 
 def test_it_counts_from_one() -> None:
-    # From one rather than zero: that is what a database sequence does, and a
-    # test database whose keys start at zero is subtly unlike every other one.
+    # Keys count from one, as a database sequence does, unlike a test database from zero.
     assert [SequentialKeys().key_for(row, 0) for row in range(4)] == [1, 2, 3, 4]
 
 

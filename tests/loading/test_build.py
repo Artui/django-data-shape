@@ -1,5 +1,3 @@
-"""The end-to-end claim: a declaration becomes a database the planner can read."""
-
 from __future__ import annotations
 
 import datetime
@@ -84,9 +82,7 @@ def test_the_declared_skew_is_what_lands_in_the_table() -> None:
         for status in ("complete", "pending", "cancelled")
     }
 
-    # The whole point of the package in one assertion: the rare value is rare,
-    # which is what makes an index on this column usable and what a fixtures
-    # loop with one row of each says the opposite of.
+    # The rare value is rare, which is what makes an index on this column usable.
     assert counts["complete"] > 9600
     assert 100 < counts["pending"] < 200
     assert 0 < counts["cancelled"] < 100
@@ -103,9 +99,7 @@ def test_analyze_runs_so_the_planner_can_see_the_skew() -> None:
         )
         row = cursor.fetchone()
 
-    # Falsifiable: with the ANALYZE removed from build(), pg_stats holds no row
-    # for this column at all and this is None. Rows without statistics is the
-    # state the package exists to condemn, so its own loader must not leave one.
+    # Rows without statistics are the state this package exists to condemn.
     assert row is not None
     values, frequencies = row
     assert "complete" in values
@@ -115,9 +109,7 @@ def test_analyze_runs_so_the_planner_can_see_the_skew() -> None:
 def test_the_sequence_is_moved_past_the_keys_it_assigned() -> None:
     build_shape(Shape(_orders(rows=100)))
 
-    # The first bug the dense-primary-key design invites. Without the reset this
-    # raises IntegrityError on a key that already exists, and it would do so in
-    # the consumer's test rather than here.
+    # The first bug the dense-primary-key design invites.
     created = Order.objects.create(
         status="complete",
         total="1.00",
@@ -149,29 +141,18 @@ def test_every_declared_table_is_built() -> None:
 
 
 def test_building_against_a_non_postgres_connection_is_refused() -> None:
-    # The gate is unit-tested with a stub elsewhere. This test exists because a
-    # stub proves the gate works, not that anything calls it: it drives the real
-    # entry point into a real refusal, so deleting the call from build() fails
-    # here even though the stub test would still pass.
+    # The gate is unit-tested with a stub elsewhere.
     with pytest.raises(UnsupportedBackend, match="needs PostgreSQL"):
         build_shape(Shape(_orders(rows=1)), using="not_postgres")
 
 
 def test_a_naive_datetime_is_stored_where_save_would_have_put_it() -> None:
-    # The silent one. Written without Django's field preparation a naive
-    # datetime lands verbatim, which under this suite's America/Chicago
-    # TIME_ZONE is hours away from where save() puts it -- on the exact column
-    # Sequential exists to make realistic, with no error and no warning.
+    # The silent one.
     naive = datetime.datetime(2020, 1, 1, 12, 0)
-    # Django's own warning, raised from DateTimeField.get_prep_value. Before the
-    # fix build() raised none at all, which is the sharpest evidence that no
-    # field preparation was happening.
     with pytest.warns(RuntimeWarning, match="received a naive datetime"):
         build_shape(Shape(Table(Prepared, rows=1, at=Constant(naive), tags=Constant({"a": 1}))))
 
     saved = Prepared.objects.create(at=naive, tags={"b": 2})
-    # Both sides read back from the database: the point is what was *stored*,
-    # and the in-memory instance still holds the naive value it was handed.
     saved.refresh_from_db()
     loaded = Prepared.objects.exclude(pk=saved.pk).get()
 
@@ -180,18 +161,14 @@ def test_a_naive_datetime_is_stored_where_save_would_have_put_it() -> None:
 
 
 def test_a_json_column_loads_at_all() -> None:
-    # psycopg has no adapter for a bare dict, so without preparation this does
-    # not merely land wrong -- the build fails outright.
+    # psycopg has no adapter for a bare dict, so the build fails outright without preparation.
     build_shape(Shape(Table(Prepared, rows=3, at=Constant(_AWARE), tags=Constant({"a": [1, 2]}))))
 
     assert Prepared.objects.get(pk=1).tags == {"a": [1, 2]}
 
 
 def test_analyze_is_fresh_rather_than_merely_present() -> None:
-    # pg_statistic survives both TRUNCATE and --reuse-db, so asserting that
-    # statistics *exist* passes against a build that never analyzed, as long as
-    # some earlier run did. Asking when the table was last analyzed is the
-    # question that actually discriminates.
+    # Asking when the table was last analyzed is the question that actually discriminates.
     build_shape(Shape(_orders(rows=200)))
     with connection.cursor() as cursor:
         cursor.execute("SELECT pg_stat_get_last_analyze_time(%s::regclass)", [_ORDERS])
@@ -208,9 +185,7 @@ def test_analyze_is_fresh_rather_than_merely_present() -> None:
 
 
 def test_building_over_existing_rows_is_refused_before_anything_is_written() -> None:
-    # Keys start at 1 every time, so the second build collided on the primary
-    # key and reported a unique violation naming an index -- which says nothing
-    # about what the caller did or what to do instead.
+    # A second build collides on the key with a message naming an index, not the cause.
     build_shape(Shape(_orders(rows=10)))
 
     with pytest.raises(ShapeNotEmpty, match="already holds rows"):
@@ -218,10 +193,6 @@ def test_building_over_existing_rows_is_refused_before_anything_is_written() -> 
 
 
 def test_the_pytest_page_quotes_the_message_it_raises() -> None:
-    # The page showed a message naming a refusal the package had stopped
-    # making, across several releases, while the composition it called refused
-    # worked. A quoted message is prose like any other: hold it to the one
-    # raised.
     build_shape(Shape(_orders(rows=10)))
 
     with pytest.raises(ShapeNotEmpty) as refused:
@@ -232,20 +203,13 @@ def test_the_pytest_page_quotes_the_message_it_raises() -> None:
     assert " ".join(f"{_ORDERS} already holds rows{quoted}".split()) == " ".join(
         str(refused.value).split()
     )
-    # The equality holds the page to the message and not the message to the
-    # truth: restoring the old claim in both places keeps them equal. A scaled
-    # world empties its declared tables, so it builds over a session world's
-    # rows, and the message must not say otherwise.
+    # A quoted message is prose like any other: hold it to the one raised.
     assert "cannot build over them" not in " ".join(str(refused.value).split())
 
 
 def test_a_failed_build_leaves_no_table_behind() -> None:
-    # Without the transaction the first table stayed committed and analyzed, so
-    # the natural next action -- fix the shape and run it again -- failed on a
-    # duplicate key rather than on the original problem.
-    Order.objects.create(
-        status="complete", total="1.00", created_at=_AWARE
-    )  # makes the second table refuse
+    # ) # makes the second table refuse
+    Order.objects.create(status="complete", total="1.00", created_at=_AWARE)
 
     with pytest.raises(ShapeNotEmpty):
         build_shape(Shape(Table(Company, rows=5, name=Constant("acme")), _orders(rows=10)))
@@ -254,9 +218,7 @@ def test_a_failed_build_leaves_no_table_behind() -> None:
 
 
 def test_a_copy_failure_arrives_as_a_django_error() -> None:
-    # cursor.copy is not in Django's WRAP_ERROR_ATTRS, so the psycopg exception
-    # escaped raw: uncatchable as django.db.DatabaseError, and an enclosing
-    # atomic block never learned it needed a rollback.
+    # cursor.copy is not wrapped, so a psycopg error escapes as an uncatchable raw exception.
     too_long = Table(Company, rows=1, name=Constant("x" * 500))
 
     with pytest.raises(DatabaseError):
@@ -270,15 +232,7 @@ def test_the_result_counts_what_the_database_took() -> None:
 
 
 def test_a_uuid_keyed_table_may_be_built_beside_rows_the_caller_made() -> None:
-    """The hybrid the documentation advertises, for the schemas that use UUIDs.
-
-    ``_require_empty`` refuses a build over existing rows because this package
-    assigns keys from 1 and a second build collides -- and that reasoning is
-    about integer keys, where the refusal was not. A UuidKeys table derives a
-    128-bit digest per row and cannot land on a factory's row, so refusing it
-    blocked "parents your code made, children this package made" in exactly the
-    schemas where UUID primary keys are the norm.
-    """
+    """The hybrid the documentation advertises, for the schemas that use UUIDs."""
     theirs = Tenant.objects.create(name="made by the caller's own factory")
 
     build_shape(Shape(Table(Tenant, rows=10, name=Constant("t")), seed=1))
@@ -296,12 +250,7 @@ def test_an_integer_keyed_table_is_still_refused_and_says_why() -> None:
 
 
 def test_a_key_function_is_read_as_able_to_collide() -> None:
-    """The case that decides the protocol is opt-in rather than a default.
-
-    A caller's own function could return anything, this package cannot read it,
-    and guessing "probably fine" would trade a clear refusal for a load that
-    dies partway through.
-    """
+    """The case that decides the protocol is opt-in rather than a default."""
     Company.objects.create(name="already here")
 
     with pytest.raises(ShapeNotEmpty):
@@ -314,9 +263,7 @@ def test_a_key_function_is_read_as_able_to_collide() -> None:
 
 
 def test_a_skewed_one_to_one_loads_under_a_cap_of_one() -> None:
-    # The acceptance the cap-of-one proof grants is only worth having if COPY
-    # agrees: a Zipf with a childless share, which the unique index refuses
-    # uncapped, loads once no parent can hold two rows.
+    # A cap of one is worth having only if COPY agrees: a childless Zipf loads once capped.
     build_shape(
         Shape(
             Table(Company, rows=100, name=Constant("acme")),
@@ -336,8 +283,7 @@ def test_a_skewed_one_to_one_loads_under_a_cap_of_one() -> None:
 
 
 def test_a_pair_kept_unique_by_a_cap_of_one_loads() -> None:
-    # The composite unique index agrees with the acceptance: the capped side
-    # puts each company on one row at most, so no pair can repeat.
+    # The composite unique index agrees: capped, each company sits on one row at most.
     build_shape(
         Shape(
             Table(Company, rows=100, name=Constant("acme")),
@@ -356,9 +302,7 @@ def test_a_pair_kept_unique_by_a_cap_of_one_loads() -> None:
 
 
 def test_the_cap_counts_the_rows_null_leaves_without_a_parent() -> None:
-    # null= is drawn after the partition, so a NULL row has already taken its
-    # place under the cap: no company exceeds it, and the rows that keep a
-    # parent are fewer than the cap times the companies.
+    # A NULL row takes its place under the cap, so no company exceeds it.
     build_shape(
         Shape(
             Table(Company, rows=10, name=Constant("acme")),

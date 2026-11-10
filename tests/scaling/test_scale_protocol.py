@@ -1,5 +1,3 @@
-"""The protocol's promise is a type-level claim, so it takes a type-level test."""
-
 from __future__ import annotations
 
 import subprocess
@@ -27,18 +25,14 @@ def _check(path: Path) -> subprocess.CompletedProcess[str]:
 
 
 def test_the_implementations_a_consumer_would_write_satisfy_the_protocol() -> None:
-    # The reproduction that mattered: a hand-rolled callable whose parameter is
-    # called something else. Before the factor was made positional-only this
-    # failed, and the documentation promising it had no test behind it at all.
+    # A callable whose parameter has another name failed until factor went positional-only.
     result = _check(_CONSUMERS)
 
     assert result.returncode == 0, result.stdout + result.stderr
 
 
 def test_and_the_ones_that_should_not_are_rejected() -> None:
-    # The control. Point the checker at nothing and it reports nothing, so a
-    # green run of the test above is only evidence if this one is red for the
-    # file next door.
+    # The control.
     result = _check(_IMPOSTORS)
 
     assert result.returncode != 0

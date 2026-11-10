@@ -1,5 +1,3 @@
-"""What a projection means, decided before a connection is opened."""
-
 from __future__ import annotations
 
 import django
@@ -43,16 +41,14 @@ def _sessions() -> Projection:
 
 
 def _statement(projection: Projection, seed: int = 0) -> str:
-    # The connection is only ever asked to quote a name, which every backend
-    # does, so this reads the same statement on Postgres and on SQLite.
+    # Only a name is quoted through the connection, so one statement reads on every backend.
     return projection.statement(connection, seed)[0]
 
 
 def test_the_join_is_derived_from_the_model_graph() -> None:
     statement = _statement(_sessions())
 
-    # Event and TemplateSession are joined through the template they both point
-    # at. Nothing in the declaration says so; the edge is in _meta already.
+    # Event and TemplateSession are joined through the template they both point at.
     assert 'ON "src"."template_id" = "per"."template_id"' in statement
     assert f'FROM "{Event._meta.db_table}" AS "per"' in statement
     assert f'INNER JOIN "{TemplateSession._meta.db_table}" AS "src"' in statement
@@ -62,23 +58,17 @@ def test_every_kind_of_column_is_decided_and_the_column_list_is_stable() -> None
     statement, params = _sessions().statement(connection, 0)
 
     columns, select = statement.split(" SELECT ", 1)
-    # Sorted by name, like Table.columns(), so two declarations differing only
-    # in the model's field order produce the same statement and hash alike.
+    # note is nullable and is left out of the statement entirely.
     assert columns.endswith('("id", "event_id", "minutes", "source_id", "title", "channel")')
-    # The edge the rows hang off, a copied-by-name column, the copied row's own
-    # key, and a model default as a bound parameter rather than as SQL.
     assert '"per"."id"' in select
     assert '"src"."minutes"' in select
     assert '"src"."id"' in select
     assert params == ("web",)
-    # note is nullable and is left out of the statement entirely.
     assert '"note"' not in statement
 
 
 def test_the_key_comes_from_the_strategy_rather_than_from_the_statement() -> None:
-    # The keys question, answered where it can be seen: the expression is the
-    # strategy's own arithmetic over a row index the database computes, not a
-    # sequence and not something the projection invented.
+    # The expression is the strategy's own arithmetic over a row index, not a sequence.
     assert isinstance(SequentialKeys(), SqlKeys)
     assert SequentialKeys().key_sql(7, "r") == "(r) + 1"
     assert "(row_number() OVER (ORDER BY " in _statement(_sessions())
@@ -88,8 +78,7 @@ def test_the_key_comes_from_the_strategy_rather_than_from_the_statement() -> Non
 def test_the_ordering_is_deterministic_and_is_the_arrival_order() -> None:
     statement = _statement(_sessions())
 
-    # Twice on purpose: the window's ORDER BY is what makes the key
-    # deterministic, the outer one is what decides where the rows land.
+    # The window's ORDER BY makes the key deterministic; the outer one decides where rows land.
     assert statement.count('"per"."id", "src"."id"') == 2
     assert statement.endswith('ORDER BY "per"."id", "src"."id"')
 
@@ -99,8 +88,7 @@ def test_two_renderings_of_one_declaration_agree() -> None:
 
 
 def test_a_different_seed_leaves_a_sequential_key_alone() -> None:
-    # SequentialKeys ignores its stream in SQL exactly as it does in Python, so
-    # the seed reaching key_sql must not silently change the keys.
+    # SequentialKeys ignores its stream in SQL as in Python, so the seed must not change keys.
     assert _statement(_sessions(), seed=1) == _statement(_sessions(), seed=2)
 
 
@@ -140,15 +128,13 @@ def test_a_projection_making_one_row_per_itself_is_refused() -> None:
 
 
 def test_a_projected_model_with_no_edge_to_per_is_refused() -> None:
-    # Order has no foreign key at all, so there is nothing for the projected
-    # rows to hang off.
+    # Order has no foreign key at all, so there is nothing for the projected rows to hang off.
     with pytest.raises(InvalidShape, match="no foreign key to Company"):
         Projection(Order, per=Company, copying=Session)
 
 
 def test_more_than_one_edge_to_per_is_refused_by_name() -> None:
-    # DualSession points at Event twice, so which edge the projected rows hang
-    # off is not something the model graph can answer.
+    # DualSession points at Event twice, so the model graph cannot say which edge to hang off.
     with pytest.raises(InvalidShape, match="more than one foreign key to Event") as raised:
         Projection(DualSession, per=Event, copying=TemplateSession)
 
@@ -156,26 +142,20 @@ def test_more_than_one_edge_to_per_is_refused_by_name() -> None:
 
 
 def test_an_unjoinable_pair_is_refused() -> None:
-    # Session hangs off Company, but nothing Company points at is also pointed
-    # at by Order, so there is no collection to copy along.
+    # Nothing Company points at is pointed at by Order, so there is nothing to copy along.
     with pytest.raises(InvalidShape, match="cannot see how those two are joined"):
         Projection(Session, per=Company, copying=Order)
 
 
 def test_an_ambiguous_join_is_refused_and_names_both_models() -> None:
-    # Rehearsal shares both a template and a venue with Event, so which
-    # collection is being copied is genuinely undecidable.
     with pytest.raises(InvalidShape, match="ways to join them") as raised:
         Projection(EventSession, per=Event, copying=Rehearsal)
 
     message = str(raised.value)
     assert "Template" in message
     assert "Venue" in message
-    # Both are reachable exactly once, so through= resolves this one and the
-    # message says so rather than sending the reader to raw SQL.
+    # Rehearsal reaches Event by two routes, so which collection to copy is undecidable.
     assert "through=Template" in message
-    # And it does not offer the audit aside here, because there is nothing
-    # reached twice: that sentence is diagnosis, not decoration.
     assert "abstract base" not in message
 
 
@@ -190,8 +170,7 @@ def test_a_callable_default_is_refused_by_name() -> None:
     with pytest.raises(InvalidShape, match="TokenSession.token") as raised:
         Projection(TokenSession, per=Event, copying=TemplateSession)
 
-    # The reason a projection has on top of Table's: there is no per-row moment
-    # at which the callable could be called.
+    # There is no per-row moment at which the callable could be called.
     assert "never pass through" in str(raised.value)
 
 
@@ -202,10 +181,7 @@ def test_a_key_strategy_with_no_sql_form_is_refused_by_name() -> None:
     message = str(raised.value)
     assert "UuidKeys()" in message
     assert not isinstance(UuidKeys(), SqlKeys)
-    # A refusal that names no remedy leaves a UUID-keyed projection looking
-    # unsupported, when it is one declaration away. Md5Keys is that declaration,
-    # and the message says why it is a different strategy rather than this one
-    # gaining a SQL half.
+    # A refusal must name the remedy: Md5Keys is one declaration away, a different strategy.
     assert "keys=Md5Keys()" in message
 
 
@@ -215,8 +191,7 @@ def test_the_remedy_the_refusal_names_is_accepted() -> None:
 
 
 def test_a_declared_strategy_with_no_sql_form_is_refused_too() -> None:
-    # Passing one explicitly has to meet the same bar as inferring one, or the
-    # refusal only holds for callers who did not try to work around it.
+    # Passing one explicitly must meet the same bar as inferring one.
     with pytest.raises(InvalidShape, match="cannot assign its keys"):
         Projection(
             EventSession, per=Event, copying=TemplateSession, keys=KeyFunction(lambda row: row)
@@ -314,16 +289,13 @@ def test_a_statistics_target_on_a_field_the_model_does_not_have_is_refused() -> 
 
 
 def test_a_statistics_target_on_a_column_the_statement_leaves_out_is_refused() -> None:
-    # note is nullable and is not a column TemplateSession carries, so the
-    # derived statement leaves it out entirely: every projected row would hold
-    # the same nothing, and a bigger sample of it would describe nothing.
+    # The derived statement leaves note out, so a bigger sample of it would describe nothing.
     with pytest.raises(InvalidShape, match="does not write that column"):
         Projection(EventSession, per=Event, copying=TemplateSession, statistics={"note": 250})
 
 
 def test_a_statistics_target_is_checked_against_a_statement_the_caller_wrote_too() -> None:
-    # The same rule read off columns= rather than off the derived plan, which is
-    # the only thing this package knows about a select it did not write.
+    # The same rule read off columns=, the only view of a select the caller wrote.
     written = Projection(
         EventSession,
         columns=("id", "event", "title", "minutes"),
@@ -342,16 +314,7 @@ def test_a_statistics_target_is_checked_against_a_statement_the_caller_wrote_too
 
 
 def test_an_audit_base_makes_every_pair_joinable_and_the_refusal_says_so() -> None:
-    """The case that put the derived form out of reach for a whole schema.
-
-    An abstract base carrying ``created_by``/``updated_by`` to ``User`` is a
-    very common Django pattern, and it makes **any** two models joinable -- so
-    ``per=``/``copying=`` derives for no pair at all, not just this one. The
-    consumer who found it was projecting the README's own motivating example.
-
-    The refusal was honest and its remedy was a sledgehammer: drop to raw SQL.
-    It now names ``through=`` first, which keeps the derived form.
-    """
+    """The case that put the derived form out of reach for a whole schema."""
     with pytest.raises(InvalidShape) as raised:
         Projection(RunStage, per=PlanRun, copying=PlanStage)
 
@@ -368,8 +331,7 @@ def test_through_names_the_model_the_join_runs_on() -> None:
 
 
 def test_through_is_part_of_what_the_declaration_says() -> None:
-    # Two shapes joining the same pair through different models copy different
-    # collections, so they are different declarations and the cache has to know.
+    # Two shapes joining one pair through different models copy different collections.
     assert (
         Projection(RunStage, per=PlanRun, copying=PlanStage, through=Plan).canonical()
         != Projection(RunStage, per=PlanRun, copying=PlanStage, through=Portfolio).canonical()
@@ -387,18 +349,13 @@ def test_a_through_model_the_two_do_not_share_is_refused() -> None:
 
 
 def test_a_through_model_reached_twice_from_one_side_is_still_refused_by_field() -> None:
-    # through=Auditor is reachable, and reachable *twice* from each side --
-    # created_by and updated_by. Naming the model is not enough there, and a
-    # refusal that named no fields would leave the reader where they started.
+    # Auditor is reachable twice from each side, so naming the model is not enough.
     with pytest.raises(InvalidShape) as raised:
         Projection(RunStage, per=PlanRun, copying=PlanStage, through=Auditor)
 
     message = str(raised.value)
     assert "created_by" in message
     assert "updated_by" in message
-    # The other shape of the same refusal, and it takes the other correction:
-    # every remaining candidate is reached more than once, so naming the model
-    # satisfies both edges and narrows nothing.
     assert "through= cannot narrow this" in message
     assert "an audit column is never the collection being copied" in message
 
@@ -409,26 +366,13 @@ def test_through_is_only_meaningful_on_the_derived_form() -> None:
 
 
 def test_columns_accepts_the_column_an_insert_actually_lists() -> None:
-    """Both spellings, because the message that sends you here says the other.
-
-    The refusal for a missing ``columns=`` reads "the select's columns are what
-    the insert lists", and what an insert lists for a foreign key is
-    ``event_id`` -- which was then refused as "no field named event_id". A
-    consumer followed the message and met the contradiction; the surrounding
-    documentation said "the COPY column list" and reinforced it.
-
-    ``event_id`` genuinely is that column, so it is accepted rather than
-    argued with, and both spellings resolve to the same one.
-    """
+    """Both spellings, because the message that sends you here says the other."""
     written = Projection(
         EventSession,
         columns=("id", "event_id", "title", "minutes"),
         sql="SELECT 1, 1, 'x', 1",
     )
 
-    # canonical(), not object equality: the claim is that the two spellings are
-    # one declaration, which is exactly what the template-database cache keys
-    # on. Two digests here would mean one shape built twice.
     assert (
         written.canonical()
         == Projection(
@@ -441,8 +385,7 @@ def test_columns_accepts_the_column_an_insert_actually_lists() -> None:
 
 
 def test_a_statistics_target_may_be_spelled_either_way_too() -> None:
-    # The same dict is read for the statistics check, so the two have to agree
-    # about what a column is called or one would accept what the other refuses.
+    # Both checks must agree on a column's name, or one accepts what the other refuses.
     Projection(
         EventSession,
         columns=("id", "event_id", "title", "minutes"),
@@ -468,9 +411,7 @@ def test_a_target_outside_postgres_own_range_is_refused_here_as_well() -> None:
 
 
 def test_a_raw_projection_can_name_what_it_selects_from() -> None:
-    # Nothing here parses SQL, so a raw statement used to be a black box that
-    # could only be ordered last. reads= is how it rejoins the graph: after what
-    # it names, and before whatever fans out over the table it fills.
+    # reads= places a raw statement after what it names and before what fans out over it.
     projection = Projection(
         EventSession,
         columns=("id", "event", "title"),
@@ -482,25 +423,19 @@ def test_a_raw_projection_can_name_what_it_selects_from() -> None:
 
 
 def test_reads_without_a_statement_of_your_own_is_refused() -> None:
-    # A derived projection already names its two inputs, so reads= would be a
-    # second and quieter answer to a question per= and copying= have answered.
+    # A derived projection already names its inputs, so reads= would be a second answer.
     with pytest.raises(InvalidShape, match="declares reads= without sql="):
         Projection(EventSession, per=Event, copying=TemplateSession, reads=(Company,))
 
 
 def test_a_raw_projection_naming_itself_in_reads_is_refused() -> None:
-    # order_tables carries no self-edge guard on purpose, because every way of
-    # writing one is refused where the declaration is made. reads= was a new way
-    # to write one, and a declaration that has to come after itself would have
-    # been reported as a cycle from inside the ordering pass instead.
+    # A declaration that must come after itself would be reported as a cycle inside ordering.
     with pytest.raises(InvalidShape, match="names itself in reads="):
         Projection(EventSession, columns=("id",), sql="SELECT 1", reads=(EventSession,))
 
 
 def test_what_a_raw_projection_reads_is_part_of_the_declaration() -> None:
-    # It writes no column and still decides the data: the same statement run
-    # before and after a table selects different rows, so two declarations
-    # differing only in reads= must not share a cached template database.
+    # The statement decides the rows, so reads= must be part of the cached template's key.
     without = Projection(EventSession, columns=("id",), sql="SELECT 1")
     with_reads = Projection(EventSession, columns=("id",), sql="SELECT 1", reads=(Event,))
 
@@ -508,8 +443,6 @@ def test_what_a_raw_projection_reads_is_part_of_the_declaration() -> None:
 
 
 def test_projecting_into_an_inherited_model_is_refused_too() -> None:
-    # The escape hatch is the first thing a reader reaches for once Table has
-    # refused, so it has to refuse for the same reason rather than accept and
-    # then insert into a column the child's table has not got.
+    # The escape hatch must refuse for the same reason Table does.
     with pytest.raises(InvalidShape, match="multi-table inheritance"):
         Projection(DeliveryDocument, columns=("id",), sql="SELECT 1")

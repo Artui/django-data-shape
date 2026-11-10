@@ -1,5 +1,3 @@
-"""Declaring a tree, and the declarations a tree refuses."""
-
 from __future__ import annotations
 
 import pytest
@@ -68,8 +66,6 @@ def test_a_tree_on_a_column_that_refuses_null_is_refused() -> None:
 def _the_sentence_the_remedy_was_read_from(message: str) -> None:
     """The one wording 0.25.1 gave ``shape_from_factory``, and the two remedies it names."""
     assert "Make the column null=True, or fill the table with a Projection" in message
-    # Both of these were offered and then refused: a column left out of a table
-    # whose key refuses NULL is the required-relation refusal.
     assert "leave it out" not in message
     assert "fill it after the build" not in message
     assert "FanOut(Zipf())" not in message
@@ -80,8 +76,7 @@ def test_a_tree_refused_on_a_key_that_refuses_null_offers_a_remedy_table_accepts
         Table(RootlessNode, rows=5, parent=Tree(roots=0.1, sizes=Zipf()))
 
     _the_sentence_the_remedy_was_read_from(str(refused.value))
-    # The projection half of the remedy is a declaration, not a hope: it builds
-    # a shape over the very table the refusal is about.
+    # The projection half of the remedy is a declaration: it builds over the refused table.
     Shape(Projection(RootlessNode, columns=("id", "parent_id"), sql="SELECT 1, 1"))
 
 
@@ -111,8 +106,7 @@ def test_a_required_key_to_another_table_is_still_offered_a_fan_out() -> None:
 def test_a_tree_on_a_unique_self_reference_is_refused() -> None:
     with pytest.raises(InvalidShape, match="Successor.previous is unique") as refused:
         Table(Successor, rows=5, previous=Tree(roots=0.1, sizes=Zipf()))
-    # The generic unique-column check opens with the same prefix, so the
-    # sentence only the Tree branch writes is what shows that branch ran.
+    # Only the Tree branch writes this sentence, which shows that branch ran.
     assert "previous=Tree(roots=0.1, sizes=Constant(1))" in str(refused.value)
     assert "A chain of one-to-one links" not in str(refused.value)
 
@@ -121,8 +115,7 @@ def test_a_tree_on_a_unique_self_reference_is_refused() -> None:
     "sizes", [Constant(1), Constant(3), Skew({3: 1})], ids=["one", "three", "skew_of_one"]
 )
 def test_a_tree_of_one_size_on_a_unique_self_reference_is_accepted(sizes: Distribution) -> None:
-    # Table alone decides unique=True, and it answers past _check_trees too: the
-    # generic unique-column check reads a tree as a draw if it is not told.
+    # Table alone decides unique=True, so the generic check must not read a tree as a draw.
     assert isinstance(Table(Successor, rows=50, previous=Tree(roots=0.1, sizes=sizes)), Table)
 
 

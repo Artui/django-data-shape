@@ -1,5 +1,3 @@
-"""Heavy-tailed weights, which is what makes fan-out worth declaring."""
-
 from __future__ import annotations
 
 import pytest
@@ -12,9 +10,7 @@ def test_it_produces_a_head_and_a_long_tail() -> None:
     weights = sorted((zipf.value(i, i / 1000) for i in range(1000)), reverse=True)
     total = sum(weights)
 
-    # The property that matters is concentration: the top of the distribution
-    # holds a disproportionate share, which is what makes the planner's
-    # n_distinct average a lie for the head and for the tail alike.
+    # The top holds a disproportionate share, which makes the planner's average a lie.
     assert sum(weights[:10]) / total > 0.15
     assert sum(weights[500:]) / total < 0.30
 
@@ -22,8 +18,7 @@ def test_it_produces_a_head_and_a_long_tail() -> None:
 def test_every_weight_is_positive_and_finite() -> None:
     zipf = Zipf(1.2)
 
-    # draw is in [0, 1), so 1 - draw never reaches zero and the power stays
-    # finite for every draw the generator can produce.
+    # draw is below one, so 1 - draw never reaches zero and the power stays finite.
     assert all(0 < zipf.value(i, i / 4096) < float("inf") for i in range(4096))
 
 

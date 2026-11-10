@@ -1,5 +1,3 @@
-"""A database name holding a double quote, refused wherever this package writes one into SQL."""
-
 from __future__ import annotations
 
 import secrets
@@ -62,14 +60,7 @@ def _oid(database: str) -> int | None:
 def test_dropping_a_name_holding_a_double_quote_is_refused_before_anything_is_dropped(
     spelling: str, plain_database: Callable[[], str]
 ) -> None:
-    # Without the refusal, both of these drop the database this test made,
-    # under a name nobody passed. The lookup asks pg_database for the string as
-    # given, finds nothing and would report False; the statement reads
-    # DROP DATABASE IF EXISTS "<made>" either way -- the first because Django
-    # passes a name already wrapped in double quotes through unchanged, the
-    # second because the quote in it closes the identifier, the clause after it
-    # is the statement's, and the comment swallows the quote Django adds. The
-    # database checked and the database dropped are two different ones.
+    # The database checked and the database dropped are two different ones.
     made = plain_database()
     before = _oid(made)
 
@@ -84,12 +75,7 @@ def test_dropping_a_name_holding_a_double_quote_is_refused_before_anything_is_dr
 def test_cloning_with_a_name_holding_a_double_quote_is_refused_before_any_statement(
     which: str, plain_database: Callable[[], str]
 ) -> None:
-    # replace=True, so the first statement would be DROP DATABASE IF EXISTS of
-    # the target. Without the refusal, a wrapped target drops the database this
-    # test made and creates it again from the template under the bare name,
-    # and a wrapped template is copied from under the bare name, after the
-    # plain target was dropped. The target's oid is what tells a database left
-    # alone from one dropped and made again under the same name.
+    # replace=True, so the first statement would be DROP DATABASE IF EXISTS of the target.
     names = {"template": plain_database(), "target": plain_database()}
     target = names["target"]
     before = _oid(target)

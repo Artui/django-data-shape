@@ -1,5 +1,3 @@
-"""Build once per machine, clone per session, and never serve a stale database."""
-
 from __future__ import annotations
 
 import secrets
@@ -100,13 +98,7 @@ def _template(shape: Shape, made: list[str]) -> str:
 
 
 def _rows_in(database: str, statement: str) -> list[tuple[object, ...]]:
-    """Read from a cloned database directly, with no Django connection involved.
-
-    psycopg rather than a second Django alias, because the thing being checked
-    is what landed in a database this package created outside Django's own
-    settings -- and reading it through a connection Django configured would be
-    reading the settings back rather than the database.
-    """
+    """Read from a cloned database directly, with no Django connection involved."""
     settings = connections["default"].settings_dict
     with (
         psycopg.connect(
@@ -139,19 +131,10 @@ def _execute_in(database: str, statement: str) -> None:
 
 
 def _base(made: list[str]) -> str:
-    """A migrated database to start templates from, dropped with everything else.
-
-    A copy of the test database, which pytest-django has already migrated --
-    the same thing a project keeping a base for its own test databases has, and
-    a copy rather than a second migrate because it is the migrated state that
-    matters here and not the minutes it took to reach it. Not named with the
-    package's prefix, so that it is never counted as a template.
-    """
+    """A migrated database to start templates from, dropped with everything else."""
     name = f"shape_base_{secrets.token_hex(4)}"
     source = connection.settings_dict["NAME"]
     quote = connection.ops.quote_name
-    # PostgreSQL refuses to copy a database anything is attached to, and the
-    # test's own connection is.
     connection.close()
     with connection._nodb_cursor() as cursor:
         cursor.execute(f"CREATE DATABASE {quote(name)} TEMPLATE {quote(source)}")
@@ -160,12 +143,7 @@ def _base(made: list[str]) -> str:
 
 
 def _migrate(database: str, *arguments: str) -> None:
-    """Run ``migrate`` against ``database``, as a project keeping a base would.
-
-    The connection is pointed at it the way the package points one at a
-    partial, and closed on both sides, because PostgreSQL refuses to copy a
-    database anything is attached to and the next step is always a copy.
-    """
+    """Run ``migrate`` against ``database``, as a project keeping a base would."""
     original = connection.settings_dict["NAME"]
     connection.close()
     connection.settings_dict["NAME"] = database
@@ -177,22 +155,7 @@ def _migrate(database: str, *arguments: str) -> None:
 
 
 def _left_by(shape: Shape, base: str | None = None) -> set[str]:
-    """The databases a build of ``shape`` would leave: its template and its working copy.
-
-    Named from the key rather than listed from the server, because the server's
-    list is every suite's. Two suites on one server (each its own ``PGDATABASE``)
-    share the prefix, and a test that compared the whole list failed whenever
-    the other suite built or dropped a template between its two reads, which
-    says nothing about this package. The name is the one ``template_database``
-    would give, so a template of this shape left by anything -- this build, an
-    earlier one, another process -- is still found.
-
-    With a base the key also holds its name and oid, read here the way
-    ``_base_context`` reads them but without its refusals: the refusal is what a
-    caller is asserting, and a name that required it to pass could not be
-    computed for the very bases it refuses. A base that does not exist has no
-    oid, so nothing could be built under its name and the set is then empty.
-    """
+    """The databases a build of ``shape`` would leave: its template and its working copy."""
     context = template_module._context()
     if base is not None:
         context = (*context, base, str(_oid(base)))
@@ -224,9 +187,7 @@ def test_it_creates_a_template_named_after_the_declaration(
 def test_a_template_is_keyed_to_the_run_that_asked_for_it(
     temporary_databases: list[str],
 ) -> None:
-    # Two suites on one server, each its own PGDATABASE, would otherwise declare
-    # the same shape and share a template: one reading it half made, or losing
-    # it to the other's teardown. The salt is in the suite-wide fixture.
+    # The salt is in the suite-wide fixture.
     shape = _shape()
     name = _template(shape, temporary_databases)
 
@@ -237,9 +198,7 @@ def test_a_template_is_keyed_to_the_run_that_asked_for_it(
 def test_what_a_build_of_a_shape_would_leave_is_found_wherever_it_came_from(
     temporary_databases: list[str],
 ) -> None:
-    # The leftover check names the template and the partial the shape would
-    # make, so one that something else left -- another process, an earlier run --
-    # is found, and one for another shape is not.
+    # A partial left by another process is found; one for another shape is not.
     shape = _shape()
     name = f"{TEMPLATE_PREFIX}{_key(shape, template_module._context())}"
     elsewhere = _shape(seed=1)
@@ -261,10 +220,7 @@ def test_asking_twice_does_not_build_twice(temporary_databases: list[str]) -> No
 
     again = template_database(shape)
 
-    # The object identity of the database itself, which is the only thing that
-    # can tell a reuse from a rebuild: a second build would have created another
-    # database under the same name and it would carry a new oid. Row counts
-    # cannot tell them apart, because a rebuild produces exactly the same rows.
+    # Row counts cannot tell them apart, because a rebuild produces exactly the same rows.
     assert again == name
     assert _oid(again) == first
 
@@ -278,18 +234,14 @@ def test_two_shapes_do_not_share_a_template(temporary_databases: list[str]) -> N
 def test_the_seed_alone_is_enough_to_make_it_a_different_database(
     temporary_databases: list[str],
 ) -> None:
-    # Two shapes with the same cardinality and different rows in it. A key that
-    # missed this would hand a suite a database whose every value was decided by
-    # a seed nobody asked for.
+    # Two shapes with the same cardinality and different rows in it.
     assert _template(_shape(seed=1), temporary_databases) != _template(
         _shape(seed=2), temporary_databases
     )
 
 
 def test_nothing_may_connect_to_a_finished_template(temporary_databases: list[str]) -> None:
-    # Not tidiness: the one failure mode of this whole mechanism is PostgreSQL
-    # refusing to copy a database something is attached to. Turning connections
-    # off is what makes that impossible rather than unlikely.
+    # Turning connections off is what makes that impossible rather than unlikely.
     name = _template(_shape(), temporary_databases)
 
     with connection.cursor() as cursor:
@@ -309,10 +261,7 @@ def test_a_clone_carries_the_rows(temporary_databases: list[str]) -> None:
 
 
 def test_and_the_statistics_with_them(temporary_databases: list[str]) -> None:
-    # The measurement the whole design rests on, asserted rather than assumed:
-    # if the planner had to be shown the rows again after every clone, the clone
-    # would cost an ANALYZE per session and the ratio this package sells would
-    # not exist. pg_statistic is ordinary catalogue content, so it comes along.
+    # pg_statistic is ordinary catalogue content, so it comes along.
     name = _template(_shape(rows=400), temporary_databases)
     target = f"{name}_clone"
     temporary_databases.append(target)
@@ -330,7 +279,6 @@ def test_and_the_statistics_with_them(temporary_databases: list[str]) -> None:
 
 def test_a_clone_can_take_the_servers_own_strategy(temporary_databases: list[str]) -> None:
     # The path an older PostgreSQL has, and the one the strategy gate points at.
-    # It produces the same database, more slowly.
     name = _template(_shape(rows=40), temporary_databases)
     target = f"{name}_wal"
     temporary_databases.append(target)
@@ -348,8 +296,7 @@ def test_a_clone_will_not_overwrite_unless_it_is_told_to(
     temporary_databases.append(target)
     clone_database(name, target)
 
-    # The default destroys nothing, so a second session that forgot to clean up
-    # gets an error naming the database rather than losing it.
+    # The default destroys nothing: an existing database makes the clone fail, not vanish.
     with pytest.raises(Exception, match="already exists"):
         clone_database(name, target)
 
@@ -361,11 +308,7 @@ def test_a_clone_will_not_overwrite_unless_it_is_told_to(
 def test_a_shape_whose_build_fails_leaves_no_half_built_template(
     temporary_databases: list[str],
 ) -> None:
-    # A projection over tables nobody filled inserts nothing, which build()
-    # refuses. What matters here is what is left behind: the database is created
-    # under a working name and only renamed once the build succeeds, so a
-    # failure leaves nothing that could ever be mistaken for a finished
-    # template.
+    # A projection over tables nobody filled inserts nothing, which build() refuses.
     shape = Shape(Projection(EventSession, per=Event, copying=TemplateSession))
 
     with pytest.raises(InvalidShape, match="inserted no rows"):
@@ -375,10 +318,7 @@ def test_a_shape_whose_build_fails_leaves_no_half_built_template(
 
 
 def test_a_template_holds_a_whole_graph(temporary_databases: list[str]) -> None:
-    # One table proves the mechanism; the graph proves the mechanism is applied
-    # to the thing this package is actually for. The migration ran, every
-    # declared table was filled in dependency order, and the projection found
-    # its inputs already there.
+    # One table proves the mechanism; the graph proves it on the thing this package is for.
     shape = Shape(
         Table(Template, rows=5, name=Constant("t")),
         Table(
@@ -403,9 +343,7 @@ def test_a_template_holds_a_whole_graph(temporary_databases: list[str]) -> None:
 
 
 def test_a_statistics_target_survives_the_clone(temporary_databases: list[str]) -> None:
-    # The two halves of this release meeting: a target is catalogue state like
-    # the statistics themselves, so a cloned database is planner-ready in the
-    # way the declaration asked for rather than merely in the default way.
+    # A target is catalogue state like the statistics, so a clone keeps the declared one.
     shape = Shape(
         Table(
             Catalogue,
@@ -431,10 +369,7 @@ def test_a_statistics_target_survives_the_clone(temporary_databases: list[str]) 
 def test_a_shape_that_cannot_be_hashed_is_refused_before_anything_is_created(
     temporary_databases: list[str],
 ) -> None:
-    # The refusal that keeps the cache honest, met from the direction a consumer
-    # meets it: a template is asked for and the shape says it cannot be
-    # recognised twice. Nothing is created, because the name cannot be computed
-    # at all.
+    # Nothing is created, because the name cannot be computed at all.
     shape = Shape(Table(SlugPk, rows=5, name=Constant("x"), keys=KeyFunction(lambda row: str(row))))
 
     with pytest.raises(UnhashableShape, match="KeyFunction"):
@@ -442,9 +377,7 @@ def test_a_shape_that_cannot_be_hashed_is_refused_before_anything_is_created(
 
 
 def test_it_refuses_to_run_inside_a_transaction(temporary_databases: list[str]) -> None:
-    # Rather than poisoning the connection. Django marks a connection closed
-    # inside an atomic block as unusable for the rest of that block, so the
-    # failure without this guard is not here but in whatever ran next.
+    # Rather than poisoning the connection.
     with transaction.atomic(), pytest.raises(TransactionManagementError, match="atomic block"):
         temporary_databases.append(template_database(_shape()))
 
@@ -455,8 +388,7 @@ def test_dropping_says_whether_there_was_anything_to_drop(
     name = _template(_shape(), temporary_databases)
 
     assert drop_database(name) is True
-    # Twice, because the answer is what a caller cleaning up reads, and an
-    # unconditional True would make it useless.
+    # An unconditional True would make the answer, which a caller cleaning up reads, useless.
     assert drop_database(name) is False
 
 
@@ -470,9 +402,7 @@ def test_dropping_says_whether_there_was_anything_to_drop(
     ],
 )
 def test_none_of_it_is_offered_on_a_backend_that_has_no_such_statement(call: object) -> None:
-    # Driven through the real entry points against a real non-PostgreSQL alias,
-    # which is the difference between asserting a guard exists and falsifying
-    # its absence: a stub proves the gate works, not that anything calls it.
+    # A real non-PostgreSQL alias, because a stub proves the gate, not that anything calls it.
     with pytest.raises(UnsupportedBackend):
         call()
 
@@ -480,9 +410,7 @@ def test_none_of_it_is_offered_on_a_backend_that_has_no_such_statement(call: obj
 def test_the_declaration_reaches_the_database_and_not_only_the_name(
     temporary_databases: list[str],
 ) -> None:
-    # The end of the chain, and the claim a cache is worth having at all: what
-    # comes out of a clone is the database the declaration describes -- the row
-    # count, the skew and the keys -- rather than a database with the right name.
+    # What a clone holds is the declared database, not one with the right name.
     shape = Shape(
         Table(
             Catalogue,
@@ -505,10 +433,7 @@ def test_the_declaration_reaches_the_database_and_not_only_the_name(
 def test_a_declaration_the_cache_cannot_key_on_is_the_only_thing_it_refuses(
     temporary_databases: list[str],
 ) -> None:
-    # A continuous distribution has no distinct-value count and a fan-out is not
-    # a value distribution at all, and neither stops a shape being hashed: the
-    # refusal is about callables, not about anything a declaration ordinarily
-    # holds.
+    # The refusal is about callables, not about anything a declaration ordinarily holds.
     shape = Shape(
         Table(Template, rows=4, name=Constant("t")),
         Table(
@@ -536,18 +461,11 @@ def test_the_declaration_reaches_the_key() -> None:
 
 
 def test_and_so_does_everything_around_it() -> None:
-    # The composition, checked separately from the parts: a key that stopped
-    # mixing the context in would still look exactly like this one from outside,
-    # and would serve a database built by an older release or into an older
-    # schema.
     shape = _shape()
     context = ("version", "schema", "True", "UTC")
 
     assert _key(shape, context) != _key(shape, ("version", "different schema", "True", "UTC"))
-    # And a base, when there is one: its name and its database oid follow the
-    # rest of the context. The oid is the part doing the work -- a base dropped
-    # and recreated under the same name, which is how one restored from a dump
-    # is usually refreshed, is a new oid and so a new key.
+    # And a base, when there is one: its name and its database oid follow the rest of the context.
     keys = {
         _key(shape, context),
         _key(shape, (*context, "base", "16384")),
@@ -558,24 +476,19 @@ def test_and_so_does_everything_around_it() -> None:
 
 
 def test_the_schema_digest_moves_when_a_model_does() -> None:
-    # An app with no migrations has its tables built straight from the models,
-    # so a column added or renamed there changes the database while every
-    # migration name stays the same.
+    # Tables built from models move with them, while every migration name stays the same.
     assert _schema_digest((Catalogue,), ()) != _schema_digest((Catalogue, Event), ())
 
 
 def test_and_when_a_migration_is_added() -> None:
-    # The other half. A migration that adds an index or a constraint changes the
-    # database while leaving every model field exactly as it was.
+    # The other half.
     assert _schema_digest((Catalogue,), ()) != _schema_digest(
         (Catalogue,), (("testapp", "0001_initial"),)
     )
 
 
 def test_the_package_version_is_part_of_the_context() -> None:
-    # A release that changes how a distribution draws changes the rows without
-    # changing a word of the declaration, so a cache keyed on the declaration
-    # alone would hand the new code the old database.
+    # A release can change the rows while the declaration stays the same word for word.
     assert __version__ in _context()
 
 
@@ -589,9 +502,7 @@ def test_the_package_version_is_part_of_the_context() -> None:
 def test_the_settings_that_decide_what_a_datetime_holds_are_too(
     settings_override: dict[str, object],
 ) -> None:
-    # Every value goes through its field's get_db_prep_save on the way into COPY,
-    # so a datetime column lands somewhere else under a different setting. Same
-    # declaration, different database, and therefore a different key.
+    # Same declaration, different database, and therefore a different key.
     before = _context()
 
     with override_settings(**settings_override):
@@ -605,8 +516,7 @@ def test_the_settings_that_decide_what_a_datetime_holds_are_too(
 
 def test_a_template_can_start_from_a_migrated_base(temporary_databases: list[str]) -> None:
     base = _base(temporary_databases)
-    # A row in a table the shape does not declare, so that the template can be
-    # told apart from one built from empty: nothing else would put it there.
+    # A row in an undeclared table tells a template built from a base from one built from empty.
     _execute_in(base, "INSERT INTO auth_group (name) VALUES ('from the base')")
 
     name = template_database(_shape(rows=40), base=base)
@@ -621,11 +531,7 @@ def test_a_template_can_start_from_a_migrated_base(temporary_databases: list[str
 
 
 def test_migrate_still_runs_over_the_copy(temporary_databases: list[str]) -> None:
-    # Finding no migration to apply is not the same as having nothing to do: an
-    # app with no migrations gets its tables from run_syncdb, and a base made by
-    # a plain migrate does not have them. The test app is such an app, so a
-    # template that skipped migrate because it started from a base would have
-    # no table to build the shape into.
+    # An app with no migrations gets its tables from run_syncdb, so migrate must still run.
     base = f"shape_base_{secrets.token_hex(4)}"
     with connection._nodb_cursor() as cursor:
         cursor.execute(f"CREATE DATABASE {connection.ops.quote_name(base)}")
@@ -643,8 +549,7 @@ def test_migrate_still_runs_over_the_copy(temporary_databases: list[str]) -> Non
 
 
 def test_a_base_is_part_of_the_key(temporary_databases: list[str]) -> None:
-    # The same declaration from empty and from a base is two databases -- the
-    # base's rows are template content -- so it has to be two names.
+    # The same declaration from empty and from a base is two databases, so two names.
     shape = _shape(rows=40, seed=21)
     base = _base(temporary_databases)
 
@@ -656,9 +561,7 @@ def test_a_base_is_part_of_the_key(temporary_databases: list[str]) -> None:
 
 
 def test_recreating_the_base_is_a_new_template(temporary_databases: list[str]) -> None:
-    # The way a base restored from a schema dump is refreshed: drop it, make it
-    # again under the same name. What it holds may have changed and nothing on
-    # disk would say so, which is what keying on its oid answers.
+    # A base recreated under the same name has a new oid, which the key answers.
     shape = _shape(rows=40, seed=22)
     base = _base(temporary_databases)
     first = template_database(shape, base=base)
@@ -695,12 +598,7 @@ _FIRST_NAME_WIDTH = (
 def test_a_base_behind_the_migrations_on_disk_is_migrated_forward(
     temporary_databases: list[str],
 ) -> None:
-    # The base a consumer has most often: every migration a branch adds leaves
-    # a kept base one behind. Migrating forward ends at this checkout's schema
-    # whatever prefix of the history the base holds, which is what the key
-    # already names. Behind for real -- migrated back, so the column really is
-    # the narrower one -- rather than a row deleted from django_migrations over
-    # a schema that still has the change, which migrate would fail to reapply.
+    # The copy is what was migrated; the base is left where its owner put it.
     base = _base(temporary_databases)
     _migrate(base, "auth", "0011_update_proxy_permissions")
     assert _rows_in(base, _FIRST_NAME_WIDTH) == [(30,)]
@@ -718,17 +616,13 @@ def test_a_base_behind_the_migrations_on_disk_is_migrated_forward(
         "WHERE app = 'auth' AND name = '0012_alter_user_first_name_max_length'",
     ) == [(1,)]
     assert _rows_in(target, f"SELECT count(*) FROM {Catalogue._meta.db_table}") == [(40,)]
-    # The copy is what was migrated; the base is left where its owner put it.
     assert _rows_in(base, _FIRST_NAME_WIDTH) == [(30,)]
 
 
 def test_migrating_the_base_forward_in_place_asks_for_the_same_template(
     temporary_databases: list[str],
 ) -> None:
-    # Why the base's applied migrations stay out of the key: catching the base
-    # up leaves its oid alone, and the template the key already names is the
-    # one that catching up would have given -- the copy was migrated forward to
-    # the same schema when it was built.
+    # Catching the base up leaves its oid alone, so the key names the same template.
     shape = _shape(rows=40, seed=30)
     base = _base(temporary_databases)
     _migrate(base, "auth", "0011_update_proxy_permissions")
@@ -744,16 +638,11 @@ def test_migrating_the_base_forward_in_place_asks_for_the_same_template(
 
     assert _rows_in(base, _FIRST_NAME_WIDTH) == [(150,)]
     assert caught_up == behind
-    # And the template under that name does hold the schema the caught-up base
-    # has, which is the half of the claim the names alone cannot show.
     assert _rows_in(target, _FIRST_NAME_WIDTH) == [(150,)]
 
 
 def test_an_empty_base_is_migrated_in_full(temporary_databases: list[str]) -> None:
-    # The far end of behind, and not the same path as building from empty: the
-    # base has no django_migrations table at all, so reading what it has
-    # applied must find nothing rather than fail. It costs what building from
-    # empty costs, once per key, which is the most a behind base ever pays.
+    # A base with no django_migrations table must read as nothing applied, not fail.
     base = f"shape_base_{secrets.token_hex(4)}"
     with connection._nodb_cursor() as cursor:
         cursor.execute(f"CREATE DATABASE {connection.ops.quote_name(base)}")
@@ -770,10 +659,7 @@ def test_an_empty_base_is_migrated_in_full(temporary_databases: list[str]) -> No
 
 
 def test_a_base_ahead_of_the_migrations_on_disk_is_refused(temporary_databases: list[str]) -> None:
-    # The one base migrating cannot fix. A base migrated by another branch
-    # holds schema the migrations on disk do not describe, and nothing here can
-    # take it away -- an index that branch added would build silently and skew
-    # every plan assertion over the template.
+    # The one base migrating cannot fix.
     base = _base(temporary_databases)
     _execute_in(
         base,
@@ -789,22 +675,16 @@ def test_a_base_ahead_of_the_migrations_on_disk_is_refused(temporary_databases: 
     assert base in message
     assert "ahead" in message
     assert "contenttypes.9999_ghost" in message
-    # Both remedies, because the two causes need opposite ones: pruning a
-    # branch's rows would leave its schema behind and stop the refusal.
     assert "manage.py migrate contenttypes --prune" in message
     assert "recreate it" in message
     assert _left_by(declared, base) == set()
-    # Nor does a refusal fall back to building the shape without its base.
     assert _left_by(declared) == set()
 
 
 def test_a_base_that_goes_ahead_is_refused_with_its_template_already_built(
     temporary_databases: list[str],
 ) -> None:
-    # A base migrated in place by another branch keeps its name and its oid, so
-    # the template built from it while it matched is still the one the key
-    # names. The check runs before the key is looked up, so the cache hit is
-    # never reached.
+    # The check runs before the key is looked up, so the cache hit is never reached.
     base = _base(temporary_databases)
     built = template_database(_shape(rows=40, seed=25), base=base)
     temporary_databases.append(built)
@@ -821,9 +701,7 @@ def test_a_base_that_goes_ahead_is_refused_with_its_template_already_built(
 def test_a_row_for_an_app_no_longer_installed_does_not_refuse_the_base(
     temporary_databases: list[str],
 ) -> None:
-    # Removing an app leaves its rows in django_migrations, and they describe
-    # nothing this checkout's models use: its tables, if any, are content the
-    # template carries like any other table the shape does not declare.
+    # A removed app's rows describe nothing this checkout uses, so they do not refuse the base.
     base = _base(temporary_databases)
     _execute_in(
         base,
@@ -849,8 +727,7 @@ def test_a_base_that_does_not_exist_is_refused_by_name(temporary_databases: list
             template_database(declared, base="shape_base_that_was_never_made")
         )
 
-    # A base nobody made has no oid, so nothing could be built under its name; what a
-    # regression could do is fall back to building the shape without it.
+    # A missing base has no oid, and a regression would fall back to building without it.
     assert _left_by(declared) == set()
 
 
@@ -865,9 +742,7 @@ def _allow_connections(database: str, allowed: bool) -> None:
 def test_a_base_that_refuses_connections_is_refused_by_name(
     temporary_databases: list[str],
 ) -> None:
-    # Its applied migrations are read by connecting to it, so the alternative
-    # is the server's own refusal surfacing as an OperationalError from inside
-    # the migration loader, naming nothing a reader asked for.
+    # Nor does a refusal fall back to building the shape without its base.
     base = _base(temporary_databases)
     _allow_connections(base, False)
     declared = _shape()
@@ -879,32 +754,23 @@ def test_a_base_that_refuses_connections_is_refused_by_name(
     assert base in message
     assert "ALLOW_CONNECTIONS true" in message
     assert _left_by(declared, base) == set()
-    # Nor does a refusal fall back to building the shape without its base.
     assert _left_by(declared) == set()
 
 
 def test_a_template_is_never_a_base(temporary_databases: list[str]) -> None:
-    # The likeliest database to be refusing connections is one this package
-    # made, and the remedy for that is not to allow them: a template holds a
-    # shape's rows under a name keyed for that shape, so starting another from
-    # it is a mistake whatever its connection setting says.
+    # A template holds one shape's rows, so starting another from it is a mistake.
     template = _template(_shape(rows=40, seed=31), temporary_databases)
 
     with pytest.raises(UnusableBase, match="never a base"):
         temporary_databases.append(template_database(_shape(rows=40, seed=32), base=template))
 
-    # Including one opened up to look inside, as the docstring tells a reader
-    # how to do -- which is what holds the name check apart from the
-    # connection check.
     _allow_connections(template, True)
     with pytest.raises(UnusableBase, match="never a base"):
         temporary_databases.append(template_database(_shape(rows=40, seed=32), base=template))
 
 
 def test_a_partial_this_package_left_is_never_a_base(temporary_databases: list[str]) -> None:
-    # A build killed between creating its working database and renaming it
-    # leaves one under the template's name and the partial suffix, and it is
-    # this package's as much as a finished template is.
+    # A partial left by a killed build is this package's as much as a finished template is.
     partial = f"{TEMPLATE_PREFIX}{secrets.token_hex(8)}__partial"
     with connection._nodb_cursor() as cursor:
         cursor.execute(f"CREATE DATABASE {connection.ops.quote_name(partial)}")
@@ -918,11 +784,7 @@ def test_a_partial_this_package_left_is_never_a_base(temporary_databases: list[s
 def test_a_database_only_named_like_a_template_is_not_refused_as_one(
     temporary_databases: list[str], pattern: str
 ) -> None:
-    # Only a name this package generates is its template: the prefix, a digest
-    # exactly as long as the key's, and the partial suffix or nothing. A user's
-    # database sharing the prefix -- including one whose suffix happens to be
-    # hexadecimal, but of another length -- is a base like any other, here an
-    # empty one, migrated in full.
+    # Only a name of the generated shape is a template; a user's look-alike is an ordinary base.
     base = pattern.format(secrets.token_hex(4))
     with connection._nodb_cursor() as cursor:
         cursor.execute(f"CREATE DATABASE {connection.ops.quote_name(base)}")
@@ -937,10 +799,7 @@ def test_a_database_only_named_like_a_template_is_not_refused_as_one(
 def test_a_base_whose_name_holds_a_double_quote_is_refused(
     temporary_databases: list[str],
 ) -> None:
-    # Django's quote_name passes a name that is already quoted through as it is
-    # and does not escape an embedded quote, so a base literally named "x"
-    # would be looked up as one database and copied from another. The
-    # database exists and is migrated, so the name is the only thing wrong.
+    # The database exists and is migrated, so the name is the only thing wrong.
     quoted = f'"shape_base_{secrets.token_hex(4)}"'
     escaped = '"' + quoted.replace('"', '""') + '"'
     source = connection.settings_dict["NAME"]
@@ -951,7 +810,6 @@ def test_a_base_whose_name_holds_a_double_quote_is_refused(
         with pytest.raises(UnusableBase) as refused:
             temporary_databases.append(template_database(_shape(), base=quoted))
     finally:
-        # By hand, because drop_database quotes the way this test is about.
         with connection._nodb_cursor() as cursor:
             cursor.execute(f"DROP DATABASE IF EXISTS {escaped}")
 
@@ -963,11 +821,7 @@ def test_a_base_whose_name_holds_a_double_quote_is_refused(
 def test_a_base_holding_rows_in_a_declared_table_is_named_as_their_cause(
     temporary_databases: list[str],
 ) -> None:
-    # The rows are real and were put there by whoever keeps the base, so a
-    # message naming only a session world -- or only "empty the table first" --
-    # reads as advice about a table the test never touched. The table is one
-    # of an app with migrations, because that is where a base's rows survive:
-    # the tables of an app without them are rebuilt from the models.
+    # Nor does a refusal fall back to building the shape without its base.
     base = _base(temporary_databases)
     _execute_in(base, "INSERT INTO auth_group (name) VALUES ('kept in the base')")
     declared = Shape(Table(Group, rows=1, name=Constant("declared")), seed=42)
@@ -981,10 +835,7 @@ def test_a_base_holding_rows_in_a_declared_table_is_named_as_their_cause(
         "a template started from a base database keeps the rows the base holds, apart from "
         "the tables it rebuilds for apps without migrations" in message
     )
-    # The partial the build failed in is dropped with it, so the next run does
-    # not find a half-built database under a name it would have to judge.
     assert _left_by(declared, base) == set()
-    # Nor does a refusal fall back to building the shape without its base.
     assert _left_by(declared) == set()
 
 
@@ -1000,10 +851,7 @@ _CATALOGUE_COLUMNS = (
 def test_a_stale_table_of_an_app_without_migrations_is_rebuilt_from_the_model(
     temporary_databases: list[str],
 ) -> None:
-    # run_syncdb creates a missing table and never alters an existing one, so
-    # an app without migrations whose model changed after the base was made
-    # kept the base's table under a key naming the new model. Its tables are
-    # dropped from the copy and made again, as they are in an empty database.
+    # Its tables are dropped from the copy and made again, as they are in an empty database.
     base = _base(temporary_databases)
     _execute_in(
         base,
@@ -1027,8 +875,7 @@ def test_a_stale_table_of_an_app_without_migrations_is_rebuilt_from_the_model(
 def test_so_a_bases_rows_in_such_a_table_do_not_carry_over(
     temporary_databases: list[str],
 ) -> None:
-    # The other half of rebuilding: a base contributes what its migration
-    # history contributes, and an app without migrations has none.
+    # A base contributes what its migrations contribute, and an app without any has none.
     base = _base(temporary_databases)
     _execute_in(base, f"INSERT INTO {Company._meta.db_table} (name) VALUES ('kept in the base')")
 
@@ -1045,10 +892,7 @@ def test_so_a_bases_rows_in_such_a_table_do_not_carry_over(
 def test_an_unmanaged_models_table_in_the_base_is_carried(
     temporary_databases: list[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # run_syncdb never makes an unmanaged model's table, so dropping one would
-    # lose it rather than rebuild it: whatever made it in the base is the only
-    # thing that ever will. Holds that only the tables migrate builds are
-    # dropped.
+    # Holds that only the tables migrate builds are dropped.
     monkeypatch.setattr(Subscriber._meta, "managed", False)
     base = _base(temporary_databases)
     _execute_in(base, f"INSERT INTO {Subscriber._meta.db_table} (email) VALUES ('kept@base')")
@@ -1065,13 +909,7 @@ def test_an_unmanaged_models_table_in_the_base_is_carried(
 def test_a_table_postgres_stores_under_a_shortened_name_is_rebuilt(
     temporary_databases: list[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # PostgreSQL keeps the first 63 bytes of a name, cut back to a character
-    # boundary, and Django shortens only a table name it makes up, never one a
-    # model spells out. Looked for under the model's own name, the base's table
-    # is not there: it was left in place, and run_syncdb, which looks for it
-    # the same way, failed on it with "already exists". The two-byte character
-    # straddles byte 63, so a cut by characters, or one that splits it, still
-    # misses.
+    # PostgreSQL keeps 63 bytes of a name, so a shortened table must be looked for by that name.
     spelled = "testapp_subscriber_" + "x" * 43 + "\N{LATIN SMALL LETTER E WITH ACUTE}tail"
     stored = spelled.encode()[:62].decode()
     base = _base(temporary_databases)
@@ -1092,10 +930,7 @@ def test_a_table_postgres_stores_under_a_shortened_name_is_rebuilt(
 def test_an_app_with_no_models_module_is_carried(
     temporary_databases: list[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # run_syncdb passes over an app whose models were registered from
-    # somewhere other than a models module, so it never makes that app's
-    # tables, and dropping them would lose them. Holds that the drop list skips
-    # such an app as run_syncdb does.
+    # Holds that the drop list skips such an app as run_syncdb does.
     monkeypatch.setattr(apps.get_app_config("testapp"), "models_module", None)
     base = _base(temporary_databases)
     _execute_in(base, f"INSERT INTO {Subscriber._meta.db_table} (email) VALUES ('kept@base')")
@@ -1118,12 +953,7 @@ def _columns_of(table: str) -> str:
 
 
 def _drop_foreign_keys(database: str, table: str) -> None:
-    """Drop every foreign key ``table`` holds, as a legacy table often has none.
-
-    A table carried into the copy that points into a table being rebuilt stops
-    the rebuild, which ``test_a_reference_into_such_a_table_refuses_the_base``
-    holds; the tests here are about which tables are carried, so theirs go.
-    """
+    """Drop every foreign key ``table`` holds, as a legacy table often has none."""
     _execute_in(
         database,
         "DO $$ DECLARE constraint_name text; BEGIN "
@@ -1137,10 +967,7 @@ def _drop_foreign_keys(database: str, table: str) -> None:
 def test_a_stale_through_table_is_rebuilt_with_the_model_that_declares_it(
     temporary_databases: list[str],
 ) -> None:
-    # run_syncdb makes an auto-created many-to-many table only while making the
-    # model that declares the relation, so the copy has to drop it with that
-    # model: kept, it would survive stale, and the model's own create would
-    # fail on it with "already exists". Holds that those tables are dropped.
+    # Holds that those tables are dropped.
     through = Wearer.badges.through._meta.db_table
     base = _base(temporary_databases)
     _execute_in(base, f"ALTER TABLE {through} ADD COLUMN left_over integer")
@@ -1161,11 +988,7 @@ def test_a_stale_through_table_is_rebuilt_with_the_model_that_declares_it(
 def test_the_through_table_of_an_unmanaged_model_is_carried(
     temporary_databases: list[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # Django counts an auto-created through table as managed when either end
-    # is, so with the declaring end unmanaged the through still reads as one
-    # migrate builds -- and run_syncdb never builds it, because it builds it
-    # only from the declaring model, which it skips. Dropped, it would be lost.
-    # Holds that the through tables are read off the models run_syncdb makes.
+    # Dropped, it would be lost.
     monkeypatch.setattr(Wearer._meta, "managed", False)
     through = Wearer.badges.through._meta.db_table
     base = _base(temporary_databases)
@@ -1189,10 +1012,7 @@ def test_the_through_table_of_an_unmanaged_model_is_carried(
 def test_a_declared_through_model_is_judged_as_a_model_of_its_own(
     temporary_databases: list[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # A through model a relation names is not made by the declaring model's
-    # create, so it is never dropped on that model's account: unmanaged, its
-    # table is carried like any other unmanaged model's. Holds that only the
-    # auto-created through tables go with the model that declares them.
+    # Holds that only the auto-created through tables go with the model that declares them.
     monkeypatch.setattr(Award._meta, "managed", False)
     base = _base(temporary_databases)
     _drop_foreign_keys(base, Award._meta.db_table)
@@ -1219,9 +1039,7 @@ class _NotSubscribersOnDefault:
 def test_a_table_the_router_keeps_off_the_alias_is_carried(
     temporary_databases: list[str],
 ) -> None:
-    # run_syncdb asks the router which models to make on the alias it runs on,
-    # and makes none of the rest, so a table the router keeps off it is one
-    # nothing would make again. Holds that the router is asked.
+    # Holds that the router is asked.
     base = _base(temporary_databases)
     _execute_in(base, f"INSERT INTO {Subscriber._meta.db_table} (email) VALUES ('routed@base')")
 
@@ -1238,10 +1056,7 @@ def test_a_table_the_router_keeps_off_the_alias_is_carried(
 def test_what_a_migration_did_to_a_rebuilt_table_is_lost_from_a_base_and_kept_from_empty(
     temporary_databases: list[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # The gap the docs state rather than detect. A migration of an app with
-    # migrations may index a table of an app without them; the base applied it,
-    # so the copy rebuilds the table and never runs the migration again. From
-    # empty, run_syncdb makes the table first and the migration indexes it.
+    # The gap the docs state rather than detect.
     index = Migration("0003_index_catalogue", "contenttypes")
     index.dependencies = [("contenttypes", "0002_remove_content_type_name")]
     index.operations = [
@@ -1279,10 +1094,7 @@ def test_what_a_migration_did_to_a_rebuilt_table_is_lost_from_a_base_and_kept_fr
 
 
 def test_a_reference_into_such_a_table_refuses_the_base(temporary_databases: list[str]) -> None:
-    # Rebuilding drops the table without CASCADE. CASCADE would remove the
-    # reference silently, run_syncdb would not put it back, and the template
-    # would differ from both the base and one built from empty; so PostgreSQL
-    # refuses the drop and the refusal is turned into one naming the base.
+    # Rebuilding drops the table without CASCADE.
     base = _base(temporary_databases)
     _execute_in(
         base,
@@ -1300,7 +1112,6 @@ def test_a_reference_into_such_a_table_refuses_the_base(temporary_databases: lis
     assert "recreate it" in message
     assert "CASCADE" not in message
     assert _left_by(declared, base) == set()
-    # Nor does a refusal fall back to building the shape without its base.
     assert _left_by(declared) == set()
     assert _rows_in(base, "SELECT to_regclass('kept_reference') IS NOT NULL") == [(True,)]
 
@@ -1345,14 +1156,7 @@ def roles() -> Iterator[Callable[[str], str]]:
 
 @contextmanager
 def _acting_as(role: str) -> Iterator[None]:
-    """Every connection the default alias opens inside the block is ``role``, by ``SET ROLE``.
-
-    PostgreSQL checks privileges against the current role rather than the one
-    that logged in, so inside the block the suite has exactly that role's
-    rights. A superuser bypasses every ownership rule, and the role the suite
-    connects as almost always is one -- which is why a refusal about ownership
-    cannot be reached without this.
-    """
+    """Every connection the default alias opens inside the block is ``role``, by ``SET ROLE``."""
     options = connection.settings_dict["OPTIONS"]
     connection.close()
     options["assume_role"] = role
@@ -1372,18 +1176,7 @@ def _owned_by(role: str) -> list[str]:
 
 
 def _base_for(role: str, made: list[str], *, schema_owner: str, rebuilt_owner: str) -> str:
-    """A base ``role`` may copy and migrate, whose rebuilt tables ``rebuilt_owner`` owns.
-
-    The role owns the database, because PostgreSQL lets only a database's
-    owner or a superuser copy one that is not marked as a template, and the
-    tables of the apps with migrations, because ``migrate`` reads and writes
-    them in the copy. The tables of the app without migrations, which are the
-    ones the copy drops, belong to ``rebuilt_owner``. ``schema_owner`` owns
-    ``public``: ``CURRENT_USER``, the suite's role, so that owning the copy
-    gives the role nothing there, or ``pg_database_owner``, which owns it in a
-    new database from PostgreSQL 15 and whose privileges the owner of each
-    database holds.
-    """
+    """A base ``role`` may copy and migrate, whose rebuilt tables ``rebuilt_owner`` owns."""
     base = _base(made)
     quote = connection.ops.quote_name
     with connection._nodb_cursor() as cursor:
@@ -1418,12 +1211,7 @@ def _rebuilt_tables_of(base: str) -> list[tuple[object, ...]]:
 def test_a_base_whose_rebuilt_tables_the_role_cannot_drop_is_refused_naming_their_owner(
     roles: Callable[[str], str], temporary_databases: list[str]
 ) -> None:
-    # DROP TABLE needs ownership -- of the table, of its schema, or of a role
-    # holding either's privileges -- and a copy made with CREATE DATABASE ...
-    # TEMPLATE keeps every owner the base gave. Here the role owns the base and
-    # the migrated apps' tables but neither public nor the tables the copy
-    # rebuilds, so the drop failed inside the copy with a raw ProgrammingError
-    # naming one table and no way out.
+    # TEMPLATE keeps every owner the base gave.
     role = roles("CREATEDB")
     base = _base_for(
         role, temporary_databases, schema_owner="CURRENT_USER", rebuilt_owner="CURRENT_USER"
@@ -1441,18 +1229,13 @@ def test_a_base_whose_rebuilt_tables_the_role_cannot_drop_is_refused_naming_thei
     assert repr(role) in message
     assert "OWNER TO" in message
     assert "base=None" in message
-    # The partial went with the refusal: all the role owns is the base it was handed.
     assert _owned_by(role) == [base]
 
 
 def test_so_is_one_that_is_a_member_of_their_owner_without_inheriting_its_privileges(
     roles: Callable[[str], str], temporary_databases: list[str]
 ) -> None:
-    # Ownership is checked as "has the privileges of", not as membership: a
-    # member that does not inherit them has to SET ROLE first, and DROP TABLE
-    # does not. So a check reading membership would let this base through to
-    # the raw ProgrammingError again -- which is what pg_has_role with MEMBER,
-    # rather than USAGE, does.
+    # Ownership is checked as having the owner's privileges, not as mere membership.
     owner = roles()
     role = roles("CREATEDB NOINHERIT")
     with connection.cursor() as cursor:
@@ -1469,9 +1252,7 @@ def test_so_is_one_that_is_a_member_of_their_owner_without_inheriting_its_privil
 def test_a_role_owning_those_tables_may_rebuild_them_without_owning_their_schema(
     roles: Callable[[str], str], temporary_databases: list[str]
 ) -> None:
-    # The table-owner half of the rule. public belongs to the suite's role
-    # here, so owning the tables is the only thing that lets this role drop
-    # them, and a check that ignored it would refuse a base the drop accepts.
+    # The table-owner half of the rule.
     role = roles("CREATEDB")
     base = _base_for(role, temporary_databases, schema_owner="CURRENT_USER", rebuilt_owner=role)
 
@@ -1485,12 +1266,7 @@ def test_a_role_owning_those_tables_may_rebuild_them_without_owning_their_schema
 def test_so_may_one_owning_their_schema_without_owning_them(
     roles: Callable[[str], str], temporary_databases: list[str]
 ) -> None:
-    # The schema-owner half, and the common case rather than a corner: from
-    # PostgreSQL 15 a new database's public schema belongs to
-    # pg_database_owner, whose privileges the owner of a database holds, and a
-    # copy belongs to the role that made it. So a role owning none of the
-    # tables may still drop every one of them from its own copy, and a check
-    # that read only the tables' owners would refuse the default layout.
+    # From PostgreSQL 15 the public schema belongs to pg_database_owner, the common case here.
     role = roles("CREATEDB")
     base = _base_for(
         role, temporary_databases, schema_owner="pg_database_owner", rebuilt_owner="CURRENT_USER"
@@ -1506,10 +1282,7 @@ def test_so_may_one_owning_their_schema_without_owning_them(
 def test_a_connection_already_on_the_base_does_not_stop_the_copy(
     temporary_databases: list[str],
 ) -> None:
-    # A project's own test database is the likeliest base, so the process
-    # asking for the template is the likeliest thing attached to it -- and
-    # PostgreSQL refuses to copy a database anything is attached to. Holds that
-    # nothing between reading the base and copying it reopens the connection.
+    # Holds that nothing between reading the base and copying it reopens the connection.
     base = _base(temporary_databases)
     original = connection.settings_dict["NAME"]
     connection.close()
@@ -1519,7 +1292,6 @@ def test_a_connection_already_on_the_base_does_not_stop_the_copy(
         name = template_database(_shape(rows=40, seed=23), base=base)
         temporary_databases.append(name)
 
-        # And the caller's connection is left pointing where it pointed.
         assert connection.settings_dict["NAME"] == base
     finally:
         connection.close()
@@ -1529,14 +1301,7 @@ def test_a_connection_already_on_the_base_does_not_stop_the_copy(
 
 
 def _squash_on_disk(monkeypatch: pytest.MonkeyPatch, *, replaced_files: bool = False) -> Migration:
-    """A squash of two contenttypes migrations, added to what the loader reads from disk.
-
-    No installed app ships one, so it is made here -- a real Migration, shaped as
-    squashmigrations writes it -- and it creates a table, so whether a template
-    ran it can be read back. With ``replaced_files`` the two migrations it
-    replaces are on disk beside it, as they are until somebody deletes them, and
-    the second creates the same table, because the squash is what they fold into.
-    """
+    """A squash of two contenttypes migrations, added to what the loader reads from disk."""
     marker = migrations.RunSQL("CREATE TABLE squash_marker (id int)", migrations.RunSQL.noop)
     squash = Migration("0003_squashed_0004", "contenttypes")
     squash.replaces = [("contenttypes", "0003_folded"), ("contenttypes", "0004_folded")]
@@ -1566,10 +1331,7 @@ _SQUASH_RAN = "SELECT to_regclass('squash_marker') IS NOT NULL"
 def test_a_squash_whose_replaced_files_were_deleted_does_not_make_a_base_ahead(
     temporary_databases: list[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # The state a squash passes through on its way to being an ordinary
-    # migration: the replaced files are gone, the squash still lists them in
-    # ``replaces``, and every database migrated before the squash still records
-    # them -- both of them, so the squash counts as applied.
+    # Replaced files gone but still listed, so the squash counts as applied and nothing is ahead.
     _squash_on_disk(monkeypatch)
     base = _base(temporary_databases)
     _execute_in(
@@ -1587,9 +1349,7 @@ def test_a_squash_whose_replaced_files_were_deleted_does_not_make_a_base_ahead(
 def test_a_base_behind_a_squash_is_migrated_through_it(
     temporary_databases: list[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # None of what the squash replaces is applied, so Django runs the squash
-    # itself, and the replaced files being gone does not matter. Holds that a
-    # squash is refused only when some of it is applied.
+    # Holds that a squash is refused only when some of it is applied.
     _squash_on_disk(monkeypatch)
     base = _base(temporary_databases)
 
@@ -1605,10 +1365,7 @@ def test_a_base_behind_a_squash_is_migrated_through_it(
 def test_a_squash_applied_in_part_is_finished_by_the_replaced_files_still_on_disk(
     temporary_databases: list[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # Django sets a partly applied squash aside and runs the rest of what it
-    # replaces one migration at a time, which ends where the squash would have.
-    # Holds that a partly applied squash is refused only when a migration it
-    # still needs is missing from disk.
+    # A partly applied squash is set aside, and the replaced files still on disk finish it.
     _squash_on_disk(monkeypatch, replaced_files=True)
     base = _base(temporary_databases)
     _execute_in(
@@ -1634,10 +1391,7 @@ def test_a_squash_applied_in_part_is_finished_by_the_replaced_files_still_on_dis
 def test_a_squash_applied_in_part_with_its_replaced_files_deleted_is_refused(
     temporary_databases: list[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # Django runs a squash only when all or none of what it replaces is applied,
-    # and otherwise runs the replaced migrations themselves. With their files
-    # gone neither runs: the copy was built without the squash's table under a
-    # key that names the squash, and from empty the same key would have it.
+    # Nor does a refusal fall back to building the shape without its base.
     _squash_on_disk(monkeypatch)
     base = _base(temporary_databases)
     _execute_in(
@@ -1655,11 +1409,8 @@ def test_a_squash_applied_in_part_with_its_replaced_files_deleted_is_refused(
     assert "contenttypes.0003_squashed_0004" in message
     assert "contenttypes.0004_folded" in message
     assert "recreate it" in message
-    # The applied half is replaced by a squash on disk, so it is not ahead, and
-    # the message is this check's rather than that one's.
     assert "ahead" not in message
     assert _left_by(declared, base) == set()
-    # Nor does a refusal fall back to building the shape without its base.
     assert _left_by(declared) == set()
 
 
@@ -1680,14 +1431,7 @@ nested_squashes = pytest.mark.skipif(
 def _nested_squash_on_disk(
     monkeypatch: pytest.MonkeyPatch, *, on_disk: tuple[str, ...]
 ) -> Migration:
-    """The outer squash, and whichever of the migrations under it ``on_disk`` names.
-
-    The inner squash folds ``0003_folded`` and ``0004_folded``, which make one
-    table; the outer one folds the inner one and ``0005_more``, which makes a
-    second. So whether a template ran all of it, or lost the part after the
-    inner squash, can be read back. ``0005_more`` depends on the inner squash,
-    as a migration made while that squash was the app's latest does.
-    """
+    """The outer squash, and whichever of the migrations under it ``on_disk`` names."""
     first_table = migrations.RunSQL("CREATE TABLE nested_marker_a (id int)", migrations.RunSQL.noop)
     second_table = migrations.RunSQL(
         "CREATE TABLE nested_marker_b (id int)", migrations.RunSQL.noop
@@ -1725,15 +1469,7 @@ def _nested_squash_on_disk(
 def test_a_squash_in_another_app_is_named_only_where_prune_declines_for_it(
     temporary_databases: list[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # The contenttypes squash lists two migrations the base applied and that
-    # are gone from disk, and the ahead row is auth's. Up to Django 5.0,
-    # migrate --prune declines over such a squash in any app; from 5.1 it looks
-    # only at the app being pruned, so there the squash has nothing to do with
-    # the ahead row and naming it would send someone to edit a migration that
-    # is not the cause. Checked against migrate itself rather than against a
-    # version table: the message names the squash exactly when pruning, as the
-    # message says to, declines. Holds both halves of which rows the advice
-    # reads, the ahead apps' from 5.1 and every app's before.
+    # Up to Django 5.0, --prune declines over a squash in any app, so only there is it named.
     _squash_on_disk(monkeypatch)
     base = _base(temporary_databases)
     _execute_in(
@@ -1764,15 +1500,7 @@ _GHOST_RECORDED = "SELECT EXISTS (SELECT FROM django_migrations WHERE name = '99
 def test_a_squash_listing_nothing_prune_would_remove_is_not_named_as_one_to_finish(
     temporary_databases: list[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # --prune declines only over a squash that lists a migration it would
-    # remove: one the base records as applied and that is gone from disk.
-    # This squash's replaced files are still on disk -- one of them applied --
-    # so pruning the ahead row works as it stands, while removing the squash's
-    # replaces beside those files, as finishing it means, would leave the app
-    # with two leaf nodes. Holds that a squash is named only when what it lists
-    # includes a migration --prune would remove: the applied 0003_folded would
-    # name it if a file on disk counted, and naming every squash of an ahead
-    # app would name it regardless.
+    # And the remedy the message does give is the one that works.
     squash = _squash_on_disk(monkeypatch, replaced_files=True)
     base = _base(temporary_databases)
     _execute_in(
@@ -1789,15 +1517,12 @@ def test_a_squash_listing_nothing_prune_would_remove_is_not_named_as_one_to_fini
     assert "manage.py migrate contenttypes --prune" in message
     assert "still lists" not in message
 
-    # And the remedy the message does give is the one that works.
     _migrate(base, "contenttypes", "--prune")
     name = template_database(_shape(rows=40, seed=59), base=base)
     temporary_databases.append(name)
 
     assert _rows_in(base, _GHOST_RECORDED) == [(False,)]
     assert _oid(name) is not None
-    # While finishing the squash, as the message would have had it, splits the
-    # app in two.
     squash.replaces = []
     assert "contenttypes" in MigrationLoader(None).detect_conflicts()
 
@@ -1806,10 +1531,7 @@ def test_a_squash_listing_nothing_prune_would_remove_is_not_named_as_one_to_fini
 def test_a_base_behind_a_squash_of_a_squash_is_migrated_through_it(
     temporary_databases: list[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # Nothing under either squash is applied, so Django runs the outer one,
-    # and takes the inner one out of the graph because the outer one replaces
-    # it -- not because it was set aside. Holds that a squash missing from the
-    # graph is set aside only when no squash that replaces it is in use.
+    # Django runs the outer squash, which replaces the inner, so the base migrates through it.
     _nested_squash_on_disk(monkeypatch, on_disk=(_INNER[1], "0005_more"))
     base = _base(temporary_databases)
 
@@ -1827,10 +1549,6 @@ def test_a_squash_of_a_squash_applied_in_part_is_finished_by_the_files_on_disk(
     temporary_databases: list[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # Both squashes are set aside, and Django runs 0004 and 0005 themselves.
-    # The outer squash replaces the inner one, which is missing from the graph
-    # and unapplied, but it is a squash judged on its own rather than a file
-    # gone from disk. Holds that a squash is never counted as a stranded
-    # migration of the squash that replaces it.
     _nested_squash_on_disk(
         monkeypatch, on_disk=("0003_folded", "0004_folded", _INNER[1], "0005_more")
     )
@@ -1854,11 +1572,7 @@ def test_a_squash_of_a_squash_applied_in_part_is_finished_by_the_files_on_disk(
 def test_a_squash_of_a_squash_applied_in_part_with_a_replaced_file_deleted_is_refused(
     temporary_databases: list[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # The loader judges the outer squash over everything under it, so 0003
-    # applied sets it aside although none of what it lists directly is: the
-    # inner squash is not applied, and 0005 is not. With 0005's file gone,
-    # Django finishes the inner squash from 0004 and nothing ever runs 0005, so
-    # the copy would lack its table under a key that names it.
+    # Nor does a refusal fall back to building the shape without its base.
     _nested_squash_on_disk(monkeypatch, on_disk=("0003_folded", "0004_folded", _INNER[1]))
     base = _base(temporary_databases)
     _execute_in(
@@ -1876,18 +1590,13 @@ def test_a_squash_of_a_squash_applied_in_part_with_a_replaced_file_deleted_is_re
     assert "contenttypes.0005_more" in message
     assert "ahead" not in message
     assert _left_by(declared, base) == set()
-    # Nor does a refusal fall back to building the shape without its base.
     assert _left_by(declared) == set()
 
 
 def test_a_base_ahead_only_of_a_squash_of_a_squash_says_to_finish_the_squash(
     temporary_databases: list[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # Once only the outer squash is on disk, the rows of the migrations the
-    # inner squash replaced are listed by nothing on disk, so they read as
-    # ahead although Django has the base as fully migrated. --prune declines
-    # while a squash still lists replaces, so the message says what to do
-    # first; and following it, against the base, is what makes the base usable.
+    # Only the outer squash on disk leaves the inner's rows reading as ahead; say to finish it.
     squash = _nested_squash_on_disk(monkeypatch, on_disk=())
     base = _base(temporary_databases)
     _execute_in(
@@ -1921,9 +1630,7 @@ def test_a_base_ahead_only_of_a_squash_of_a_squash_says_to_finish_the_squash(
 def test_a_base_with_tables_but_no_django_migrations_is_refused(
     temporary_databases: list[str],
 ) -> None:
-    # Nothing records which migrations made its tables, so migrate would create
-    # them again and fail on the first with "already exists" from inside the
-    # migration executor, naming a table rather than the base.
+    # Nor does a refusal fall back to building the shape without its base.
     base = _base(temporary_databases)
     _execute_in(base, "DROP TABLE django_migrations")
     declared = _shape(rows=40, seed=38)
@@ -1936,17 +1643,13 @@ def test_a_base_with_tables_but_no_django_migrations_is_refused(
     assert "django_migrations" in message
     assert "auth_group" in message
     assert _left_by(declared, base) == set()
-    # Nor does a refusal fall back to building the shape without its base.
     assert _left_by(declared) == set()
 
 
 def test_a_base_whose_django_migrations_records_nothing_is_refused(
     temporary_databases: list[str],
 ) -> None:
-    # What a base restored from pg_dump --schema-only looks like: the table is
-    # there, so a check for the table alone passes, and it holds no rows, so
-    # migrate would create every table again and fail on the first with
-    # "already exists" from inside the executor.
+    # Nor does a refusal fall back to building the shape without its base.
     base = _base(temporary_databases)
     _execute_in(base, "DELETE FROM django_migrations")
     declared = _shape(rows=40, seed=47)
@@ -1959,17 +1662,13 @@ def test_a_base_whose_django_migrations_records_nothing_is_refused(
     assert "auth_group" in message
     assert "--schema-only" in message
     assert _left_by(declared, base) == set()
-    # Nor does a refusal fall back to building the shape without its base.
     assert _left_by(declared) == set()
 
 
 def test_so_is_one_with_no_record_of_a_single_app_whose_tables_it_holds(
     temporary_databases: list[str],
 ) -> None:
-    # The same history one app at a time, which is what a base made while an
-    # app had no migrations looks like once the app gains a 0001_initial: its
-    # tables are there and nothing records them. Holds that the check is made
-    # per app, rather than once for the whole table.
+    # Holds that the check is made per app, rather than once for the whole table.
     base = _base(temporary_databases)
     _execute_in(base, "DELETE FROM django_migrations WHERE app = 'auth'")
 
@@ -1978,18 +1677,13 @@ def test_so_is_one_with_no_record_of_a_single_app_whose_tables_it_holds(
 
     message = str(refused.value)
     assert "auth_group" in message
-    # contenttypes still records its migrations, so its table is not named.
     assert "django_content_type" not in message
 
 
 def test_but_an_app_whose_migrations_package_holds_no_migration_is_not(
     temporary_databases: list[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # An app that gains an empty migrations package counts as migrated, so
-    # run_syncdb stops making its tables, and has no migration for migrate to
-    # run, so the tables the base made for it are left as they are and migrate
-    # over the copy succeeds. Nothing would make them again, so they are
-    # carried. Holds that only an app with a migration on disk is judged.
+    # Nothing would make them again, so they are carried.
     load_disk = MigrationLoader.load_disk
 
     def load_disk_with_an_empty_package(loader: MigrationLoader) -> None:
@@ -2014,9 +1708,6 @@ def test_but_an_app_whose_migrations_package_holds_no_migration_is_not(
 def test_but_a_table_of_an_app_without_migrations_does_not_count(
     temporary_databases: list[str],
 ) -> None:
-    # migrate --run-syncdb makes those tables with no django_migrations row,
-    # and a project with no migrated app makes no django_migrations table at
-    # all, so a base holding only them is one migrate could have produced.
     # Holds that only the tables of apps with migrations refuse a base.
     base = f"shape_base_{secrets.token_hex(4)}"
     with connection._nodb_cursor() as cursor:
@@ -2053,8 +1744,7 @@ def test_one_recorded_and_missing_from_disk_is() -> None:
 
 
 def test_unless_a_migration_on_disk_replaces_it() -> None:
-    # A squash whose replaced files were deleted leaves their records behind,
-    # legitimately: the squash on disk is what they became.
+    # A squash whose replaced files were deleted leaves their records behind, legitimately.
     applied = [("shop", "0001_initial"), ("shop", "0002_order"), ("shop", "0001_squashed_0002")]
 
     assert (
@@ -2108,8 +1798,7 @@ def test_but_one_already_applied_is_not() -> None:
 
 
 def test_nor_one_that_is_itself_a_squash() -> None:
-    # The inner squash of a squash of a squash is missing from the graph when it
-    # is set aside, and is judged as a squash of its own rather than as a file.
+    # A squash set aside from the graph is judged as a squash, not as a file.
     inner, outer = ("shop", "0001_squashed_0002"), ("shop", "0001_squashed_0003")
 
     assert (
@@ -2126,8 +1815,7 @@ def test_nor_one_that_is_itself_a_squash() -> None:
 
 
 def test_nor_one_under_a_squash_the_loader_replaced_rather_than_set_aside() -> None:
-    # Nothing applied: the loader uses the outer squash, which takes the inner
-    # one out of the graph, and with it the migrations the inner one replaced.
+    # Nothing applied, so the loader uses the outer squash, which replaces the inner one.
     inner, outer = ("shop", "0001_squashed_0002"), ("shop", "0001_squashed_0003")
 
     assert (

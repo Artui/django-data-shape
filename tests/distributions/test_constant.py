@@ -1,5 +1,3 @@
-"""A column that never varies is a shape, not a missing declaration."""
-
 from __future__ import annotations
 
 from django_data_shape import Constant
@@ -16,8 +14,7 @@ def test_it_reads_back_as_what_was_declared() -> None:
 
 
 def test_it_reports_a_single_distinct_value() -> None:
-    # What makes a unique column with more than one row decidably impossible
-    # at declaration time rather than partway through a load.
+    # A unique column of more than one row is decidably impossible at declaration time.
     assert Constant("web").distinct_values() == 1
 
 

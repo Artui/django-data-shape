@@ -1,12 +1,3 @@
-"""A many-to-many field's name is refused by name, not as a missing field.
-
-``Wearer.awards`` is a column of nothing: its rows live in the through model, and
-this package builds them the way it builds any table with two keys, by declaring
-that model with ``FanOut`` and ``Paired``. The refusal used to say the model "has
-no field named awards" and list its concrete fields, which sent the reader away
-from the fix -- the field exists, and the list was the wrong place to look.
-"""
-
 from __future__ import annotations
 
 import pytest

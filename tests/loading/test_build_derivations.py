@@ -1,10 +1,3 @@
-"""The derivation mechanism against a real database.
-
-Everything here is the wiring rather than the arithmetic: the parent's values
-coming back beside its keys, the guard actually being installed, and the four
-faces holding once the rows are in the table the application reads.
-"""
-
 from __future__ import annotations
 
 import datetime
@@ -76,10 +69,7 @@ def _built(**overrides: object) -> list[Ticket]:
 def test_every_child_lands_after_its_own_parent() -> None:
     tickets = _built()
 
-    # Not "after the earliest account": after *its* account, which is the whole
-    # difference between a correlated column and an independent one. Left
-    # undeclared, every date-range join over these two columns has a
-    # selectivity no production database has.
+    # After its own account, not the earliest: that is what correlation means here.
     assert tickets
     assert all(
         ticket.account.signed_up_at <= ticket.opened_at < ticket.account.signed_up_at + _WINDOW
@@ -100,9 +90,7 @@ def test_the_conditional_skew_follows_the_parent_row() -> None:
 def test_the_within_row_derivation_holds_in_the_loaded_table() -> None:
     tickets = _built()
 
-    # The column the application reads, not the value the generator produced:
-    # the derived value goes through the field's own preparation like any other,
-    # so this is also what says a Decimal survived COPY intact.
+    # The column the application reads, so this also shows a Decimal survived COPY intact.
     assert all(ticket.total == ticket.quantity * ticket.unit_price for ticket in tickets)
 
 
@@ -115,9 +103,7 @@ def test_the_aligned_columns_are_large_in_the_same_rows() -> None:
 
 
 def test_independent_columns_are_not_aligned_by_accident() -> None:
-    # The control the assertion above needs: the same two columns drawn from
-    # their own streams correlate at nothing, so a passing alignment test is
-    # about the rank rather than about the distributions happening to agree.
+    # Independent columns correlate at nothing, so a passing alignment is about the rank.
     tickets = _built(
         quantity=Uniform(1, 100, places=0),
         unit_price=Uniform(1, 500, places=2),
@@ -129,10 +115,7 @@ def test_independent_columns_are_not_aligned_by_accident() -> None:
 
 
 def test_the_parents_values_are_read_rather_than_recomputed() -> None:
-    # The same correction the fan-out took for keys, applied to values. These
-    # accounts were never declared to this package, so nothing about them can be
-    # derived from a declaration -- and a realistic project builds its small
-    # tables exactly this way.
+    # The same correction the fan-out took for keys, applied to values.
     for index in range(10):
         Account.objects.create(
             signed_up_at=_SIGNED_UP + datetime.timedelta(days=90 * index),
@@ -153,9 +136,7 @@ def test_a_derivation_that_queries_the_database_is_refused() -> None:
     def _count_accounts(quantity: object, unit_price: object) -> object:
         return Decimal(Account.objects.count())
 
-    # The rule this package's scope rests on, and the reason it is a rule rather
-    # than advice: it is decidable. A hook that may query is a hook that will,
-    # and then nothing is COPY-loaded.
+    # A hook that may query is a hook that will, and then nothing is COPY-loaded.
     with pytest.raises(DerivationQueriedDatabase, match="may not call the database"):
         build_shape(
             Shape(
@@ -185,11 +166,7 @@ def test_the_refusal_names_the_table_and_its_derivations() -> None:
 
 
 def _correlation(left: list[float], right: list[float]) -> float:
-    """Pearson correlation, written out rather than pulled in.
-
-    A dependency for six lines of arithmetic would be a dependency this package
-    ships to every consumer so that its own suite reads more tidily.
-    """
+    """Pearson correlation, written out rather than pulled in."""
     count = len(left)
     mean_left = sum(left) / count
     mean_right = sum(right) / count
@@ -216,22 +193,13 @@ def test_a_parent_hidden_by_its_own_default_manager_is_still_a_parent() -> None:
     )
 
     supplies = list(Supply.objects.select_related("vendor").all())
-    # Two reads have to agree about which parents exist: the fan-out reads every
-    # key, so the values beside them have to come from every row too. A default
-    # manager that hides half of them would point children at a subset while
-    # reporting the whole.
+    # Keys and values must come from the same rows, or children point at a subset.
     assert len({supply.vendor_id for supply in supplies}) == 4
     assert all(supply.vendor_name == supply.vendor.name for supply in supplies)
 
 
 def test_a_narrowed_fan_out_derives_from_the_parents_it_named() -> None:
-    """``parents=`` and a parent-scoped derivation take the ORM route together.
-
-    The keys and the values come back from one query, so the narrowing has to
-    reach both -- a partition over two vendors reading names from all four would
-    line the wrong name up against the wrong key, which is the failure a
-    derivation exists to prevent rather than cause.
-    """
+    """``parents=`` and a parent-scoped derivation take the ORM route together."""
     vendors = [Vendor.objects.create(name=f"v{index}") for index in range(4)]
     named = [vendors[1].pk, vendors[3].pk]
 

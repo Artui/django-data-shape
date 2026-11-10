@@ -1,16 +1,3 @@
-"""A conditional uniqueness whose condition names a relation column.
-
-A relation's declaration says which keys a column can hold, and it used to be compared
-to the condition's value as though it were that value, which is never true, so every
-one of these read as never inside the condition and was accepted.
-
-**A figure here is only true of its table's name**, because the draws are keyed on it.
-Each ``loads`` comment below was measured over twenty seeds on the table these cases
-make, with the check switched off. The sizes are chosen so that the figure means
-something: ``Q(owner=1)`` over three hundred people loaded twenty times in twenty on a
-table where ten people loaded once, because the one key had few rows to collide.
-"""
-
 from __future__ import annotations
 
 from typing import Any, NamedTuple, cast
@@ -1525,8 +1512,7 @@ def test_a_condition_that_any_value_meets_is_named_as_written() -> None:
 
 
 def test_a_derivation_in_the_group_is_left_to_the_other_two_nets() -> None:
-    # Loads 1 of 20 grouped by company, which is no group of the constraint, and is accepted:
-    # whether a compute= keeps the rule is not readable here, and Derived("owner") keeps it.
+    # A compute= is not readable here, so a derivation in the group is left to the other nets.
     case = _Case(
         "key_under_a_derivation",
         ("label",),
@@ -1559,8 +1545,7 @@ def test_a_derivation_grouped_by_the_key_keeps_the_condition() -> None:
 
 
 def test_the_tree_remedies_are_not_offered_where_they_prove_nothing() -> None:
-    # Two children of two rows are two rows inside, so sizes of one value do not keep it,
-    # and one root leaves a key with every child there is.
+    # One root leaves a key with every child, so no tree remedy is offered.
     assert "sizes that hold one value" not in _refusal(_refused("set_over_a_flat_tree"))
     assert "sizes that hold one value" in _refusal(_refused("key_over_one_root"))
     assert "Tree(roots=1/201" not in _refusal(_refused("key_over_one_root"))
@@ -1571,8 +1556,7 @@ def test_the_tree_remedies_are_not_offered_where_they_prove_nothing() -> None:
 @pytest.mark.django_db(transaction=True)
 @pytest.mark.parametrize("rows", [11, 13])
 def test_the_one_root_a_refusal_offers_is_one_root_at_any_row_count(rows: int) -> None:
-    # roots=1/rows is two roots at rows 11 and 13 among others, because the share is read
-    # through its decimal spelling and 1/11 rounds up. The offer is 1/(rows + 1).
+    # The offer is 1/(rows + 1).
     flat = {"company": FanOut(Zipf()), "prev": Tree(roots=0.3, sizes=Constant(1))}
     refused = _refused("roots_of_a_flat_tree")._replace(
         name=f"one_root_at_{rows}", rows=rows, columns=flat
@@ -1599,8 +1583,7 @@ def test_the_cap_is_not_offered_for_a_set_or_for_a_null() -> None:
 
 
 def test_a_cap_is_not_offered_where_the_parents_are_unknown() -> None:
-    # A parent this shape does not build: the cap needs a parent for every row, and
-    # nothing here can say there are enough.
+    # The cap needs a parent for every row, and nothing here can say there are enough.
     message = _refusal(
         _refused("key_over_a_fan_out")._replace(name="key_over_unknown_parents", people=None)
     )
@@ -1919,8 +1902,7 @@ def test_a_condition_that_is_no_set_of_values_is_offered_only_what_builds(
     ids=["not_null", "expression"],
 )
 def test_the_flat_tree_is_offered_only_for_a_condition_that_names_one_key(condition: Q) -> None:
-    # Sizes of one value give one key one child at most. A condition that is no one key puts
-    # every child of every row inside, so the same sizes prove nothing there.
+    # Sizes of one value give one key one child at most.
     case = _Case(
         "tree_key_that_is_no_one_key",
         ("company",),
@@ -1950,8 +1932,7 @@ def test_leaving_the_condition_column_out_is_not_offered_where_its_null_is_insid
 
 
 def test_a_rule_per_parent_that_leaves_a_member_in_the_rest_is_refused() -> None:
-    # Held by the ``rest`` conjunct in _check_conditional_over_draws: ``last`` writes none
-    # of the condition and ``rest`` is the value inside it, in every row but one per company.
+    # The rest writes the value inside the condition in every row but one per company.
     message = _refusal(
         _over_draws("rule_per_parent_over_a_draw")._replace(
             name="rule_per_parent_with_the_member_in_the_rest",
@@ -1967,8 +1948,7 @@ def test_a_rule_per_parent_that_leaves_a_member_in_the_rest_is_refused() -> None
 
 
 def test_a_derivation_filling_a_drawn_condition_is_left_to_the_other_two_nets() -> None:
-    # Held by the ``Derivation`` conjunct in _check_conditional_over_draws: what a ``compute=``
-    # writes is not readable here, and ``_produces`` answers unknown for it, which is refused.
+    # What a compute= writes is not readable here, so the refusal is left to the other nets.
     case = _over_draws("drawn_condition_over_a_draw")._replace(
         name="derivation_fills_the_drawn_condition",
         columns={
@@ -1982,9 +1962,7 @@ def test_a_derivation_filling_a_drawn_condition_is_left_to_the_other_two_nets() 
 
 
 def test_a_pairing_in_a_condition_is_offered_no_tree() -> None:
-    # Held by ``isinstance(declared, Tree)`` in _what_keeps_a_relation_out: one key inside is
-    # the shape a tree is offered for, and a pairing is no tree, so it would offer a column
-    # that Table refuses to fill with one.
+    # A pairing is no tree, and Table refuses to fill a column that a tree would offer.
     message = _refusal(_refused("paired_under_another_fan_out"))
 
     assert "owner left out of the shape" in message
@@ -1998,8 +1976,7 @@ def test_a_pairing_in_a_condition_is_offered_no_tree() -> None:
 def test_only_a_derivation_that_reads_the_column_takes_back_the_left_out_offer(
     read: str, offered: bool
 ) -> None:
-    # Held by ``column in one.sources`` in _may_be_left_out: a derivation of ``company`` is
-    # beside the refusal and leaves ``owner`` free to be left out, one of ``owner`` does not.
+    # A derivation that reads the column is beside the refusal, so it may be left out.
     message = _refusal(
         _refused("key_over_a_fan_out")._replace(
             name=f"derivation_reads_{read}",

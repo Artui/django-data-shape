@@ -1,11 +1,3 @@
-"""Per-group rules against a real database, and the two nets behind them.
-
-Everything here needs PostgreSQL, and not only for ``COPY``: the constraint
-that makes the worked example a worked example is a partial unique index, and a
-backend that cannot express one would let every assertion below pass for the
-wrong reason.
-"""
-
 from __future__ import annotations
 
 import datetime
@@ -88,9 +80,7 @@ def _statuses_by_company() -> dict[int, list[str]]:
 
 
 def test_the_partial_unique_constraint_is_really_in_the_test_schema() -> None:
-    # Without this the assertions below would pass just as happily against a
-    # schema that never created the index -- which is a test passing for a
-    # reason unrelated to its name, and the load would prove nothing at all.
+    # Without this, the assertions below would pass against a schema without the index.
     with connection.cursor() as cursor:
         cursor.execute(
             "SELECT indexdef FROM pg_indexes WHERE indexname = %s",
@@ -112,9 +102,7 @@ def test_one_active_project_per_company_holds_across_the_whole_table() -> None:
 
 
 def test_the_active_share_is_derived_from_the_fan_out_rather_than_declared() -> None:
-    # The finding the whole feature rests on: status skew and fan-out are one
-    # declaration seen twice. Fifty companies and two thousand projects means
-    # exactly fifty active rows -- 2.5% -- and nobody chose that number.
+    # Status skew and fan-out are one declaration seen twice, so the active share is derived.
     build_shape(Shape(_companies(50), _projects(2000), seed=11))
 
     active = Project.objects.filter(status="ACTIVE").count()
@@ -125,9 +113,7 @@ def test_the_active_share_is_derived_from_the_fan_out_rather_than_declared() -> 
 
 
 def test_a_childless_company_contributes_no_active_project() -> None:
-    # The reason the count is one per *non-empty* group. A company nobody
-    # references has no project to be its active one, and inventing one would
-    # be inventing a row the fan-out said was not there.
+    # The reason the count is one per *non-empty* group.
     build_shape(
         Shape(
             _companies(50),
@@ -143,10 +129,7 @@ def test_a_childless_company_contributes_no_active_project() -> None:
 
 
 def test_the_rule_holds_while_the_rows_are_still_emitted_interleaved() -> None:
-    # Assignment order is not emission order, and this is the assertion that
-    # says so. Under the honest default a company's projects are scattered
-    # through the table -- consecutive rows come from unrelated parents -- and
-    # the per-group rule still holds exactly.
+    # Assignment order is not emission order, and this is the assertion that says so.
     build_shape(Shape(_companies(50), _projects(500), seed=5))
 
     companies = list(Project.objects.order_by("id").values_list("company_id", flat=True))
@@ -159,9 +142,7 @@ def test_the_rule_holds_while_the_rows_are_still_emitted_interleaved() -> None:
 
 
 def test_ordering_a_group_makes_the_newest_project_the_active_one() -> None:
-    # What order_by buys, and it is application realism rather than plan
-    # realism: PostgreSQL keeps no statistic about which row of a group holds
-    # which value, so the shape without it plans identically.
+    # PostgreSQL keeps no statistic on which row of a group holds which value.
     build_shape(
         Shape(
             _companies(20),
@@ -200,14 +181,12 @@ def test_several_winners_per_group_where_no_constraint_says_otherwise() -> None:
         per_contest.setdefault(contest_id, []).append(placing)
 
     assert per_contest
-    # Three winners, unless the contest had fewer entries than that -- which is
-    # arithmetic rather than a clamp: two entries cannot produce three winners.
+    # Two entries cannot produce three winners, so the count is arithmetic, not a clamp.
     assert all(placings.count("WON") == min(3, len(placings)) for placings in per_contest.values())
 
 
 def test_the_current_period_is_the_one_with_no_end() -> None:
-    # The SCD-2 shape, and the reason last= needs a sentinel rather than
-    # defaulting to None: here None *is* the declared value.
+    # Here None is the declared value, so last= needs a sentinel rather than defaulting.
     build_shape(
         Shape(
             _companies(10),
@@ -236,10 +215,7 @@ def test_the_current_period_is_the_one_with_no_end() -> None:
 
 
 def test_the_database_is_the_net_the_pre_check_cannot_be() -> None:
-    # A conditional constraint over an expression, Lower(room): the pre-check
-    # does not read what an expression computes, so it skips it by design and
-    # says so. This is what the skip costs, and it is the failure the pre-check
-    # exists to replace where it can -- an index violation from inside the load.
+    # The pre-check skips expressions by design, so the database must catch them.
     shape = Shape(
         _companies(5),
         Table(
@@ -258,10 +234,7 @@ def test_the_database_is_the_net_the_pre_check_cannot_be() -> None:
 
 
 def test_a_column_distinct_in_every_row_really_does_keep_a_two_column_uniqueness() -> None:
-    # The exemption, loaded rather than argued. ``one_seat_label_per_company``
-    # is a real unique index here, and this is the declaration the refusal lets
-    # through: a pair is distinct as soon as either half is, so nothing has to
-    # be arranged per group at all.
+    # The exemption, loaded rather than argued.
     build_shape(
         Shape(
             _companies(50),
@@ -273,12 +246,7 @@ def test_a_column_distinct_in_every_row_really_does_keep_a_two_column_uniqueness
 
 
 def test_the_remedy_the_refusal_names_is_one_that_builds() -> None:
-    # The same table, the same constraint, and the form the message points at:
-    # a Scope.GROUP derivation receives this row's position among its parent's
-    # children, so it can hand back a value per position where a draw beside the
-    # fan-out can only hope. Asserted against the database rather than taken on
-    # trust -- a refusal naming a remedy that does not build would be worse than
-    # one naming none.
+    # A Scope.GROUP derivation gets each row's position, so the remedy can build.
     build_shape(
         Shape(
             _companies(50),
@@ -295,10 +263,7 @@ def test_the_remedy_the_refusal_names_is_one_that_builds() -> None:
 
 
 def test_a_partition_with_no_group_of_two_really_does_load_under_the_index() -> None:
-    # The exemption against the database rather than against the arithmetic. A
-    # flat fan-out at fifty rows over fifty companies gives every company one
-    # seat, so one label for the whole table collides with nothing -- and the
-    # unique index is really there to say so.
+    # The exemption against the database rather than against the arithmetic.
     build_shape(
         Shape(
             _companies(50),
@@ -307,8 +272,6 @@ def test_a_partition_with_no_group_of_two_really_does_load_under_the_index() -> 
     )
 
     assert Seat.objects.count() == 50
-    # The claim the exemption actually rests on, asserted rather than assumed:
-    # no group holds two rows, so there is nothing for two draws to collide in.
     largest = max(
         Seat.objects.values("company_id")
         .annotate(seats=Count("id"))
@@ -318,10 +281,7 @@ def test_a_partition_with_no_group_of_two_really_does_load_under_the_index() -> 
 
 
 def test_one_flat_fan_out_carries_a_two_fan_out_uniqueness_under_the_index() -> None:
-    # The asymmetric exemption against the database. Five people cannot hold
-    # twenty rows one apiece, so only the company fan-out satisfies the proof --
-    # and only one has to, because a company that owns one row cannot own the
-    # second half of a duplicate pair.
+    # The asymmetric exemption against the database.
     build_shape(
         Shape(
             _companies(20),
@@ -337,8 +297,6 @@ def test_one_flat_fan_out_carries_a_two_fan_out_uniqueness_under_the_index() -> 
     )
 
     assert Membership.objects.count() == 20
-    # The claim the exemption rests on, asserted rather than assumed: every row
-    # has its own company, so no pair can repeat whatever the people do.
     largest = max(
         Membership.objects.values("company_id")
         .annotate(rows=Count("id"))
@@ -388,9 +346,7 @@ def test_a_violated_invariant_fails_the_build_and_rolls_it_back() -> None:
             )
         )
 
-    # The half that makes this a build failure rather than a test failure: a
-    # database full of impossible data would make every later assertion pass or
-    # fail for a reason unrelated to the code under test.
+    # A database of impossible data would make later assertions pass for unrelated reasons.
     assert Project.objects.count() == 0
     assert Company.objects.count() == 0
 
@@ -438,8 +394,7 @@ def test_a_failure_with_few_enough_offenders_lists_all_of_them() -> None:
 
 
 def test_the_rules_can_be_re_run_against_a_database_this_did_not_just_build() -> None:
-    # Exported as well as called, because a template clone is built once and
-    # cloned per test, and the rules are worth having against the clone.
+    # The rules are exported too, because a template clone is built once and cloned per test.
     build_shape(Shape(_companies(20), _projects(200), seed=6))
     passing = Invariant(
         "no company has two active projects",
@@ -455,10 +410,7 @@ def test_the_rules_can_be_re_run_against_a_database_this_did_not_just_build() ->
 
 
 def test_an_invariant_reads_rows_a_default_manager_would_have_hidden() -> None:
-    # _base_manager, for the reason a fan-out reads through it. Vendor's own
-    # default manager hides retired rows, which is an entirely ordinary thing
-    # for a project to write -- and a rule that could not see them would report
-    # a database as clean in exactly the place it is not.
+    # _base_manager, for the reason a fan-out reads through it.
     build_shape(
         Shape(
             Table(Vendor, rows=100, name=Constant("v"), retired=Skew({True: 1, False: 1})),
@@ -475,9 +427,7 @@ def test_an_invariant_reads_rows_a_default_manager_would_have_hidden() -> None:
 
 
 def test_an_invariant_changes_no_row_and_still_changes_the_cache_key() -> None:
-    # Otherwise a shape would reuse a cached template database and the rule
-    # would silently never run -- which is worse than no rule, because it is a
-    # rule everybody believes.
+    # Otherwise a cached template would silently skip the rule, which is worse than none.
     plain = Shape(_companies(20), _projects(200), seed=6)
     checked = Shape(
         _companies(20),
@@ -490,7 +440,6 @@ def test_an_invariant_changes_no_row_and_still_changes_the_cache_key() -> None:
 
 
 def test_a_shape_declaring_a_skew_against_the_constraint_never_reaches_the_load() -> None:
-    # The pre-check is the point: this refusal costs nothing, where the same
-    # declaration reaching PostgreSQL costs a partial load first.
+    # The pre-check costs nothing; reaching PostgreSQL would cost a partial load first.
     with pytest.raises(Exception, match="one_active_project_per_company"):
         Shape(_companies(50), _projects(2000, status=Skew({"ACTIVE": 0.1, "COMPLETE": 0.9})))

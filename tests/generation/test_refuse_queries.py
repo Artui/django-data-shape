@@ -1,12 +1,3 @@
-"""The rule with teeth: your code may not call the database.
-
-Driven through a stub connection rather than a real one, for the same reason the
-backend gate reads a vendor: the wrapper contract is Django's, three lines wide,
-and a guard whose refusal could only be covered by a real build is a guard the
-coverage gate would push somewhere it means less. The wiring into a real build is
-falsified separately, where it is a build test rather than a guard test.
-"""
-
 from __future__ import annotations
 
 from contextlib import contextmanager
@@ -58,9 +49,7 @@ def test_the_guard_is_lifted_when_the_block_ends() -> None:
     with refuse_queries(connection, "Ticket", ()):
         pass
 
-    # The portable route enters one of these per chunk and executes its insert
-    # outside them, so a guard that outlived its block would refuse this
-    # package's own statement.
+    # A guard that outlived its block would refuse this package's own portable insert.
     assert connection.wrappers == []
 
 
@@ -84,8 +73,7 @@ def test_a_long_statement_is_truncated_rather_than_pasted_whole() -> None:
     ):
         _wrapper(connection)(lambda *_: None, sql, (), False, {})
 
-    # A generated IN list with ten thousand parameters must not become the
-    # error message.
+    # A generated IN list with ten thousand parameters must not become the error message.
     assert len(str(raised.value)) < 1000
 
 
@@ -93,6 +81,5 @@ def test_the_wrapper_says_which_model_it_belongs_to() -> None:
     connection = _Connection()
 
     with refuse_queries(connection, "Ticket", ("total",)):
-        # One left behind by an exception is far easier to read this way than as
-        # a bare function object.
+        # A wrapper left by an exception is far easier to read with its model named.
         assert repr(_wrapper(connection)) == "_Refuse('Ticket')"

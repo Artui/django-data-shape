@@ -1,5 +1,3 @@
-"""Which strategy a primary key type implies, when the caller says nothing."""
-
 from __future__ import annotations
 
 from django.db import models
@@ -18,7 +16,6 @@ def test_a_uuid_key_is_derived() -> None:
 
 
 def test_anything_else_has_no_obvious_answer() -> None:
-    # None rather than a guess. Inventing values for a semantic column is how a
-    # character primary key once got loaded with "1", "2" and "3".
+    # None rather than a guess.
     assert infer_key_strategy(models.CharField()) is None
     assert infer_key_strategy(models.DateField()) is None
