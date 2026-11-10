@@ -4564,7 +4564,8 @@ for how large that is.</p>
 column climbs with the table whatever order a family is written in, which is
 also how a production tree looks. Nor is there a <code>max_children</code>, a
 <code>childless</code> or a depth; the depth is whatever the sizes make it, and flat
-sizes, where every row has about one child, make long chains.</p>
+sizes, where every row has about one child, make long chains. Sizes of one
+value give no row two children, which is what fills a unique key to this table.</p>
 
 
 
@@ -5965,7 +5966,9 @@ the through table of a many-to-many -- passes the pigeonhole comfortably,
 because the product of two parent counts dwarfs the row count, and still
 cannot be built: two partitions of the same rows are computed independently,
 so the pairs they produce are an artefact of the row index and a collision
-is a matter of the seed. It is refused rather than counted.</p>
+is a matter of the seed. It is refused rather than counted. So is a <code>Paired</code> under a
+constraint that does not name the relation it is paired over, since it keeps its
+partners apart only inside each group of that relation.</p>
 <p><strong>A conditional <code>UniqueConstraint</code> is a statement about a group</strong>, and the
 refusal is categorical rather than arithmetic. <code>one_active_project_per_company</code>
 permits one <code>ACTIVE</code> row per company; a <code>Skew</code> filling <code>status</code> draws
@@ -5976,21 +5979,34 @@ decides it. The remedy is
 :class:<code>~django_data_shape.derivations.per_parent.PerParent</code>, which makes
 the count one per non-empty group and therefore derived from the fan-out
 rather than chosen beside it.</p>
-<p><strong>What this cannot decide, and leaves to the other two nets.</strong> A condition
-that is not a single equality -- <code>Q(status__in=[...])</code>, a negation, two
-clauses -- is skipped, because reading it would mean this package deciding
-what an arbitrary predicate matches. A constraint over <code>expressions</code>
-rather than <code>fields</code> is skipped for the same reason. A conditional
-constraint whose grouping columns include neither a declared <code>FanOut</code> nor
-a declared <code>Tree</code> is skipped because there is no partition here to satisfy
-it with, so a refusal would name no remedy. A column filled by a distribution
-that cannot enumerate itself -- anything not
-:class:<code>~django_data_shape.distributions.categorical.Categorical</code> -- is
-undecidable, and so is a fan-out over a parent this shape does not build,
-or one carrying a null share, because PostgreSQL counts each NULL as its own
-group and those rows are exempt from the index. In every one of those cases
-the declaration is allowed through and the post-load check and the database
-are what catch it.</p>
+<p><strong>What this does not read, and leaves to the other two nets.</strong> A condition
+that names no set of values for one column -- a negation, two clauses joined
+by AND, a comparison -- is skipped, because reading it would mean this package
+deciding what an arbitrary predicate matches. <code>__isnull</code> and a <code>Value</code> are read,
+and an <code>F()</code> or another expression as the value is read as a member that may be
+met, never as one that is not. A constraint over <code>expressions</code> rather than
+<code>fields</code> is skipped for the same reason. A derivation in a conditional
+constraint's group is skipped, because whether its <code>compute=</code> keeps the rule is not
+readable here: <code>Derived("owner", ..., scope="group")</code> keeps it and one grouped by
+another relation does not. A column the shape leaves out whose
+<code>db_default</code> is an expression other than <code>Now()</code> is skipped too, because nothing
+here can read what it writes: <code>gen_random_uuid()</code> keeps a constraint, and
+:func:<code>_held</code> says why <code>Now()</code> is the one that can be read.
+In every one of those cases the declaration is allowed through and the
+post-load check and the database are what catch it.</p>
+<p><strong>What this cannot count, and refuses anyway.</strong> A distribution that cannot
+enumerate itself -- anything not
+:class:<code>~django_data_shape.distributions.categorical.Categorical</code> -- under a
+condition is read as able to land inside it, so <code>Uniform(1, 9)</code> under
+<code>Q(status="accepted")</code> is refused although it would load: unknown is read as a
+yes. A fan-out over a parent this shape does not build, or one carrying a null
+share while each NULL is its own group, leaves only the capacity unknown. The
+arrangement refusals never needed it, so they stand, and what drops out is the
+arithmetic in the message. A key under a condition is read the same way where
+<code>parents=</code> does not settle it, since this runs before any parent's keys are read, so
+<code>Q(owner=99)</code> over five people is refused although it would load, over a fan-out and
+over draws alone. So is <code>Q(owner=1)</code> over a <code>Uniform(1, 10**9)</code>, since a wide draw
+is not <code>Distinct</code>. See :func:<code>_check_a_relation_in_a_condition</code>.</p>
 <p>A :class:<code>~django_data_shape.declaration.projection.Projection</code> is skipped entirely. Its
 columns are copied along a join rather than drawn from distributions, so
 there is no declared share to compare a capacity against.</p>

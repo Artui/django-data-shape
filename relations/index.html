@@ -1578,6 +1578,27 @@ is 64 to 2,255, 23 to 65 and 5.3 to 22.7 on <code>testapp_referred.referrer</cod
 to 1,618, 24 to 65 and 4.9 to 32.2 on <code>testapp_folder.parent</code>.</p>
 <p>Flat sizes give every row about one child, which is long chains. That is what
 they declare, and a heavy tail is what most trees have.</p>
+<p><strong>Sizes of one value give no row two children</strong>, whatever the seed or the table's
+name, and that is what fills a nullable unique self-key, however it is spelled:
+<code>unique=True</code>, a <code>OneToOneField</code>, a <code>UniqueConstraint</code> on the column alone, or
+<code>unique_together</code> on it alone. It is <code>FanOut(max_children=1)</code> for a key to the
+table's own rows:</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-13-1"><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="c1"># models.py</span>
+</span><span id="__span-13-2"><a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="k">class</span><span class="w"> </span><span class="nc">Link</span><span class="p">(</span><span class="n">models</span><span class="o">.</span><span class="n">Model</span><span class="p">):</span>
+</span><span id="__span-13-3"><a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a>    <span class="n">previous</span> <span class="o">=</span> <span class="n">models</span><span class="o">.</span><span class="n">OneToOneField</span><span class="p">(</span><span class="s2">"self"</span><span class="p">,</span> <span class="n">null</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">on_delete</span><span class="o">=</span><span class="n">models</span><span class="o">.</span><span class="n">SET_NULL</span><span class="p">)</span>
+</span><span id="__span-13-4"><a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a>
+</span><span id="__span-13-5"><a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a>
+</span><span id="__span-13-6"><a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a><span class="n">Shape</span><span class="p">(</span><span class="n">Table</span><span class="p">(</span><span class="n">Link</span><span class="p">,</span> <span class="n">rows</span><span class="o">=</span><span class="mi">50_000</span><span class="p">,</span> <span class="n">previous</span><span class="o">=</span><span class="n">Tree</span><span class="p">(</span><span class="n">roots</span><span class="o">=</span><span class="mf">0.05</span><span class="p">,</span> <span class="n">sizes</span><span class="o">=</span><span class="n">Constant</span><span class="p">(</span><span class="mi">1</span><span class="p">))))</span>
+</span></code></pre></div>
+<p>Each root's NULL is its own group in the unique index, so the roots do not collide
+either. Under <code>nulls_distinct=False</code> two roots do, so what is accepted there is one
+root, with <code>roots</code> at most <code>1 / (rows + 1)</code>, and sizes of one value. <code>1 / rows</code> is two
+roots at some row counts, 11 and 13 among them, because a share is read through its
+decimal spelling and <code>repr(1 / 11)</code> is a hair above the fraction.
+<code>shape_from_factory</code> writes the flat tree for a unique self-key where each NULL is its
+own group, and names the one-root tree in a finding under <code>nulls_distinct=False</code>. A
+uniqueness over that key together with a column it draws gets a finding where its NULLs
+are one value as well, since the roots are one group and the flat tree keeps none of it.</p>
 <p>A <code>Tree</code> has no <code>childless</code>, <code>null</code> or <code>max_children</code> either, and no depth of
 its own. It needs no other table, so it adds
 nothing to the load order. In <code>COPY</code>, every parent is written before its
@@ -1639,7 +1660,8 @@ filled first is decided by the declarations and needs no connection to answer.</
   load time. The refusal names the <code>Tree</code> that fills the column instead.</li>
 <li>A <code>Tree</code> on a key to <strong>another</strong> table, where its parents would be keys that
   table never had; on a column that <strong>cannot be null</strong>, since its first row is
-  always a root; and on a <strong>unique</strong> column, which takes one child per parent.</li>
+  always a root; and on a <strong>unique</strong> column, which takes one child per parent,
+  unless the tree gives no row two children. The refusal names the flat <code>Tree</code>.</li>
 <li>Anything read <strong>across</strong> a <code>Tree</code>, or decided per <strong>family</strong> of one. The
   parent is a row of the same table generated in the same pass, and a family is
   not a range of rows the way a fan-out's group is.</li>
@@ -1647,8 +1669,9 @@ filled first is decided by the declarations and needs no connection to answer.</
   in names unique among siblings: a drawn value cannot see its siblings, so two
   of them sharing one is a matter of the seed. A column that is <code>Distinct</code> in
   every row, such as <code>Sequential</code>, keeps the constraint, and so does a tree with
-  sizes of one value, such as <code>Constant(1)</code>, which gives no row two children; a
-  <code>Tree</code> alone under a <code>UniqueConstraint</code> is refused as a unique column is.</li>
+  sizes of one value, such as <code>Constant(1)</code>, which gives no row two children. A
+  <code>Tree</code> alone under a <code>UniqueConstraint</code> is decided as a unique column is, and
+  under <code>nulls_distinct=False</code> it also needs one root, since two roots then collide.</li>
 <li>A <code>Tree</code> under a uniqueness beside a <strong><code>FanOut</code> or a second <code>Tree</code></strong>. Each column
   is computed from the row index without seeing the other, so two rows sharing a
   combination is a matter of the seed. A <code>Distinct</code> column keeps the constraint,
@@ -1660,8 +1683,10 @@ filled first is decided by the declarations and needs no connection to answer.</
   condition. <code>PerParent</code> is refused over a tree, so what keeps it is a column that
   stays outside the condition, a <code>Distinct</code> column in the constraint, a tree that
   gives no row two children, or a <code>Projection</code>. Beside a <code>FanOut</code>, <code>PerParent</code> over
-  that fan-out is the remedy. A tree's exemption needs each root's NULL to be its own
-  group, so it does not apply under <code>nulls_distinct=False</code>.</li>
+  that fan-out is the remedy, and a fan-out that gives no parent two rows
+  (<code>max_children=1</code>) keeps it on its own. A tree's exemption needs each root's NULL to
+  be its own group, so under <code>nulls_distinct=False</code> it also needs one root, which is
+  one NULL.</li>
 <li>A required relation <strong>left undeclared</strong>, which would fail the load on a
   not-null violation rather than at declaration time. The message names the
   column and the fan-out that fills it: forgetting one foreign key is the
