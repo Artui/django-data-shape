@@ -1,5 +1,3 @@
-"""Read what a factory actually produces, and say what it does not."""
-
 from __future__ import annotations
 
 from collections import Counter
@@ -27,48 +25,7 @@ def shape_from_factory(
     defaults: Mapping[str, object] | None = None,
     using: str = DEFAULT_DB_ALIAS,
 ) -> str:
-    """Run a factory, measure what it made, and return a declaration **as source**.
-
-    **Source to read, edit and check in -- never a ``Shape`` to build from**, and
-    that is the whole design rather than a limitation of it. A shape this package
-    builds is *declared*, which is what makes it reviewable and assertable; a
-    shape learned from a sample is neither, and one used directly would change
-    whenever the factory did, silently. So what comes back is text, and a person
-    decides what of it to keep.
-
-    **Because the thing it usually finds is that the factory is flat.** Factories
-    are written for single-object tests, so they fix values: one status, one
-    parent, one count. Measured on exactly that shape, faithful inference emits
-    ``status=Constant('ACTIVE'), company=Constant(1)`` -- the uniform world this
-    package exists to argue against, now with a declaration blessing it. So every
-    such column is reported as a **finding** rather than quietly written down,
-    and the report leads with them.
-
-    **A sub-factory is the sharpest case and the one worth running this for.**
-    ``company = SubFactory(CompanyFactory)`` creates one parent per child, which
-    is a fan-out of degree one: every parent has exactly one row, the average is
-    the truth, and the join estimate cannot miss. It is the single most
-    unrealistic thing a fixture can do and it is invisible in the factory's own
-    source, so it is detected by watching which other tables grew and by how
-    much.
-
-    ``defaults`` is passed to every call, because **most factories in a mature
-    codebase need arguments**. A ``TeamFactory`` wanting a ``permission_role``,
-    called with nothing, leaves a required column empty and fails as a raw
-    ``IntegrityError`` naming a constraint -- which says nothing about what the
-    caller did. Anything the factory raises is caught and named here instead,
-    with the call number, because "it failed" and "it failed after three" are
-    different bugs.
-
-    Nothing is left behind: the calls run inside a transaction that is rolled
-    back, so this can be pointed at a development database without writing to it.
-
-    ``samples`` decides how much of the tail is seen, and the answer moves with
-    it -- fifty runs saw nineteen distinct parents where a thousand saw
-    forty-nine. That is stated in the output rather than hidden, because two
-    people running this at different sizes should not be surprised by two
-    different declarations.
-    """
+    """Run a factory, measure what it made, and return a declaration **as source**."""
     if samples < 2:
         raise InvalidShape(
             f"shape_from_factory needs at least two samples to see a shape, got {samples}. "
@@ -82,12 +39,6 @@ def shape_from_factory(
             try:
                 row = factory(**arguments)
             except Exception as error:
-                # Re-raised rather than propagated, because the failure a caller
-                # sees otherwise is a database constraint naming a column, which
-                # describes neither what they ran nor what to do about it. The
-                # driver's own words are kept: unlike a refusal about a
-                # declaration, the column their factory left empty is the whole
-                # of the information, and nothing here retains a generated value.
                 raise InvalidShape(
                     f"the factory could not be called on call {index + 1} of {samples}: "
                     f"{type(error).__name__}: {error}. Most factories in a real codebase take "
@@ -127,12 +78,7 @@ def _grown(
 
 
 def _describe(values: list[object], rows: int) -> tuple[str, str | None]:
-    """A declaration for one column, and the finding it deserves if any.
-
-    The declaration carries its own trailing comma, **before** any comment: one
-    written after ``# every value distinct`` is inside the comment, and the next
-    column then has no separator and the source does not compile.
-    """
+    """A declaration for one column, and the finding it deserves if any."""
     counts = Counter(values)
     if len(counts) == 1:
         only = next(iter(counts))
@@ -162,22 +108,7 @@ def _describe(values: list[object], rows: int) -> tuple[str, str | None]:
 
 
 def _relation(values: list[object], rows: int) -> tuple[str, str | None]:
-    """A declaration for a foreign key, which is a fan-out and never a draw.
-
-    Its own function rather than a branch in :func:`_describe`, because the
-    answer is a different *kind* of thing. ``Table`` refuses a value
-    distribution on a relation -- it would emit keys drawn from nothing -- so
-    emitting one here would hand back source that cannot be built, which is a
-    worse failure than a wrong number: the reader would take it for a starting
-    point and it is not even a valid one.
-
-    The finding is what matters anyway. A factory reaches a foreign key in one
-    of two unrealistic ways and both come out here: a sub-factory gives every
-    parent exactly one child, and a round-robin gives every parent the same
-    number. Either way the average is the truth and a join over that column
-    cannot be misestimated, which is the defect this package exists to make
-    reproducible.
-    """
+    """A declaration for a foreign key, which is a fan-out and never a draw."""
     counts = Counter(values)
     spread = sorted(counts.values(), reverse=True)
     parents = len(counts)
@@ -204,29 +135,7 @@ def _relation(values: list[object], rows: int) -> tuple[str, str | None]:
 def _self_key(
     model: type[Model], field: Field[Any, Any], values: list[object], rows: int
 ) -> tuple[str | None, str | None]:
-    """A declaration for a key to the model's own table, and the finding it deserves.
-
-    Its own function rather than a branch of :func:`_relation`, because the
-    answer is a different kind of thing: ``Table`` refuses a self-referential
-    ``FanOut`` everywhere, so the suggestion :func:`_relation` makes for every
-    other key would hand back source that cannot be built. The key is a
-    :class:`~django_data_shape.relations.tree.Tree` where one can fill it.
-
-    **Where this cannot write one, there is no declaration at all** (``None``) and
-    the finding says why, rather than a ``Tree`` that will be refused. A column that
-    refuses NULL has no first row to point at. A constraint counting every NULL as
-    one value holds one root, so its share depends on the rows, which the report
-    leaves to the caller. Neither is an error of the factory's, and the rest of what
-    it measured is still worth reading, so this does not raise.
-
-    **A unique key gets sizes of one value**, because a tree whose sizes hold one
-    value gives no row two children, and that is what such a column requires. Every
-    other key gets ``Zipf()``, which the factory did not measure either.
-
-    The root share is measured from ``values``, whose ``None`` is a root and not a
-    parent: a ``Counter`` over them would count it as one more parent, as
-    :func:`_relation` does for a key to another table, where it is harmless.
-    """
+    """A declaration for a key to the model's own table, and the finding it deserves."""
     if not field.null:
         return None, (
             "a key that refuses NULL has no first row to point at, so no shape can fill it: a Tree "
@@ -234,8 +143,6 @@ def _self_key(
             "time. Make the column null=True, or fill the table with a Projection."
         )
     if _nulls_count_as_one(model, field):
-        # The rows a share would be written against are the caller's: the report leaves
-        # them as ``rows=...``, so it can name this tree and cannot write it down.
         return None, (
             "a constraint counting every NULL as one value has room for one root, so a Tree "
             "fills it only with one root and sizes of one value, Tree(roots=1/(rows + 1), "
@@ -263,7 +170,6 @@ def _self_key(
         )
     share = f"{roots / rows:.3g}"
     if not 0 < float(share) < 1:
-        # Three figures write a share past 0.9995 as 1, which Tree refuses.
         share = repr(roots / rows)
     why_these_sizes = "a unique key gives no row two children" if unique else "sizes not measured"
     return (
@@ -274,13 +180,7 @@ def _self_key(
 
 
 def _is_unique(model: type[Model], field: Field[Any, Any]) -> bool:
-    """Whether the column alone is unique, by whichever of the three spellings.
-
-    ``unique=True`` is on the field. A ``UniqueConstraint`` and ``unique_together``
-    are on the model, in two different places, and a shape decides a tree under
-    each as the unique column it amounts to. A constraint with a condition holds
-    only on some rows, so it is not this.
-    """
+    """Whether the column alone is unique, by whichever of the three spellings."""
     return (
         field.unique
         or any(field_names(model, entry) == (field.name,) for entry in model._meta.unique_together)
@@ -289,10 +189,7 @@ def _is_unique(model: type[Model], field: Field[Any, Any]) -> bool:
 
 
 def _nulls_count_as_one(model: type[Model], field: Field[Any, Any]) -> bool:
-    """Whether a constraint on this column alone makes its NULLs one value.
-
-    Read with ``getattr`` because ``nulls_distinct`` arrived in Django 5.0.
-    """
+    """Whether a constraint on this column alone makes its NULLs one value."""
     return any(
         getattr(constraint, "nulls_distinct", None) is False
         for constraint in _constraints_on_it_alone(model, field)
@@ -322,12 +219,7 @@ def _unconditional_constraints(model: type[Model]) -> Iterator[UniqueConstraint]
 def _composite_uniqueness(
     model: type[Model], field: Field[Any, Any]
 ) -> Iterator[tuple[str, tuple[str, ...], bool]]:
-    """Each uniqueness over this column together with others: its name, its columns, and
-    whether it keeps each NULL apart.
-
-    ``nulls_distinct=False`` makes the NULLs one value, read with ``getattr`` because it
-    arrived in Django 5.0. A ``unique_together`` always keeps them apart.
-    """
+    """Each uniqueness over this column with others, and whether it keeps each NULL apart."""
     for constraint in _unconditional_constraints(model):
         names = field_names(model, constraint.fields)
         if field.name in names and len(names) > 1:
@@ -343,11 +235,7 @@ def _composite_uniqueness(
 
 
 def _is_distinct(field: Field[Any, Any], values: list[object]) -> bool:
-    """Whether the column is written as one distinct in every row, which is ``Sequential``.
-
-    Not a relation, whatever its values: a key to another table is written as a
-    fan-out, which is a draw.
-    """
+    """Whether the column is written as one distinct in every row, which is ``Sequential``."""
     return not field.is_relation and len(set(values)) == len(values)
 
 
@@ -356,28 +244,7 @@ def _composite_finding(
     field: Field[Any, Any],
     columns: dict[str, tuple[Field[Any, Any], list[object]]],
 ) -> list[str]:
-    """What a tree beside a draw under a composite uniqueness means, one finding per uniqueness.
-
-    **Because ``Shape`` refuses it and the report would not say so.** A pair is
-    distinct as soon as either half is, so a column distinct in every row keeps the
-    uniqueness on its own and ``Sequential`` is written for it. Where none is, the
-    others are drawn per row from a distribution, and siblings of one parent cannot
-    see what each other drew.
-
-    **A key to another table is not a column to make distinct.** It is written as a
-    fan-out, which ``Sequential`` cannot fill, so the remedy for it is a cap of one,
-    which gives no parent two rows, and a ``Projection`` for either kind.
-
-    **A unique key gets none where the uniqueness keeps each NULL apart.** It is written
-    with sizes of one value, a flat tree, which gives no row two children and so keeps any
-    uniqueness that includes the key itself. Where the NULLs are one value the roots are
-    one group, and the others drawn beside them collide, so the finding stands.
-    ``test_a_unique_self_key_needs_no_finding_about_a_composite_uniqueness`` holds the
-    ``apart`` conjunct from one side and
-    ``test_a_unique_self_key_under_nulls_counted_as_one_is_a_finding`` from the other;
-    ``test_a_self_key_under_a_composite_uniqueness_over_repeated_values_is_a_finding``
-    holds ``unique``, since a key that is not unique is a finding either way.
-    """
+    """What a tree beside a draw under a composite uniqueness means, per uniqueness."""
     findings = []
     unique = _is_unique(model, field)
     for label, names, apart in _composite_uniqueness(model, field):
@@ -454,9 +321,7 @@ def _render(
     body = [f"Table({model.__name__}, rows=...,"]
     for field, values in columns.values():
         declaration: str | None
-        # The comma ends the line for a declaration that has not put it before its
-        # comment, which is every one of a key; ``_describe`` has, and a second
-        # would sit inside the comment it writes.
+        # The comma goes before any comment, or it lands inside the comment it writes.
         comma = ","
         extra: list[str] = []
         if field.is_relation and field.related_model is model:
@@ -491,10 +356,5 @@ def _render(
 
 
 def _read(field: Field[Any, Any]) -> str:
-    """The attribute holding this column's value on an unsaved-or-saved instance.
-
-    ``attname`` rather than ``name`` for a relation, so a foreign key is read as
-    the key it stores rather than by fetching the parent -- which would be a
-    query per row and would describe the parent instead of this column.
-    """
+    """The attribute holding this column's value on an unsaved-or-saved instance."""
     return field.attname
