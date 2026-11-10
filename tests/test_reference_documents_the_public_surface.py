@@ -1,20 +1,3 @@
-"""The reference page and ``__all__`` are one claim, so they are checked as one.
-
-``docs/reference.md`` is hand-maintained, and drift in it is invisible: an entry
-that names a symbol which is not exported still builds, because mkdocstrings
-resolves the full dotted path and never consults ``__all__``. That is how three
-documented functions came to be reachable only as
-``django_data_shape.declaration.check_constraints.check_constraints`` while
-``from django_data_shape import check_constraints`` silently handed back the
-*module* of the same name -- an import that succeeds and then fails at the call
-site with "module object is not callable". A missing entry drifts the other way
-just as quietly: ``ShapeNotEmpty`` was raised by ``build`` and exported for
-several releases without appearing on the page at all.
-
-Neither direction can be caught by the docs build or by the type checker, so it
-is caught here.
-"""
-
 from __future__ import annotations
 
 import re
@@ -44,10 +27,7 @@ def _documented() -> dict[str, str]:
 
 
 def _exported() -> set[str]:
-    """Every name in ``__all__`` that a reference entry could describe.
-
-    ``__version__`` is a string, and mkdocstrings has nothing to render for it.
-    """
+    """Every name in ``__all__`` that a reference entry could describe."""
     return {name for name in django_data_shape.__all__ if not name.startswith("__")}
 
 

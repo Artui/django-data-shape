@@ -1,20 +1,3 @@
-"""The package root is a table of contents, not a drawer.
-
-The structural rules this package is written to governed *files* -- one exported
-symbol each, named after it -- and every one of them was obeyed while forty-two
-modules piled up at the package root. A rule about files cannot notice a rule
-about directories being broken, and prose about directories would have rotted
-the same way, so the directory rule is asserted here instead.
-
-Two failures are caught. **A new module at the root** is the drift the rule
-exists to stop: the allowlist below is short and deliberate, and a module that
-does anything belongs in the subpackage named for the concern it serves.
-**A root module sharing a name with one inside a subpackage** is the other half,
-and it is not hypothetical in this family -- a sibling repo grew two modules
-twice each, once at the root and once under ``types/``, while every file rule
-held.
-"""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -40,8 +23,7 @@ def _subpackages() -> list[Path]:
 
 
 def test_the_package_is_where_this_test_thinks_it_is() -> None:
-    # Without this, both tests below pass by finding nothing at all, which is the
-    # failure mode of every test that discovers its own inputs.
+    # Without this, both tests below pass by finding nothing at all.
     assert _modules(_PACKAGE) >= _ALLOWED_AT_THE_ROOT
     assert len(_subpackages()) >= 4
 
