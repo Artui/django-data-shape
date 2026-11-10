@@ -1,11 +1,3 @@
-"""A tree under a uniqueness that nothing arranges, refused when the shape is declared.
-
-The models are declared here under ``isolate_apps`` rather than in the test app,
-because every test below stops at ``Shape()`` or at the plan and none needs a
-table. It also keeps this module importable against a tree without the refusals, where each
-refusal test fails on its assertion rather than dying at import.
-"""
-
 from __future__ import annotations
 
 import django
@@ -282,13 +274,10 @@ def _refusal(*tables: Table) -> str:
 
 
 def _assert_names_only_what_a_tree_accepts(message: str) -> None:
-    # Table refuses all three over a tree, so a refusal offering one of them
-    # would send the reader from one refusal straight to another.
     assert "scope='group'" not in message
     assert "Paired(" not in message
     assert "PerParent(" not in message
-    # Each caller's constraint is keys alone beside the tree, and Table refuses a distribution
-    # on a key, so there is no column to make Distinct.
+    # Table refuses all three over a tree, so no refusal may offer one of them.
     assert "Distinct" not in message
     assert "Projection" in message
 
@@ -314,8 +303,7 @@ def _folders(parent: Tree, rows: int) -> Table:
 def test_a_flat_tree_gives_no_row_two_children(
     rows: int, roots: float, seed: int, table: str, field: str
 ) -> None:
-    # What the exemptions below stand on, read from what the build uses. The
-    # table and field are varied because every other tree figure moves with them.
+    # What the exemptions below stand on, read from what the build uses.
     plan = resolve_tree(Tree(roots=roots, sizes=Constant(1)), rows, seed, table, field)
     parents = [plan.parent_for(row) for row in range(rows)]
     children = [parent for parent in parents if parent is not None]
@@ -324,8 +312,7 @@ def test_a_flat_tree_gives_no_row_two_children(
 
 
 def test_a_flat_tree_of_no_weight_is_refused_when_it_is_resolved() -> None:
-    # Reads as one value, so no constraint refuses it, and it has no children to
-    # share out: the refusal is the build's, before any row reaches COPY.
+    # It reads as one value and has no children to share out, so the build refuses it.
     Shape(_folders(Tree(roots=0.05, sizes=Constant(0)), rows=20))
 
     with pytest.raises(InvalidShape, match="sum to 0.0"):
@@ -333,8 +320,7 @@ def test_a_flat_tree_of_no_weight_is_refused_when_it_is_resolved() -> None:
 
 
 def test_a_flat_tree_beside_a_fan_out_is_accepted() -> None:
-    # Five parents cannot make the fan-out's own proof at 500 rows, so the tree
-    # is the only thing keeping this constraint.
+    # Five parents cannot make the fan-out's own proof, so the tree keeps the constraint.
     Shape(_companies(5), Table(Branch, rows=500, parent=_flat(), company=FanOut(Zipf())))
 
 
@@ -370,8 +356,7 @@ def test_a_flat_tree_in_a_conditional_uniqueness_is_accepted() -> None:
 
 
 def test_a_flat_tree_beside_a_fan_out_in_a_conditional_uniqueness_is_accepted() -> None:
-    # This constraint has a fan-out in it, so it would go to the fan-out's
-    # conditional check, and the tree answers it before that.
+    # The tree answers before the fan-out's conditional check gets a say.
     Shape(
         _companies(),
         Table(
@@ -392,9 +377,7 @@ def _refusal_alone(model: type[models.Model], rows: int, tree: Tree) -> str:
 
 
 def test_a_flat_tree_alone_under_a_uniqueness_is_accepted() -> None:
-    # Every spelling of a unique self-key is one fact, so the proof that holds
-    # beside a draw holds with nothing beside it, as FanOut(max_children=1) does
-    # on a unique column. Through Shape, since Table cannot see a constraint.
+    # Through Shape, since Table cannot see a constraint.
     with isolate_apps("tests.testapp"):
 
         class Alone(models.Model):
@@ -453,8 +436,7 @@ def test_a_table_with_two_children_is_refused_alone(model: type[models.Model]) -
 
 
 def test_a_unique_self_key_that_refuses_null_stays_refused_however_flat() -> None:
-    # A root is NULL and the first row is always one, whichever spelling makes
-    # the key unique, so no proof about children reaches this.
+    # A root is NULL and the first row always is one, so no child proof reaches this.
     with isolate_apps("tests.testapp"):
 
         class Required(models.Model):
@@ -487,15 +469,12 @@ _NEEDS_NULLS_DISTINCT = pytest.mark.skipif(
     ],
 )
 def test_roots_counted_as_one_group_collide_alone(tree: Tree, rows: int) -> None:
-    # The roots hold one NULL between them, so the proof that a flat tree keeps a
-    # uniqueness is false here, and leaving the column out loads that NULL in
-    # every row.
+    # The refusal must not offer the shape it has just refused, or the other one.
     message = _refusal(Table(TiedLink, rows=rows, previous=tree))
 
     assert "one_tied_link_after_each" in message
     assert "nulls_distinct=False" in message
     assert "Projection" in message
-    # The refusal must not offer the shape it has just refused, or the other one.
     assert "Constant(1))," not in message
     assert "previous=Tree(" not in message
     assert "fill it after the build" not in message
@@ -507,13 +486,11 @@ def test_roots_counted_as_one_group_collide_alone(tree: Tree, rows: int) -> None
     [(Tree(roots=0.05, sizes=Constant(1)), 300), (Tree(roots=0.95, sizes=Zipf()), 20)],
 )
 def test_roots_counted_as_one_group_collide_beside_a_draw(tree: Tree, rows: int) -> None:
-    # Every root holds the same NULL, so the roots collide among themselves
-    # however few children the tree gives anyone.
+    # The refusal must not offer the shape it has just refused.
     message = _refusal(Table(NullFolder, rows=rows, parent=tree, name=Skew({"a": 1, "b": 1})))
 
     assert "one_null_folder" in message
     assert "is a Tree beside" in message
-    # The refusal must not offer the shape it has just refused.
     assert "Constant(1)," not in message
 
 
@@ -555,10 +532,7 @@ def test_roots_counted_as_one_group_collide_beside_a_fan_out_in_a_conditional() 
 
 @_NEEDS_NULLS_DISTINCT
 def test_nulls_counted_together_under_another_constraint_change_nothing_here() -> None:
-    # The reading is per constraint, because the NULLs of one index say nothing
-    # about another's.
-    # The second is declared because a column left out of it holds one NULL in every
-    # row, which no load survives.
+    # The reading is per constraint, because the NULLs of one index say nothing about another's.
     Shape(
         Table(
             TwoRules, rows=300, parent=_flat(), name=Skew({"a": 1, "b": 1}), code=Sequential(1, 1)
@@ -640,8 +614,7 @@ def test_a_tree_beside_a_fan_out_over_enough_parents_is_offered_a_cap_of_one() -
 
 
 def test_a_tree_beside_a_fan_out_with_a_cap_of_one_is_accepted() -> None:
-    # A pair is distinct as soon as either half is, and a cap of one never
-    # repeats a company. This is the exemption the fan-out side can prove.
+    # A pair is distinct as soon as either half is, and a cap of one never repeats a company.
     Shape(
         _companies(300),
         Table(Branch, rows=200, parent=_tree(), company=FanOut(Zipf(), max_children=1)),
@@ -656,8 +629,7 @@ def test_a_tree_beside_a_flat_fan_out_over_enough_parents_is_accepted() -> None:
 
 
 def test_a_tree_beside_a_flat_fan_out_one_row_over_is_refused() -> None:
-    # One row more than parents gives some parent two rows, and the exemption
-    # stops there. It reads the fan-out and never the tree.
+    # One row more than parents gives some parent two rows, and the exemption stops there.
     message = _refusal(
         _companies(199),
         Table(Branch, rows=200, parent=_tree(), company=FanOut(Constant(1))),
@@ -690,8 +662,7 @@ def test_a_tree_beside_a_fan_out_and_a_distinct_column_is_accepted() -> None:
 
 
 def test_a_tree_beside_a_fan_out_and_a_column_that_does_not_move_is_refused() -> None:
-    # The protocol answers for the parameters and not the class. Without the
-    # is_distinct_per_row() conjunct, a zero step is accepted here.
+    # The protocol answers for the parameters and not the class.
     message = _refusal(
         _companies(),
         Table(Unit, rows=200, parent=_tree(), company=FanOut(Zipf()), label=Sequential(0, 0)),
@@ -701,9 +672,7 @@ def test_a_tree_beside_a_fan_out_and_a_column_that_does_not_move_is_refused() ->
 
 
 def test_a_tree_beside_a_fan_out_and_a_derivation_is_left_to_the_other_two_nets() -> None:
-    # A group-scoped derivation over the fan-out can number a company's rows,
-    # which keeps the triple apart whatever the tree does. Its compute= is not
-    # readable, so a refusal here could be the wrong one.
+    # Its compute= is not readable, so a refusal here could be the wrong one.
     Shape(
         _companies(),
         Table(
@@ -770,9 +739,7 @@ def test_a_tree_and_two_fan_outs_keep_the_refusal_that_can_offer_a_pairing() -> 
 
 
 def test_two_trees_under_one_uniqueness_are_refused_as_two_trees() -> None:
-    # This is what keeps `len(trees) != 1` in the drawn-column check. Loosened
-    # to `not trees`, two trees alone reach that check's "tree alone" branch
-    # and come back as a statement about one column.
+    # This is what keeps `len(trees) != 1` in the drawn-column check.
     message = _refusal(Table(Edge, rows=200, left=_tree(), right=_tree()))
 
     assert "one_edge_per_pair" in message
@@ -784,8 +751,7 @@ def test_two_trees_under_one_uniqueness_are_refused_as_two_trees() -> None:
 
 
 def test_two_trees_beside_a_draw_are_refused_as_two_trees() -> None:
-    # The same guard from its other side: loosened, this one comes back as one
-    # tree beside a draw, naming the second tree as though it were drawn.
+    # Loosened, this guard names a second tree as though it were drawn.
     message = _refusal(
         Table(LabelledEdge, rows=200, left=_tree(), right=_tree(), label=Skew({"a": 1, "b": 1}))
     )
@@ -901,8 +867,7 @@ def test_a_condition_this_module_cannot_read_is_left_alone() -> None:
 
 
 def test_a_distribution_that_cannot_enumerate_itself_is_read_as_able_to() -> None:
-    # Unknown is read as a yes, as it is on the fan-out side, and the message
-    # has no share to quote.
+    # Unknown is read as a yes, as it is on the fan-out side, and the message has no share to quote.
     message = _refusal(Table(Reply, rows=200, parent=_tree(), status=Sequential(1, 1)))
 
     assert "one_accepted_reply" in message
@@ -910,9 +875,7 @@ def test_a_distribution_that_cannot_enumerate_itself_is_read_as_able_to() -> Non
 
 
 def test_a_rule_kept_per_a_fan_out_outside_the_constraint_is_refused() -> None:
-    # One accepted reply per company says nothing about how many one parent
-    # gets, and pointing at the constraint's own fields would be pointing at
-    # the tree, which Table refuses to decide anything by.
+    # The declaration is quoted back, so its own PerParent is in the message.
     message = _refusal(
         _companies(),
         Table(
@@ -924,8 +887,6 @@ def test_a_rule_kept_per_a_fan_out_outside_the_constraint_is_refused() -> None:
         ),
     )
 
-    # The declaration is quoted back, so its own PerParent is in the message.
-    # What must not be there is one offered over the tree.
     assert "one_accepted_reply" in message
     assert "decided per company" in message
     assert "PerParent('parent'" not in message
@@ -948,8 +909,7 @@ def test_a_rule_kept_per_a_fan_out_with_nothing_inside_the_condition_is_accepted
 
 
 def test_a_rule_kept_per_a_fan_out_whose_rest_lands_inside_the_condition_is_refused() -> None:
-    # The special row is outside and the rest is inside, which is every other
-    # row. Reading only the special row accepts this.
+    # The special row is outside and the rest is inside, which is every other row.
     message = _refusal(
         _companies(),
         Table(
@@ -965,9 +925,7 @@ def test_a_rule_kept_per_a_fan_out_whose_rest_lands_inside_the_condition_is_refu
 
 
 def test_a_derivation_filling_the_condition_column_is_left_to_the_other_two_nets() -> None:
-    # Its compute= may never land inside the condition, and that is not
-    # readable from here. The one derivation that can be read, PerParent, is
-    # read above.
+    # Its compute= may never land inside the condition, and that is not readable from here.
     Shape(
         Table(
             Reply,
@@ -995,8 +953,7 @@ def test_a_tree_beside_a_draw_in_a_conditional_uniqueness_is_refused() -> None:
 
 
 def test_a_tree_beside_a_distinct_column_in_a_conditional_uniqueness_is_accepted() -> None:
-    # The remedy the refusal names, and why it has to be honoured: every group
-    # holds one row, so the condition has nothing to count.
+    # Every group holds one row, so the condition has nothing to count.
     Shape(
         Table(
             Tagged,
@@ -1050,8 +1007,7 @@ def test_two_trees_in_a_conditional_uniqueness_are_refused() -> None:
 
 
 def test_a_conditional_uniqueness_over_no_tree_and_no_fan_out_is_refused() -> None:
-    # It used to be skipped, since there is no partition to offer a PerParent over. It cannot
-    # load at any seed: about 100 live rows over 2 tags, where the constraint allows 2.
+    # It used to be skipped, since there is no partition to offer a PerParent over.
     with isolate_apps("tests.testapp"):
 
         class Plain(models.Model):
@@ -1084,8 +1040,6 @@ def test_a_conditional_uniqueness_over_no_tree_and_no_fan_out_is_refused() -> No
 
 def test_a_conditional_uniqueness_over_a_tree_and_a_fan_out_names_the_fan_out() -> None:
     # The fan-out's rule still applies, since one row per company is enough.
-    # The remedy has to name the fan-out wherever it sits in the constraint:
-    # the tree comes first here, and a PerParent over it is refused by Table.
     message = _refusal(
         _companies(),
         Table(

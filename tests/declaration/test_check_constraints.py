@@ -1,22 +1,3 @@
-"""Refusing a declaration the models' own constraints could not hold.
-
-Every refusal here is one the database would also make, and would make with a
-unique index failing at row N of a load that has already run for a minute. So
-what is being tested is not that the data is impossible -- PostgreSQL settles
-that -- but that it is said so before a row is generated, and said with the
-arithmetic in it.
-
-**The two unconditional checks interact, and that has broken a test here
-already.** The pigeonhole answers first by design -- "this shape does not fit at
-all" is a more useful instruction than "it fits and nothing arranges it" -- so a
-declaration can be refused by the arithmetic while the arrangement check it was
-written for is never reached. A test asserting an *arrangement* refusal has to be
-sized so the arithmetic cannot answer: give the drawn column enough distinct
-values that the capacity clears the row count, and assert which message came
-back. ``Constant`` is the trap, because its capacity is the parent count exactly.
-The boundary tests below carry that reasoning inline where they depend on it.
-"""
-
 from __future__ import annotations
 
 import datetime
@@ -92,13 +73,7 @@ _LETTERS = "abcdefghijklmnopqrstuvwxyz"
 
 
 def _letter_for_position(group: object) -> str:
-    """One letter per position inside a parent's group of children.
-
-    The shape of a ``Scope.GROUP`` derivation that *does* keep a two-column
-    uniqueness, which is why the refusal names this form: the source resolves to
-    ``(position, size)``, so a value can be chosen per position rather than
-    drawn beside the fan-out.
-    """
+    """One letter per position inside a parent's group of children."""
     position, _size = cast("tuple[int, int]", group)
     return _LETTERS[position % len(_LETTERS)]
 
@@ -118,9 +93,7 @@ def _projects(rows: int = 2000, **overrides: Any) -> Table:
 
 
 def test_a_skew_beside_a_fan_out_under_a_partial_constraint_is_refused() -> None:
-    # The worked example, and the whole reason this pre-check exists. Fifty
-    # companies permit fifty active projects; a tenth of two thousand rows asks
-    # for two hundred.
+    # The worked example, and the whole reason this pre-check exists.
     with pytest.raises(InvalidShape, match="one_active_project_per_company") as raised:
         Shape(
             _companies(50),
@@ -134,10 +107,7 @@ def test_a_skew_beside_a_fan_out_under_a_partial_constraint_is_refused() -> None
 
 
 def test_the_refusal_holds_at_a_share_that_would_have_fitted() -> None:
-    # 2.5% of two thousand rows is fifty, which is exactly the capacity -- and
-    # it is still refused, because a rule about a group cannot be kept by a
-    # draw made per row. A smaller share only moves the collision later into
-    # the load, which is the failure that costs a minute to hear about.
+    # A rule about a group cannot be kept by a draw made per row, even where the share fits.
     with pytest.raises(InvalidShape, match="at any weight"):
         Shape(
             _companies(50),
@@ -146,9 +116,7 @@ def test_the_refusal_holds_at_a_share_that_would_have_fitted() -> None:
 
 
 def test_a_declaration_that_never_writes_the_value_is_accepted() -> None:
-    # Constant enumerates itself, so this is decidable rather than merely
-    # unproven: a table with no active projects at all keeps the rule, and
-    # refusing it would be the pre-check inventing a problem.
+    # Constant enumerates itself, so a table with no active projects keeps the rule.
     Shape(_companies(50), _projects(2000, status=Constant("COMPLETE")))
 
 
@@ -157,9 +125,7 @@ def test_per_parent_over_the_constraints_own_field_is_accepted() -> None:
 
 
 def test_per_parent_grouped_by_something_the_constraint_does_not_group_by() -> None:
-    # Two parents, and the rule is kept per the wrong one. A lead per contest
-    # says nothing at all about how many leads a company ends up with, and the
-    # table's own checks cannot see it: both relations are declared fan-outs.
+    # Two parents, and the rule is kept per the wrong one.
     with pytest.raises(InvalidShape, match="says nothing about how many rows"):
         Shape(
             _companies(50),
@@ -186,8 +152,7 @@ def test_several_winners_per_group_under_a_unique_constraint_is_refused() -> Non
 
 
 def test_a_per_parent_whose_rest_writes_the_constrained_value_is_refused() -> None:
-    # The special value is a different one, so the constraint's value can only
-    # arrive through the rest of the group -- where it arrives in every row.
+    # The constrained value can only arrive through the rest of the group, in every row.
     with pytest.raises(InvalidShape, match="one_active_project_per_company"):
         Shape(
             _companies(50),
@@ -235,10 +200,7 @@ def test_a_per_parent_whose_rest_distribution_writes_it_is_refused() -> None:
 
 
 def test_a_parent_this_shape_does_not_build_leaves_the_number_out() -> None:
-    # The honest half of "declaration time": whether to refuse is decidable
-    # without the parent's row count, and the arithmetic in the message is not.
-    # A project that builds its fifty companies with the ORM gets the refusal
-    # and gets it phrased per group.
+    # Whether to refuse is decidable without the parent's row count; the arithmetic is not.
     with pytest.raises(InvalidShape, match="at most one row with status='ACTIVE'") as raised:
         Shape(_projects(2000, status=Skew({"ACTIVE": 0.1, "COMPLETE": 0.9})))
 
@@ -246,16 +208,13 @@ def test_a_parent_this_shape_does_not_build_leaves_the_number_out() -> None:
 
 
 def test_a_distribution_that_cannot_enumerate_itself_is_still_refused() -> None:
-    # Undecidable in the other direction: nothing can ask a Uniform whether it
-    # emits the value, so the refusal stands and drops the arithmetic.
+    # Nothing can ask a Uniform whether it emits the value, so the arithmetic is dropped.
     with pytest.raises(InvalidShape, match="draws 'ACTIVE' independently per row"):
         Shape(_companies(50), _projects(2000, status=Uniform(0, 1, places=0)))
 
 
 def test_a_two_column_uniqueness_short_of_combinations_is_refused() -> None:
-    # Pigeonhole, and provable however the seed falls -- which is why it is
-    # refused where a table alone declined to guess. Only a whole shape knows
-    # how many companies there are.
+    # Only a whole shape knows how many companies there are.
     with pytest.raises(InvalidShape, match="one_seat_label_per_company") as raised:
         Shape(
             _companies(50),
@@ -268,10 +227,7 @@ def test_a_two_column_uniqueness_short_of_combinations_is_refused() -> None:
 
 
 def test_the_same_uniqueness_with_room_for_every_row_is_still_refused() -> None:
-    # Room, and nothing to arrange it. Fifty companies and two labels hold
-    # exactly a hundred pairs, so every arithmetic check passes -- and the load
-    # died inside COPY at row 17, because a group of three rows draws from two
-    # labels whatever the table's total capacity says.
+    # Room, and nothing to arrange it.
     with pytest.raises(InvalidShape, match="one_seat_label_per_company") as raised:
         Shape(
             _companies(50),
@@ -281,17 +237,11 @@ def test_the_same_uniqueness_with_room_for_every_row_is_still_refused() -> None:
     message = str(raised.value)
     assert "Seat.company is a fan-out beside Seat.label=Skew({'a': 1, 'b': 1})" in message
     assert "The 100 combinations do fit the 100 rows" in message
-    # And it names the one primitive that can be arranged around a group,
-    # rather than leaving a reader to discover it.
     assert "Derived('company', compute=..., scope='group')" in message
 
 
 def test_a_null_share_makes_the_capacity_unknown_rather_than_smaller() -> None:
-    # PostgreSQL counts each NULL in a unique index as distinct, so those rows
-    # are exempt from the constraint entirely -- a capacity computed as though
-    # they were not would name a number that is not true of this shape. The
-    # rows that do have a parent are still unarranged, so the refusal stands
-    # and it is the one that carries no arithmetic.
+    # PostgreSQL counts each NULL as distinct, so a smaller capacity would be untrue.
     with pytest.raises(InvalidShape, match="There may be room for every row") as raised:
         Shape(
             _companies(50),
@@ -307,10 +257,7 @@ def test_a_null_share_makes_the_capacity_unknown_rather_than_smaller() -> None:
 
 
 def test_a_column_no_distribution_bounds_makes_the_capacity_unknown() -> None:
-    # Nothing can ask a Uniform how many values it emits, so the pigeonhole has
-    # no number to compare -- and unbounded is not the same as distinct. Two of
-    # one company's rows landing on the same integer is a coin flip, and the
-    # measured one comes up heads about half the time.
+    # Unbounded is not the same as distinct: two rows of one company can land on one integer.
     with pytest.raises(InvalidShape, match="There may be room for every row"):
         Shape(
             _companies(50),
@@ -324,9 +271,7 @@ def test_a_column_no_distribution_bounds_makes_the_capacity_unknown() -> None:
 
 
 def test_a_column_distinct_in_every_row_keeps_the_constraint_on_its_own() -> None:
-    # The exemption, and the only one that needs no coordination: a pair is
-    # distinct as soon as either half is. Sequential says so through Distinct,
-    # and this declaration loads -- see test_build_invariants.
+    # Sequential says so through Distinct, and this declaration loads -- see test_build_invariants.
     Shape(
         _companies(50),
         Table(Seat, rows=100, company=FanOut(Zipf()), label=Sequential(0, 1)),
@@ -334,9 +279,7 @@ def test_a_column_distinct_in_every_row_keeps_the_constraint_on_its_own() -> Non
 
 
 def test_a_sequential_that_does_not_move_is_not_distinct() -> None:
-    # A zero step writes one value in every row, which is a Constant spelled
-    # the long way -- so the protocol has to answer for the parameters and not
-    # for the class, and the refusal has to come back.
+    # A zero step writes one value in every row, a Constant spelled the long way.
     with pytest.raises(InvalidShape, match="one_seat_label_per_company"):
         Shape(
             _companies(50),
@@ -345,12 +288,7 @@ def test_a_sequential_that_does_not_move_is_not_distinct() -> None:
 
 
 def test_a_partition_that_gives_no_parent_two_rows_cannot_collide() -> None:
-    # The second exemption, and a proof rather than a probability: a collision
-    # here is always two rows of one group drawing the same value, so a
-    # partition with no group of two cannot produce one. Flat weights make every
-    # share rows/parents, and at fifty rows over fifty companies that is exactly
-    # one each -- measured as a largest group of one across every parent count
-    # up to sixty, every row count at or below it, and five seeds.
+    # A partition with no group of two cannot collide: a proof, not a probability.
     Shape(
         _companies(50),
         Table(Seat, rows=50, company=FanOut(Constant(1)), label=Constant("x")),
@@ -358,8 +296,7 @@ def test_a_partition_that_gives_no_parent_two_rows_cannot_collide() -> None:
 
 
 def test_the_exemption_holds_below_the_boundary_as_well_as_on_it() -> None:
-    # Fewer rows than parents leaves every share below one, so the largest
-    # remainder hands out forty-nine single rows and one company gets none.
+    # Fewer rows than parents leaves every share below one, so no group of two forms.
     Shape(
         _companies(50),
         Table(Seat, rows=49, company=FanOut(Constant(1)), label=Constant("x")),
@@ -368,11 +305,6 @@ def test_the_exemption_holds_below_the_boundary_as_well_as_on_it() -> None:
 
 def test_the_boundary_is_where_the_proof_stops_and_the_refusal_starts() -> None:
     # Two labels rather than one, on purpose, and the pair below is the point.
-    # Fifty rows over fifty companies is one seat each and cannot collide;
-    # fifty-one gives some company two, and two rows of one group drawing from
-    # {a, b} agree half the time. Constant would not test this at all -- its
-    # capacity is fifty, so the pigeonhole would answer first and the bound
-    # being asserted here would never be reached.
     Shape(
         _companies(50),
         Table(Seat, rows=50, company=FanOut(Constant(1)), label=Skew({"a": 1, "b": 1})),
@@ -384,16 +316,11 @@ def test_the_boundary_is_where_the_proof_stops_and_the_refusal_starts() -> None:
             Table(Seat, rows=51, company=FanOut(Constant(1)), label=Skew({"a": 1, "b": 1})),
         )
 
-    # The arrangement refusal and not the arithmetic one: a hundred pairs hold
-    # fifty-one rows comfortably, so the pigeonhole passes it exactly as it did
-    # one row earlier.
     assert "is a fan-out beside" in str(raised.value)
 
 
 def test_a_childless_share_takes_the_proof_away() -> None:
-    # A childless parent is weighed at zero and its rows go to the others, which
-    # is what breaks the bound rather than tightening it: at childless=0.1 the
-    # largest group over fifty rows and fifty companies is two.
+    # A childless share breaks the bound: its rows go to the others and pile up.
     with pytest.raises(InvalidShape, match="one_seat_label_per_company"):
         Shape(
             _companies(50),
@@ -407,9 +334,7 @@ def test_a_childless_share_takes_the_proof_away() -> None:
 
 
 def test_a_cap_of_one_is_a_proof_whatever_the_sizes() -> None:
-    # max_children=1 bounds the partition itself, so none of the other four
-    # conditions is needed: skewed sizes, a childless share, and a parent this
-    # shape does not build would each take the flat-sizes proof away.
+    # A cap of one bounds the partition itself, so the other conditions are not needed.
     capped = FanOut(Zipf(), childless=0.3, max_children=1)
 
     Shape(Table(Seat, rows=50, company=capped, label=Constant("x")))
@@ -426,9 +351,7 @@ def test_a_cap_of_one_is_a_proof_whatever_the_sizes() -> None:
 
 
 def test_a_cap_of_one_keeps_a_pair_unique_beside_a_second_fan_out() -> None:
-    # The composite-unique call site: two fan-outs on one through table are
-    # refused unless one of them provably gives no parent two rows, and a cap
-    # of one is that proof whatever the other fan-out does.
+    # A cap of one is the proof a pair needs, whatever the other fan-out does.
     Shape(
         _companies(100),
         Table(Person, rows=10, name=Constant("p")),
@@ -443,8 +366,7 @@ def test_a_cap_of_one_keeps_a_pair_unique_beside_a_second_fan_out() -> None:
 
 
 def test_a_cap_of_two_is_not() -> None:
-    # The proof is a cap of exactly one; two rows on one parent is all a
-    # collision needs.
+    # The proof is a cap of exactly one; two rows on one parent is all a collision needs.
     with pytest.raises(InvalidShape, match="one_seat_label_per_company"):
         Shape(
             _companies(100),
@@ -458,17 +380,13 @@ def test_a_cap_of_two_is_not() -> None:
 
 
 def test_a_parent_this_shape_does_not_build_takes_the_proof_away_too() -> None:
-    # The bound is rows against parents, and a parent loaded by the caller has
-    # however many rows it has. A bound resting on a number this package cannot
-    # read is not a bound, so the refusal stands.
+    # A bound resting on a number this package cannot read is not a bound, so the refusal stands.
     with pytest.raises(InvalidShape, match="one_seat_label_per_company"):
         Shape(Table(Seat, rows=50, company=FanOut(Constant(1)), label=Constant("x")))
 
 
 def test_sizes_that_are_not_provably_flat_are_not_exempt() -> None:
-    # Uniform(1, 10) is bounded by nothing this can read and gives a largest
-    # group of two at the very numbers Constant(1) gives one. "Usually one each"
-    # is not the question -- the exemption is a proof or it is not there.
+    # "Usually one each" is not the question -- the exemption is a proof or it is not there.
     with pytest.raises(InvalidShape, match="one_seat_label_per_company"):
         Shape(
             _companies(50),
@@ -482,10 +400,7 @@ def test_sizes_that_are_not_provably_flat_are_not_exempt() -> None:
 
 
 def test_a_column_derived_from_the_group_is_left_to_the_other_two_nets() -> None:
-    # The exemption that is the point rather than a gap. A derivation reads
-    # something other than its own row index, so it is the one kind of
-    # declaration that can be arranged around a group -- and whether a
-    # particular compute= is arranged around it is not readable here.
+    # The exemption that is the point rather than a gap.
     Shape(
         _companies(50),
         Table(
@@ -498,31 +413,7 @@ def test_a_column_derived_from_the_group_is_left_to_the_other_two_nets() -> None
 
 
 def test_every_constraint_this_cannot_read_is_left_to_the_other_two_nets() -> None:
-    # Seven skips in one model: a condition over an expression rather than
-    # fields, one joining two clauses with AND, an OR whose branches name two
-    # different columns, a negated OR, an OR one of whose branches is a
-    # comparison, a comparison as a keyword argument and the same comparison as
-    # a bare lookup expression -- which arrive as different shapes of child and
-    # take different exits -- plus a check constraint, which is not a unique
-    # constraint at all.
-    #
-    # Three used to live here and moved out when they stopped being skips:
-    # state__in to Review, a nested Q(Q(a) | Q(b)) to Approval, and a condition
-    # grouped by a plain column to
-    # test_a_condition_grouped_by_a_plain_column_is_refused. What is left
-    # is what genuinely describes no set of values for one column -- and the
-    # three OR shapes are here to hold that line, because the recursion that
-    # reads an OR-tree is the thing most likely to be widened past it.
-    #
-    # state is Skew({HELD, PAID}) and seats is Constant(0) on purpose: read as
-    # sets, those conditions would be decided and decided as refusals, so a
-    # decoder that stopped drawing the line here fails rather than passing
-    # quietly.
-    #
-    # seats is Constant(0) against a `seats__gt=0` condition on purpose: read as
-    # an equality that condition would be decided, and decided as a refusal, so
-    # a suffix check that stopped telling a lookup from an equality fails here
-    # rather than passing quietly.
+    # Constraints this cannot read are skipped and left to the other two nets.
     Shape(
         _companies(50),
         Table(
@@ -537,11 +428,7 @@ def test_every_constraint_this_cannot_read_is_left_to_the_other_two_nets() -> No
 
 
 def test_a_fan_out_on_a_one_to_one_is_refused() -> None:
-    # The instance neither path was checking: a unique=True column makes no
-    # entry in _meta.constraints, so this loop never saw it, and Table steps
-    # over a fan-out because whether a partition gives any parent two rows
-    # depends on the parent's row count -- which one table cannot see and a
-    # shape can. Measured 0/20: it does not merely usually fail, it never loads.
+    # Measured 0/20: it does not merely usually fail, it never loads.
     with pytest.raises(InvalidShape) as raised:
         Shape(
             _companies(100),
@@ -560,8 +447,6 @@ def test_a_fan_out_on_a_one_to_one_is_refused() -> None:
 
 
 def test_a_fan_out_that_cannot_collide_keeps_a_one_to_one() -> None:
-    # The same proof the other three refusals carry: a partition giving no
-    # parent two rows cannot break a uniqueness on that column either.
     # Measured 20/20 at exactly these numbers.
     Shape(
         _companies(100),
@@ -576,9 +461,7 @@ def test_a_fan_out_that_cannot_collide_keeps_a_one_to_one() -> None:
 
 
 def test_the_two_fan_out_refusal_names_the_pairing_that_replaces_it() -> None:
-    # The remedy this refusal named used to be raw SQL, because nothing else
-    # could keep the constraint. Paired is that algorithm, so the message points
-    # at the declaration first and keeps the statement as the escape hatch.
+    # Paired is that algorithm, so the message points at the declaration before the statement.
     with pytest.raises(InvalidShape) as raised:
         Shape(
             _companies(50),
@@ -598,14 +481,7 @@ def test_the_two_fan_out_refusal_names_the_pairing_that_replaces_it() -> None:
 
 
 def test_a_pairing_beside_a_fan_out_keeps_the_constraint_and_is_accepted() -> None:
-    """The declaration the refusal above sends a reader to has to be accepted.
-
-    It is exempt for a reason rather than by omission: a pairing takes distinct
-    partners inside each group, so no two rows of one group share a partner and
-    no two rows of different groups share a pair. That is the same "a pair is
-    distinct as soon as either half is" the other exemptions rest on, arrived at
-    from the group rather than from the column.
-    """
+    """The declaration the refusal above sends a reader to has to be accepted."""
     Shape(
         _companies(50),
         Table(Person, rows=200, name=Constant("p")),
@@ -620,13 +496,7 @@ def test_a_pairing_beside_a_fan_out_keeps_the_constraint_and_is_accepted() -> No
 
 
 def test_a_composite_uniqueness_with_no_fan_out_at_all_is_refused() -> None:
-    # The instance the two fan-out refusals do not reach, and the one that shows
-    # the fan-out was never what was special. Both columns are drawn per row and
-    # nothing partitions either, so nothing enumerates the pairs.
-    #
-    # Three hundred combinations for fifty rows -- six times the room -- loaded
-    # zero runs out of twenty. Ten thousand combinations, two hundred times the
-    # room, still failed two.
+    # Both columns are drawn per row and nothing partitions either, so nothing enumerates the pairs.
     with pytest.raises(InvalidShape) as raised:
         Shape(
             Table(
@@ -644,15 +514,12 @@ def test_a_composite_uniqueness_with_no_fan_out_at_all_is_refused() -> None:
 
 
 def test_a_distinct_column_keeps_a_composite_uniqueness_with_no_fan_out() -> None:
-    # The same exemption the fan-out refusals carry, and for the same one-line
-    # reason: a pair is distinct as soon as either half is. Measured 20/20.
+    # Measured 20/20.
     Shape(Table(Coupon, rows=50, batch=Constant("b"), code=Sequential(0, 1)))
 
 
 def test_a_composite_uniqueness_short_of_combinations_still_says_so_first() -> None:
-    # Ordering again: the pigeonhole answers first where it can, because "this
-    # does not fit at all" is a different instruction from "it fits and nothing
-    # arranges it".
+    # The pigeonhole answers first: 'does not fit at all' is a different instruction.
     with pytest.raises(InvalidShape) as raised:
         Shape(Table(Coupon, rows=50, batch=Constant("b"), code=Skew({"c0": 1, "c1": 1})))
 
@@ -660,18 +527,12 @@ def test_a_composite_uniqueness_short_of_combinations_still_says_so_first() -> N
 
 
 def test_a_column_the_shape_leaves_undeclared_takes_the_refusal_away() -> None:
-    # Nullable and undeclared, so every row loads NULL -- and PostgreSQL counts
-    # each NULL in a unique index as its own value, so no two rows collide
-    # whatever the other column draws. Refusing this would be the pre-check
-    # inventing a problem the database does not have.
+    # Refusing this would be the pre-check inventing a problem the database does not have.
     Shape(Table(Voucher, rows=50, batch=Skew({f"b{i}": 1 for i in range(10)})))
 
 
 def test_a_derivation_in_the_constraint_is_left_alone_here_too() -> None:
-    # A derivation reads something other than its own row index, which is what
-    # makes it the one declaration able to arrange values across rows. Whether a
-    # particular compute= does is not readable from here, and refusing on a
-    # callable this package cannot read would be the refusal that is wrong.
+    # A derivation can arrange values across rows, so refusing on its callable would be wrong.
     Shape(
         Table(
             Coupon,
@@ -683,14 +544,7 @@ def test_a_derivation_in_the_constraint_is_left_alone_here_too() -> None:
 
 
 def test_a_condition_spelled_as_a_set_is_read_like_an_equality() -> None:
-    # "One open review per company", where open-ness is three statuses rather
-    # than one. status is undeclared and comes from the model default, which
-    # Table folds into Constant('DRAFT') -- a value inside the set, so every row
-    # matches the condition and fifty of them land in one company's group.
-    #
-    # This was reported by a consumer as the arithmetic only seeing columns the
-    # caller declared. It sees the folded default perfectly well; what it could
-    # not read was the __in, and the identical shape spelled with = was refused.
+    # "One open review per company", where open-ness is three statuses rather than one.
     with pytest.raises(InvalidShape) as raised:
         Shape(_companies(50), Table(Review, rows=2000, company=FanOut(Zipf())))
 
@@ -701,9 +555,7 @@ def test_a_condition_spelled_as_a_set_is_read_like_an_equality() -> None:
 
 
 def test_a_set_condition_no_declared_value_can_match_is_accepted() -> None:
-    # The direction that must not become a refusal: Constant enumerates itself,
-    # 'ARCHIVED' is in none of the three, so no row the shape builds is even
-    # inside the constraint's condition.
+    # Constant enumerates itself, and no value the shape declares is inside the set.
     Shape(
         _companies(50),
         Table(Review, rows=2000, company=FanOut(Zipf()), status=Constant("ARCHIVED")),
@@ -711,10 +563,7 @@ def test_a_set_condition_no_declared_value_can_match_is_accepted() -> None:
 
 
 def test_a_set_condition_is_refused_on_the_share_of_any_one_member() -> None:
-    # A draw that lands inside the set only sometimes is still refused, for the
-    # reason the equality form is: a rule about a group cannot be kept by a
-    # draw made per row. The quoted arithmetic totals every member of the set,
-    # because any of them puts the row inside the condition.
+    # A draw inside the set only sometimes is still refused, as the equality form is.
     with pytest.raises(InvalidShape) as raised:
         Shape(
             _companies(50),
@@ -730,8 +579,7 @@ def test_a_set_condition_is_refused_on_the_share_of_any_one_member() -> None:
 
 
 def test_a_per_parent_whose_special_value_is_inside_the_set_is_accepted() -> None:
-    # The remedy the message names, spelled against a set condition: one row of
-    # each group inside the set, the rest outside it.
+    # One row of each group inside the set, the rest outside, is the remedy.
     Shape(
         _companies(50),
         Table(
@@ -744,9 +592,7 @@ def test_a_per_parent_whose_special_value_is_inside_the_set_is_accepted() -> Non
 
 
 def test_a_per_parent_whose_rest_is_also_inside_the_set_is_refused() -> None:
-    # The trap the set form adds: `last` is inside the condition and so is
-    # `rest`, so every row of every group matches and the constraint is broken
-    # by the declaration that fixes the equality form.
+    # A rest inside the set puts every row of every group inside the condition.
     with pytest.raises(InvalidShape) as raised:
         Shape(
             _companies(50),
@@ -763,10 +609,6 @@ def test_a_per_parent_whose_rest_is_also_inside_the_set_is_refused() -> None:
 
 def test_an_or_tree_of_equalities_is_read_like_the_set_it_is() -> None:
     # The third spelling of one rule, and the one the consumer actually wrote.
-    # Reading __in and not this made the arithmetic depend on which of two
-    # equivalent spellings an ORM offered no reason to choose between -- so the
-    # fix for the set form was aimed one return statement too narrowly, which
-    # the same consumer said before this test existed.
     with pytest.raises(InvalidShape) as raised:
         Shape(
             _companies(50),
@@ -785,11 +627,7 @@ def test_an_or_tree_of_equalities_is_read_like_the_set_it_is() -> None:
 
 
 def test_an_or_tree_that_is_nested_and_repeats_a_value_is_read_as_one_set() -> None:
-    # Django hands `Q(Q(a) | Q(b))` over as a single child that is itself a Q,
-    # a different object graph from the same expression written bare -- so
-    # reading both is recursion rather than a second case. And the set is a set:
-    # 'OPEN' named twice is one member, or the share below would be totalled
-    # twice and quote a number the declaration never asked for.
+    # A nested Q is read by recursion, and a repeated value is one member of the set.
     with pytest.raises(InvalidShape) as raised:
         Shape(
             _companies(50),
@@ -807,9 +645,7 @@ def test_an_or_tree_that_is_nested_and_repeats_a_value_is_read_as_one_set() -> N
 
 
 def test_a_set_condition_written_as_a_set_is_ordered_before_it_is_quoted() -> None:
-    # A set literal reaches the message too, and a message that reordered
-    # itself between runs would be one no test could assert on and no reader
-    # could compare across two failures.
+    # A message that reordered itself between runs could not be asserted on.
     with pytest.raises(InvalidShape) as raised:
         Shape(_companies(50), Table(Escalation, rows=2000, company=FanOut(Zipf())))
 
@@ -817,8 +653,7 @@ def test_a_set_condition_written_as_a_set_is_ordered_before_it_is_quoted() -> No
 
 
 def test_a_condition_on_a_column_this_shape_leaves_undeclared_is_skipped() -> None:
-    # Nullable and undeclared, so every row holds the same nothing and the
-    # constraint has nothing to weigh.
+    # Every row holds the same nothing, so the constraint has nothing to weigh.
     Shape(
         _companies(50),
         Table(Invitation, rows=2000, company=FanOut(Zipf()), label=Constant("x")),
@@ -826,8 +661,7 @@ def test_a_condition_on_a_column_this_shape_leaves_undeclared_is_skipped() -> No
 
 
 def test_a_projection_is_skipped_entirely() -> None:
-    # Its columns are copied along a join rather than drawn, so there is no
-    # declared share for a capacity to be compared against.
+    # Its columns are copied along a join, so there is no declared share to compare.
     shape = Shape(
         Table(Template, rows=5, name=Constant("t")),
         Table(Venue, rows=2, name=Constant("v")),
@@ -852,10 +686,6 @@ def test_a_projection_is_skipped_entirely() -> None:
 
 
 def test_two_fan_outs_under_one_uniqueness_are_refused_by_name() -> None:
-    # The through table of a many-to-many, and the case the arithmetic cannot
-    # see: twenty companies and twenty people leave four hundred pairs for two
-    # hundred rows, so the pigeonhole check passes it and the load dies inside
-    # COPY on a unique violation, at a row number that moves with the seed.
     # Room was never the question -- nothing enumerates the combinations.
     with pytest.raises(InvalidShape, match="one_membership_per_company_person") as raised:
         Shape(
@@ -872,16 +702,11 @@ def test_two_fan_outs_under_one_uniqueness_are_refused_by_name() -> None:
 
     message = str(raised.value)
     assert "Membership.company, Membership.person are fan-outs" in message
-    # And it points at the form that does build one today, rather than leaving a
-    # reader to discover that the escape hatch is also the answer.
     assert "Projection(Membership, columns=(...), sql=...)" in message
 
 
 def test_two_fan_outs_under_unique_together_are_refused_naming_the_tuple() -> None:
-    # The same through table spelled the older way. unique_together writes no
-    # entry in _meta.constraints, so a check reading only that list let this
-    # through and the load died inside COPY -- at line 15 of the edge table for
-    # seed 0, measured on PostgreSQL against 0.24.0.
+    # The same through table spelled the older way.
     with pytest.raises(InvalidShape) as raised:
         Shape(
             _companies(20),
@@ -895,10 +720,7 @@ def test_two_fan_outs_under_unique_together_are_refused_naming_the_tuple() -> No
 
 
 def test_unique_together_is_counted_by_the_pigeonhole_too() -> None:
-    # Twenty companies and five people leave a hundred pairs for two hundred
-    # rows, and that is the first answer, before the two fan-outs are asked
-    # about. Both columns are fan-outs because a Paired partner has no capacity
-    # this check can count.
+    # Both columns are fan-outs because a Paired partner has no capacity this check can count.
     with pytest.raises(InvalidShape) as raised:
         Shape(
             _companies(20),
@@ -913,9 +735,7 @@ def test_unique_together_is_counted_by_the_pigeonhole_too() -> None:
 
 
 def test_unique_together_takes_the_remedy_its_refusal_names() -> None:
-    # Paired is what the message points at, and it has to be accepted under
-    # this spelling as it is under a UniqueConstraint, or the refusal would name
-    # a way out that is itself refused.
+    # The remedy named must be accepted here too, or the refusal names a refused way out.
     Shape(
         _companies(20),
         Table(Person, rows=20, name=Constant("p")),
@@ -924,11 +744,7 @@ def test_unique_together_takes_the_remedy_its_refusal_names() -> None:
 
 
 def test_a_tree_beside_a_drawn_column_under_one_uniqueness_is_refused() -> None:
-    # A file system's rule: names unique among siblings. The tree gives a row
-    # several children whenever its sizes say so, and a name drawn per row
-    # cannot see which siblings it has, so two of them sharing one is a matter
-    # of the seed. A tree has no capacity this module can count, so the
-    # pigeonhole never answers first and this is the only check that can.
+    # A file system's rule: names unique among siblings.
     with pytest.raises(InvalidShape, match="one_name_per_folder") as raised:
         Shape(
             Table(
@@ -942,16 +758,12 @@ def test_a_tree_beside_a_drawn_column_under_one_uniqueness_is_refused() -> None:
 
     message = str(raised.value)
     assert "Folder.parent is a Tree beside Folder.name=" in message
-    # The remedies it names have to be ones a tree accepts: nothing is derived
-    # per family of a tree, so the group-scoped derivation the fan-out refusal
-    # points at would itself be refused.
     assert "scope='group'" not in message
     assert "Distinct" in message
 
 
 def test_a_tree_beside_a_column_distinct_in_every_row_is_accepted() -> None:
-    # A pair is distinct as soon as either half is, so a Sequential name keeps
-    # the constraint on its own, whatever families the tree makes.
+    # A pair is distinct as soon as either half is, so a Sequential name keeps it unique.
     Shape(
         Table(
             Folder,
@@ -964,9 +776,7 @@ def test_a_tree_beside_a_column_distinct_in_every_row_is_accepted() -> None:
 
 
 def test_a_tree_beside_a_column_that_does_not_move_is_refused() -> None:
-    # A zero step writes one value in every row, so the pair is not distinct
-    # through the name: the protocol answers for the parameters and not the
-    # class. Without the is_distinct_per_row() conjunct, this is accepted.
+    # Without the is_distinct_per_row() conjunct, this is accepted.
     with pytest.raises(InvalidShape, match="one_name_per_folder"):
         Shape(
             Table(
@@ -980,9 +790,7 @@ def test_a_tree_beside_a_column_that_does_not_move_is_refused() -> None:
 
 
 def test_a_tree_beside_a_derivation_is_left_to_the_other_two_nets() -> None:
-    # The exemption every arrangement check carries: a derivation reads
-    # something other than its own row index, and whether its compute= keeps
-    # the siblings apart is not readable here.
+    # Whether a derivation keeps the siblings apart is not readable here.
     Shape(
         Table(
             Folder,
@@ -995,9 +803,7 @@ def test_a_tree_beside_a_derivation_is_left_to_the_other_two_nets() -> None:
 
 
 def test_a_tree_alone_under_a_uniqueness_is_refused_as_a_unique_column_is() -> None:
-    # unique=True is refused on the field, and a UniqueConstraint over the one
-    # column says the same thing without the field knowing. A tree of a skew gives
-    # some parents several children, which one link per row cannot hold.
+    # A tree of a skew gives some parents several children, which one link per row cannot hold.
     with pytest.raises(
         InvalidShape, match="one_link_after_each permits one row per Chain"
     ) as raised:
@@ -1008,9 +814,7 @@ def test_a_tree_alone_under_a_uniqueness_is_refused_as_a_unique_column_is() -> N
 
 
 def test_a_single_fan_out_under_a_uniqueness_says_which_columns_it_means() -> None:
-    # One fan-out and one drawn column is the same defect one column over, and
-    # it gets its own message rather than the two-fan-out one: the obstruction
-    # is the same and the remedy is not.
+    # One fan-out and one drawn column is the same defect with its own message and remedy.
     with pytest.raises(InvalidShape, match="one_seat_label_per_company") as raised:
         Shape(
             _companies(50),
@@ -1023,9 +827,7 @@ def test_a_single_fan_out_under_a_uniqueness_says_which_columns_it_means() -> No
 
 
 def test_one_partition_with_no_group_of_two_is_enough_for_both_fan_outs() -> None:
-    # Both flat, and neither can repeat a parent key: twenty rows over twenty
-    # companies is one membership each, so no two rows share a company and the
-    # pair is distinct on that half alone.
+    # Both flat with no repeated parent key: one membership each, so the pair is distinct.
     Shape(
         _companies(20),
         Table(Person, rows=20, name=Constant("p")),
@@ -1040,11 +842,7 @@ def test_one_partition_with_no_group_of_two_is_enough_for_both_fan_outs() -> Non
 
 
 def test_the_second_fan_out_does_not_have_to_be_flat_as_well() -> None:
-    # The asymmetric case, and the reason the exemption asks for one fan-out
-    # rather than both. Five people cannot hold twenty rows one apiece, so the
-    # person fan-out could never satisfy the proof at these numbers -- and it
-    # does not have to. Twenty companies partitioned flat already make every
-    # row's company unique, and this loads twenty times out of twenty.
+    # The asymmetric case, and the reason the exemption asks for one fan-out rather than both.
     Shape(
         _companies(20),
         Table(Person, rows=5, name=Constant("p")),
@@ -1059,11 +857,7 @@ def test_the_second_fan_out_does_not_have_to_be_flat_as_well() -> None:
 
 
 def test_two_fan_outs_one_row_past_the_boundary_are_refused_again() -> None:
-    # The same boundary as the single-fan-out case. Twenty-one rows over twenty
-    # companies gives some company two, and those two rows pick their people
-    # independently. Twenty companies and twenty people leave four hundred
-    # pairs, so the pigeonhole cannot answer here -- which is what makes this a
-    # test of the bound rather than of the arithmetic.
+    # The same boundary as the single-fan-out case.
     with pytest.raises(InvalidShape, match="one_membership_per_company_person") as raised:
         Shape(
             _companies(20),
@@ -1082,10 +876,7 @@ def test_two_fan_outs_one_row_past_the_boundary_are_refused_again() -> None:
 
 
 def test_a_childless_share_takes_the_proof_away_from_two_fan_outs_too() -> None:
-    # Flat weights and a childless share is not a flat partition: the childless
-    # parents are weighed at zero and their rows go to the others, so some
-    # company gets two after all. Measured at twelve loads out of twenty, which
-    # is the lottery this refuses rather than a shape that works.
+    # A childless share is not a flat partition, so some company gets two after all.
     with pytest.raises(InvalidShape, match="one_membership_per_company_person"):
         Shape(
             _companies(20),
@@ -1101,9 +892,7 @@ def test_a_childless_share_takes_the_proof_away_from_two_fan_outs_too() -> None:
 
 
 def test_the_pigeonhole_arithmetic_is_still_what_answers_first() -> None:
-    # Both refusals apply to this declaration, and the arithmetic is the more
-    # useful of the two: it says the shape does not fit at all, which is a
-    # different instruction from "it fits and nothing arranges it".
+    # The arithmetic answers first: it says the shape does not fit at all.
     with pytest.raises(InvalidShape, match="can produce 25") as raised:
         Shape(
             _companies(5),
@@ -1121,11 +910,7 @@ def test_the_pigeonhole_arithmetic_is_still_what_answers_first() -> None:
 
 
 def test_a_narrowed_fan_out_is_weighed_on_the_parents_it_named() -> None:
-    # The capacity of a fan-out column is how many parents it can point at, and
-    # parents= makes that the named count rather than the parent's row count.
-    # Reading the table's rows here would overstate the room by the ratio of the
-    # two -- fifty companies declared, one pinned -- and an overstated capacity
-    # does not refuse a shape that cannot fit.
+    # Capacity counts the parents parents= names, not the rows of the parent table.
     with pytest.raises(InvalidShape) as raised:
         Shape(
             _companies(50),
@@ -1143,8 +928,7 @@ def test_a_narrowed_fan_out_is_weighed_on_the_parents_it_named() -> None:
 
 
 def test_a_narrowed_fan_out_cannot_collide_on_the_parents_it_named() -> None:
-    # The same substitution on the exemption side: twenty rows over twenty named
-    # parents gives no parent two rows, whatever the parent table holds.
+    # Twenty rows over twenty named parents gives no parent two rows, whatever the table holds.
     Shape(
         _companies(50),
         Table(
@@ -1812,8 +1596,6 @@ _ON_POSTGRES = pytest.mark.skipif(
             "'same'",
             id="written_as_a_value",
         ),
-        # Measured at 0 of 20 on each, past the checks: Now() is STATEMENT_TIMESTAMP() on
-        # PostgreSQL, and one table's rows arrive in one COPY statement.
         pytest.param(
             lambda: [Table(StampedFolder, rows=200, parent=Tree(roots=0.05, sizes=Zipf()))],
             "one_stamped_folder",
@@ -1829,8 +1611,7 @@ _ON_POSTGRES = pytest.mark.skipif(
     ],
 )
 def test_a_db_default_is_one_value_in_every_row(tables: Any, constraint: str, holds: str) -> None:
-    # Measured at 0 of 20 on both. The column is left out of COPY, so the database
-    # writes the default in every row: it was read as a NULL, which keeps rows apart.
+    # Measured at 0 of 20 on both.
     with pytest.raises(InvalidShape) as raised:
         Shape(*tables())
 
@@ -1900,8 +1681,7 @@ def test_a_db_default_counts_toward_the_room_a_fan_out_has() -> None:
     ],
 )
 def test_a_column_named_by_its_attname_is_the_column(tables: Any, constraint: str) -> None:
-    # Django accepts either spelling in a constraint and builds one index, and each of
-    # these loaded 0 of 20 while table.fields, keyed on names, missed the attname.
+    # Django accepts either spelling and builds one index, so the attname is the column.
     with pytest.raises(InvalidShape) as raised:
         Shape(*tables())
 
@@ -1989,8 +1769,7 @@ def test_nulls_counted_together_are_one_value_where_the_checks_read_them(
 
 @_NEEDS_DJANGO_5
 def test_a_null_share_counted_together_is_one_more_parent() -> None:
-    # Unbounded while each NULL is its own group, and one value here: five companies,
-    # the NULL and two labels are twelve combinations for five hundred rows.
+    # Unbounded while each NULL is its own group; counted together it is one more parent.
     with pytest.raises(InvalidShape) as raised:
         Shape(
             _companies(5),
@@ -2012,8 +1791,7 @@ def test_a_null_share_counted_together_is_one_more_parent() -> None:
 def test_a_fan_out_alone_under_a_uniqueness_is_the_unique_column_it_amounts_to(
     model: type[models.Model], named: str
 ) -> None:
-    # Measured at 0 of 20. A unique=True is read off the field and refused; this spelling
-    # writes the same index and no check read it.
+    # Measured at 0 of 20.
     with pytest.raises(InvalidShape) as raised:
         Shape(_companies(), Table(model, rows=20, company=FanOut(Zipf())))
 
@@ -2038,8 +1816,7 @@ def test_a_fan_out_alone_says_when_the_null_share_is_what_collides() -> None:
 @_NEEDS_DJANGO_5
 @pytest.mark.django_db(transaction=True)
 def test_a_fan_out_alone_offers_what_loads_once_the_null_share_is_gone() -> None:
-    # Both offers, applied with the null share kept, are refused again: its rows are one
-    # group, and they are enough rows to collide.
+    # Each offer as written, with the null share dropped, at several seeds.
     for kept in (
         FanOut(Zipf(), max_children=1, null=0.3),
         FanOut(Constant(1), null=0.3),
@@ -2052,7 +1829,6 @@ def test_a_fan_out_alone_offers_what_loads_once_the_null_share_is_gone() -> None
     message = str(raised.value)
     assert "max_children=1 and no null share" in message
     assert "FanOut(Constant(1)) with no childless share and no null share" in message
-    # Each offer as written, with the null share dropped, at several seeds.
     for offered in (FanOut(Zipf(), max_children=1), FanOut(Constant(1))):
         _assert_builds((TiedColumn,), _companies(), Table(TiedColumn, rows=20, company=offered))
 
@@ -2080,17 +1856,13 @@ def test_a_null_share_keeps_the_cap_while_each_null_is_its_own_group() -> None:
 
 @_NEEDS_DJANGO_5
 def test_a_condition_nothing_can_read_is_left_alone() -> None:
-    # Q(token=None) over a column the database fills with an expression: nothing here
-    # can say what it holds, so this is accepted, and a load of it is in
-    # test_each_exemption_is_accepted_and_loads.
+    # Nothing here can say what the column holds, so the condition is accepted.
     Shape(_companies(), Table(TokenCondition, rows=200, company=FanOut(Zipf())))
 
 
 @_NEEDS_DJANGO_5
 def test_a_dict_db_default_is_compared_to_a_condition_not_hashed() -> None:
-    # Constant.shares() keys a dict by the dict, so reading a left-out JSONField through it
-    # raised a TypeError at Shape(). A condition the column never meets leaves the
-    # constraint nothing to count, so it is accepted; one it meets is a refusal.
+    # Reading a left-out JSONField through a dict key raised a TypeError at Shape().
     Shape(_companies(), Table(JsonRule, rows=200, company=FanOut(Zipf())))
 
     with pytest.raises(InvalidShape) as raised:
@@ -2101,9 +1873,7 @@ def test_a_dict_db_default_is_compared_to_a_condition_not_hashed() -> None:
 
 
 def test_a_condition_may_name_a_left_out_key_by_its_attname() -> None:
-    # Q(owner_id=None) over a key the shape leaves out puts every row inside the
-    # condition, measured at 0 of 20. No field is called owner_id, so without the
-    # attname's name this read as a column nothing can read and was accepted.
+    # A condition on a left-out key by its attname puts every row inside, so it must be read.
     with pytest.raises(InvalidShape) as raised:
         Shape(_companies(), Table(UnownedRule, rows=200, company=FanOut(Zipf())))
 
@@ -2122,8 +1892,7 @@ def test_a_condition_may_name_a_left_out_key_by_its_attname() -> None:
 def test_a_unique_column_left_to_a_db_default_of_one_value_is_refused(
     build: Any, column: str, held: str
 ) -> None:
-    # Each loaded 0 of 20: unique=True writes no constraint, so no check read the
-    # column, and the second row of the COPY repeated the first row's value.
+    # A unique column left to one db_default value repeats it, so it must be refused.
     with pytest.raises(InvalidShape) as raised:
         Shape(build())
 
@@ -2158,23 +1927,19 @@ def test_a_unique_column_left_to_a_db_default_of_one_value_is_refused(
 def test_the_distribution_a_unique_left_out_column_is_offered_loads(
     model: type[models.Model], column: str, offered: Sequential
 ) -> None:
-    # The old offer, a db_default the database makes new in every row, has no true
-    # instance for a DateTimeField: Func(function="clock_timestamp") loaded 0 of 3.
+    # What the message names, built as written, at several seeds.
     with pytest.raises(InvalidShape) as raised:
         Shape(Table(model, rows=20))
 
     message = str(raised.value)
     assert f"{column}={offered!r}" in message
     assert "db_default the database makes new" not in message
-    # What the message names, built as written, at several seeds.
     _assert_builds((model,), Table(model, rows=20, **{column: offered}))
 
 
 @_NEEDS_DJANGO_5
 def test_a_unique_uuid_left_out_is_offered_the_db_default_that_is_new_in_every_row() -> None:
-    # A UUID has no Distinct distribution to name, and gen_random_uuid() is the one
-    # db_default that is new in every row, which test_each_exemption_is_accepted_and_loads
-    # builds as TokenedUnique.
+    # A UUID has no Distinct distribution, and gen_random_uuid() is new in every row.
     with pytest.raises(InvalidShape) as raised:
         Shape(Table(UuidCodedUnique, rows=20))
 
@@ -2201,8 +1966,7 @@ def _decimal(digits: int, places: int) -> models.Field[Any, Any]:
     )
 
 
-# Each loads Sequential(1, 1) twenty times in twenty at two hundred rows. The text and decimal
-# cases sit on the bound: three characters, and three digits before the point.
+# Each loads Sequential(1, 1) twenty times in twenty at two hundred rows.
 @_ON_POSTGRES
 @_NEEDS_DJANGO_5
 @pytest.mark.django_db(transaction=True)
@@ -2231,8 +1995,7 @@ def test_the_fallback_is_offered_where_it_builds(suffix: str, field: Any) -> Non
     _assert_builds((model,), Table(model, rows=200, v=Sequential(1, 1)))
 
 
-# Sequential(1, 1) loads none of twenty in each, at two hundred rows and at two for a boolean:
-# a value too long, a numeric overflow, a TypeError or a ValidationError.
+# Sequential(1, 1) loads none of twenty: a value too long, an overflow or a type error.
 @_NEEDS_DJANGO_5
 @pytest.mark.parametrize(
     ("suffix", "field", "rows"),
@@ -2299,8 +2062,7 @@ def test_the_fallback_is_offered_up_to_the_last_value_a_small_integer_holds(
 
 @_NEEDS_DJANGO_5
 def test_the_tree_left_out_of_a_self_key_that_ties_its_nulls_is_not_a_remedy() -> None:
-    # A Tree refusal does not offer this, and here is why: every row would hold the
-    # one NULL the constraint allows once. Shape says so before a row is written.
+    # Shape says so before a row is written.
     with pytest.raises(InvalidShape, match="one_tied_link_after_each.*can produce 1"):
         Shape(Table(TiedLink, rows=200))
 
@@ -2316,8 +2078,7 @@ def test_now_alone_counts_as_one_combination() -> None:
 
 @_NEEDS_DJANGO_5
 def test_a_cap_of_one_under_a_condition_is_no_proof_where_its_nulls_are_one_group() -> None:
-    # Loads 0 of 20: the rows of the null share are one group under nulls_distinct=False,
-    # and every one of them is inside the condition. _cannot_collide alone says yes here.
+    # _cannot_collide alone says yes here.
     with pytest.raises(InvalidShape) as raised:
         Shape(
             _companies(),
@@ -2333,9 +2094,7 @@ def test_a_cap_of_one_under_a_condition_is_no_proof_where_its_nulls_are_one_grou
 
 
 def test_a_condition_every_left_out_row_lands_inside_is_refused() -> None:
-    # Q(status=None) is IS NULL, and a column the shape leaves out holds NULL, so every
-    # row is inside the condition. Measured at 0 of 20: the guard this replaces read
-    # the same column as saying nothing.
+    # Measured at 0 of 20: the guard this replaces read the same column as saying nothing.
     with pytest.raises(InvalidShape) as raised:
         Shape(_companies(), Table(NullRule, rows=200, company=FanOut(Zipf())))
 
@@ -2360,8 +2119,7 @@ def test_a_db_default_inside_the_condition_is_refused() -> None:
 
 
 def test_a_distinct_column_does_not_excuse_one_that_does_not_move() -> None:
-    # Sequential is the class and the step is the answer: the is_distinct_per_row half of
-    # the proof. Measured at 0 of 20 at a step of zero.
+    # Sequential is the class and the step is the answer: the is_distinct_per_row half of the proof.
     with pytest.raises(InvalidShape) as raised:
         Shape(
             _companies(),
@@ -2418,9 +2176,7 @@ def test_one_root_is_not_enough_and_nor_is_a_flat_tree(tree: Tree, rows: int) ->
 @pytest.mark.django_db(transaction=True)
 @pytest.mark.parametrize("rows", [11, 13])
 def test_the_one_root_a_refusal_offers_is_one_root_at_any_row_count(rows: int) -> None:
-    # roots=1/rows is two roots at rows 11 and 13 among others: the share is read through
-    # its decimal spelling and repr(1/11) is a hair above the fraction. The offer is
-    # 1/(rows + 1), and it is accepted and loads.
+    # The offer is 1/(rows + 1), and it is accepted and loads.
     with pytest.raises(InvalidShape) as raised:
         Shape(Table(TiedChain, rows=rows, previous=Tree(roots=0.3, sizes=Constant(1))))
 
@@ -2484,7 +2240,6 @@ def test_one_root_is_offered_beside_a_draw_and_in_a_conditional_when_it_would_ho
 @pytest.mark.parametrize(
     ("owned", "tables"),
     [
-        # A proof that keeps the constraint whatever the db_default is.
         pytest.param(
             (DefaultedFolder,),
             lambda: [Table(DefaultedFolder, rows=200, parent=Tree(roots=0.05, sizes=Constant(1)))],
@@ -2506,7 +2261,6 @@ def test_one_root_is_offered_beside_a_draw_and_in_a_conditional_when_it_would_ho
             id="db_defaults_on_one_row",
             marks=_NEEDS_DJANGO_5,
         ),
-        # What a db_default leaves readable as something other than one value.
         pytest.param(
             (TokenFolder,),
             lambda: [Table(TokenFolder, rows=200, parent=Tree(roots=0.05, sizes=Zipf()))],
@@ -2534,7 +2288,6 @@ def test_one_root_is_offered_beside_a_draw_and_in_a_conditional_when_it_would_ho
             id="generated_column_counted_together",
             marks=_NEEDS_DJANGO_5,
         ),
-        # Conditions a left-out column stays outside, or that nothing can read.
         pytest.param(
             (DefaultOffRule,),
             lambda: [_companies(), Table(DefaultOffRule, rows=200, company=FanOut(Zipf()))],
@@ -2552,8 +2305,7 @@ def test_one_root_is_offered_beside_a_draw_and_in_a_conditional_when_it_would_ho
             lambda: [_companies(), Table(KeyRule, rows=200, company=FanOut(Zipf()))],
             id="condition_on_the_key",
         ),
-        # Now() is one value and no more than that: a proof about the other column holds,
-        # one row cannot collide, and a value that is never NULL stays outside IS NULL.
+        # A proof that keeps the constraint whatever the db_default is.
         pytest.param(
             (StampedFolder,),
             lambda: [Table(StampedFolder, rows=200, parent=Tree(roots=0.05, sizes=Constant(1)))],
@@ -2623,7 +2375,6 @@ def test_one_root_is_offered_beside_a_draw_and_in_a_conditional_when_it_would_ho
             id="now_outside_a_condition_on_null",
             marks=_NEEDS_DJANGO_5,
         ),
-        # A partition with no group of two leaves a condition nothing to count.
         pytest.param(
             (OnRule,),
             lambda: [
@@ -2711,7 +2462,6 @@ def test_one_root_is_offered_beside_a_draw_and_in_a_conditional_when_it_would_ho
             id="cap_of_one_with_no_null_to_tie_under_a_condition",
             marks=_NEEDS_DJANGO_5,
         ),
-        # The nulls reading: a cap of one still holds with nothing NULL to tie.
         pytest.param(
             (TiedSeat,),
             lambda: [
@@ -2743,7 +2493,6 @@ def test_one_root_is_offered_beside_a_draw_and_in_a_conditional_when_it_would_ho
             id="distinct_beside_a_tied_null_share",
             marks=_NEEDS_DJANGO_5,
         ),
-        # A Distinct column leaves each group one row.
         pytest.param(
             (CodedRule,),
             lambda: [
@@ -2818,7 +2567,6 @@ def test_one_root_is_offered_beside_a_draw_and_in_a_conditional_when_it_would_ho
             id="distinct_beside_two_tied_null_shares",
             marks=_NEEDS_DJANGO_5,
         ),
-        # A NULL in every row keeps every row out of the index, whichever check asks.
         pytest.param(
             (Triple,),
             lambda: [
@@ -2841,7 +2589,6 @@ def test_one_root_is_offered_beside_a_draw_and_in_a_conditional_when_it_would_ho
             ],
             id="null_in_every_row_under_a_condition",
         ),
-        # A flat tree keeps the constraint on its own.
         pytest.param(
             (TreeTriple,),
             lambda: [
@@ -2857,7 +2604,6 @@ def test_one_root_is_offered_beside_a_draw_and_in_a_conditional_when_it_would_ho
             ],
             id="flat_tree_beside_two_fan_outs",
         ),
-        # One root leaves one NULL, so nothing ties under nulls_distinct=False.
         pytest.param(
             (TiedTreeTriple,),
             lambda: [
@@ -3021,7 +2767,6 @@ def test_a_pairing_keeps_its_pairs_where_its_relation_s_nulls_are_no_group(case:
     ("refused", "offered", "builds"),
     [
         pytest.param(
-            # Loads 0 of 20.
             _tied(
                 "tied_two_fan_outs",
                 ("company", "owner"),
@@ -3038,7 +2783,6 @@ def test_a_pairing_keeps_its_pairs_where_its_relation_s_nulls_are_no_group(case:
             id="paired",
         ),
         pytest.param(
-            # Loads 0 of 20.
             _tied(
                 "tied_fan_out_beside_a_draw_with_room",
                 ("company", "label"),
@@ -3178,8 +2922,7 @@ def test_a_declared_null_in_every_row_is_one_value_where_nulls_are_tied() -> Non
 
 
 def test_a_condition_grouped_by_a_plain_column_is_refused() -> None:
-    # Was one of Booking's skips. Loads 0 of 20 on testapp_bk_grouped_by_a_plain_column, the
-    # sizes below: every row draws its room without seeing another, and no column partitions.
+    # Was one of Booking's skips.
     with isolate_apps("tests.testapp"):
         model = cast(
             "type[models.Model]",
@@ -3229,8 +2972,7 @@ def test_a_condition_grouped_by_a_plain_column_is_refused() -> None:
 
 
 def test_several_special_rows_outside_the_condition_are_accepted() -> None:
-    # count= puts ARCHIVED on three rows of each company and COMPLETE on the rest, so no row
-    # is ACTIVE and the partial index holds none of them.
+    # Three rows per company are ARCHIVED and the rest COMPLETE, so no row is ACTIVE.
     Shape(
         _companies(50),
         _projects(
@@ -3364,8 +3106,7 @@ def test_a_pairing_without_its_relation_is_refused(case: _Case) -> None:
 
 
 def test_a_pairing_over_parents_this_shape_does_not_build_is_refused() -> None:
-    # One company or fifty, loaded by the caller: nothing here reads which. Fifty load 0 of 20
-    # as paired_alone_without_its_relation.
+    # One company or fifty, loaded by the caller: nothing here reads which.
     case = _Case("paired_over_parents_left_unbuilt", ("owner",), None, _WITHOUT_ITS_RELATION)
     with pytest.raises(InvalidShape, match="which the constraint does not name"):
         Shape(
@@ -3378,9 +3119,7 @@ _FLAT = FanOut(Constant(1))
 _CAP = FanOut(Zipf(), max_children=1)
 
 
-# Each offer loads 20 of 20 on its own table, and each withheld one 0 of 20 where it is
-# withheld: the flat and capped fan-outs over 150 partners, the column left out where its
-# NULLs are one value.
+# Each offer on the refused table's sizes and constraint, the columns changed.
 @_ON_POSTGRES
 @pytest.mark.django_db(transaction=True)
 @pytest.mark.parametrize(
@@ -3491,14 +3230,12 @@ def test_a_pairing_without_its_relation_is_offered_only_what_builds(
         assert one in message
     for one in withheld:
         assert one not in message
-    # Each offer on the refused table's sizes and constraint, the columns changed.
     for name, columns in builds:
         _assert_loads(case._replace(name=name, columns=columns))
 
 
 def test_a_fan_out_of_one_row_per_partner_is_offered_where_the_partners_are_unknown() -> None:
-    # People loaded by the caller are however many there are, so the offer stands on the
-    # condition it states, as a cap does over a parent this shape does not build.
+    # The offer stands on the condition it states, as a cap does over an unbuilt parent.
     case = _without_its_relation("paired_alone_without_its_relation")
     with pytest.raises(InvalidShape) as raised:
         Shape(_companies(50), Table(_model(case), rows=200, **case.columns))
@@ -3506,8 +3243,7 @@ def test_a_fan_out_of_one_row_per_partner_is_offered_where_the_partners_are_unkn
     assert "owner=FanOut(Constant(1)), or a FanOut with max_children=1" in str(raised.value)
 
 
-# Each loads 20 of 20: the relation in the constraint, and a relation of one parent, pinned
-# by parents= or by one company declared, beside a draw under nulls counted as one as well.
+# Each loads 20 of 20, with the relation pinned by parents= or by one company declared.
 @_ON_POSTGRES
 @pytest.mark.django_db(transaction=True)
 @pytest.mark.parametrize(
@@ -3555,8 +3291,7 @@ def test_a_pairing_with_its_relation_is_accepted_and_loads(case: _Case) -> None:
 @_ON_POSTGRES
 @pytest.mark.django_db(transaction=True)
 def test_a_pairing_beside_a_kept_pair_is_accepted_and_loads() -> None:
-    # reviewer is paired over team, which the constraint does not name, and owner over
-    # company, which it does: (company, owner) is distinct already. Loads 20 of 20.
+    # Loads 20 of 20.
     with isolate_apps("tests.testapp"):
         model = cast(
             "type[models.Model]",
@@ -3765,9 +3500,7 @@ _NO_COLUMN_TO_SAY_DISTINCT = (
 )
 
 
-# Each refused table is the three offers' origin; each remedy it still offers loads 20 of 20 on
-# the refused table's sizes, and the Distinct it used to offer for a key could not be declared
-# (Table: "is a relation, so it needs a FanOut rather than a value distribution").
+# Each remedy still offered loads 20 of 20, so only a Distinct that can say it is offered.
 @_ON_POSTGRES
 @_NEEDS_DJANGO_5
 @pytest.mark.django_db(transaction=True)
@@ -3909,9 +3642,7 @@ def test_the_statement_a_fan_out_beside_a_key_offers_builds() -> None:
 
 @_NEEDS_DJANGO_5
 def test_a_constraint_over_keys_alone_is_met_by_the_pigeonhole_before_any_offer() -> None:
-    # The drawn-columns refusal offers Distinct too, and no key reaches it: a key left out is a
-    # constant of one value, so the arithmetic refuses first at two rows or more, and a key
-    # declared is a fan-out, a tree or a Paired, which that refusal returns on.
+    # A left-out key is a constant of one value, so the arithmetic refuses first at two rows.
     message = _refusal(_Case("keys_alone", ("other", "prev"), None, {}, together=True))
 
     assert "this shape can produce 1" in message
@@ -4002,9 +3733,7 @@ def test_the_per_parent_the_refusal_offers_over_a_null_share_loads_with_the_shar
 def test_the_nulls_a_refusal_counts_together_are_the_constraints_own_reading(
     columns: dict[str, Any], fields: tuple[str, ...], rows: int
 ) -> None:
-    # Held by the ``_each_null_is_its_own_group`` conjunct in _a_null_share_counted_together:
-    # a null share is the same fan-out either way, and the sentence about its rows being one
-    # group is true only under nulls_distinct=False.
+    # The one-group reading of nulls holds only under nulls_distinct=False.
     apart = _Case("nulls_apart", fields, None, columns, rows=rows)
     refusal = _refusal(apart)
     assert "counts every NULL as one value" not in refusal

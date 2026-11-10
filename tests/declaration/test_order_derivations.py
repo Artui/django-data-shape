@@ -1,5 +1,3 @@
-"""Computation order, which is not column order."""
-
 from __future__ import annotations
 
 import operator
@@ -27,9 +25,7 @@ def test_a_derivation_comes_after_the_derivation_it_reads() -> None:
         "unit_price": Aligned("size", Uniform(1, 10)),
     }
 
-    # Sorted by name these come out total-first, which is exactly the order that
-    # would read an unfilled slot. The column order is for the COPY statement
-    # and says nothing about what depends on what.
+    # The column order is for the COPY statement and says nothing about what depends on what.
     assert order_derivations("Ticket", fields) == ("unit_price", "total")
 
 
@@ -59,17 +55,14 @@ def test_a_source_that_is_not_derived_creates_no_edge() -> None:
         "quantity": Constant(3),
     }
 
-    # A plain distribution is computed before every derivation regardless, so
-    # naming one is not a dependency the ordering has to carry.
+    # A plain distribution is computed before every derivation, so naming one adds no edge.
     assert order_derivations("Ticket", fields) == ("total",)
 
 
 def test_a_parent_source_is_not_a_column_of_this_table() -> None:
     fields = {"opened_at": After("account.signed_up_at", within=1)}
 
-    # "account.signed_up_at" names a column of another table, already loaded, so
-    # it cannot create an edge here even though a column called "account" is
-    # right there beside it.
+    # A dotted name reads a column of another table, so it creates no edge here.
     assert order_derivations("Ticket", fields) == ("opened_at",)
 
 

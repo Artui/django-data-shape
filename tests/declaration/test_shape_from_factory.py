@@ -1,10 +1,3 @@
-"""Reading a factory, and reporting what it does not vary.
-
-The tests are about the **findings**, not the declaration. Inference is the easy
-half and it is not what this is for: a factory measured faithfully produces the
-flat world this package exists to argue against, so the value is in saying so.
-"""
-
 from __future__ import annotations
 
 import re
@@ -69,12 +62,7 @@ def _shared_parent(companies: list[Company]) -> Session:
 
 
 def test_a_sub_factory_is_reported_as_a_fan_out_of_degree_one() -> None:
-    """The finding worth running this for, and the one no source shows.
-
-    A parent per child is a fan-out where every parent has exactly one row, so
-    the average is the truth and the join estimate cannot miss. Nothing in the
-    factory says so -- it is only visible in what the calls wrote.
-    """
+    """The finding worth running this for, and the one no source shows."""
     report = shape_from_factory(_sub_factory, samples=25)
 
     assert "Company grew by exactly one per call -- a sub-factory" in report
@@ -86,16 +74,13 @@ def test_a_reused_parent_is_reported_with_its_real_ratio() -> None:
 
     report = shape_from_factory(lambda: _shared_parent(companies), samples=20)
 
-    # A round-robin is the other unrealistic way a factory reaches a foreign
-    # key: not one parent per child, but the same number for every parent. The
-    # average is the truth either way.
+    # The average is the truth either way.
     assert "every one of the 4 parents got exactly 5 row(s)" in report
     assert "cannot miss" in report
 
 
 def test_a_column_the_factory_fixes_is_a_finding_and_not_just_a_constant() -> None:
-    # The whole point. Writing Constant('ACTIVE') down without comment would be
-    # this package blessing the flat world it exists to expose.
+    # The whole point.
     companies = [Company.objects.create(name=f"c{i}") for i in range(4)]
 
     report = shape_from_factory(lambda: _shared_parent(companies), samples=20)
@@ -156,8 +141,7 @@ def test_a_column_with_a_value_per_row_is_named_as_such() -> None:
 
 
 def test_a_column_with_many_values_is_not_written_out_in_full() -> None:
-    # A Skew listing sixty values is not a declaration a person keeps, so past a
-    # point it says how many there were and what the head is instead.
+    # Past a point, a long Skew says how many values there were and what the head is.
     companies = [Company.objects.create(name=f"c{i}") for i in range(4)]
     counter = {"n": 0}
 
@@ -185,8 +169,7 @@ def test_every_row_pointing_at_one_parent_is_not_a_fan_out_at_all() -> None:
 
 
 def test_a_relation_that_is_actually_skewed_gets_no_finding() -> None:
-    # The direction that must stay quiet. A factory doing the right thing should
-    # not be told off for it, or the findings stop meaning anything.
+    # The direction that must stay quiet.
     companies = [Company.objects.create(name=f"c{i}") for i in range(4)]
     counter = {"n": 0}
 
@@ -232,13 +215,7 @@ def test_a_factory_that_varies_everything_gets_a_declaration_and_no_findings() -
 
 
 def test_a_factory_needing_arguments_is_told_so_rather_than_failing_in_the_database() -> None:
-    """A mature codebase's factories take arguments, and most need them.
-
-    Called with none, they leave a required column empty and the failure arrives
-    as a raw `IntegrityError` naming a constraint -- which says nothing about
-    what the caller did or what to do instead, and is the one thing every other
-    refusal in this package avoids.
-    """
+    """A mature codebase's factories take arguments, and most need them."""
 
     def needs_a_parent(company=None) -> Session:
         return Session.objects.create(company=company, label="s")
@@ -249,9 +226,6 @@ def test_a_factory_needing_arguments_is_told_so_rather_than_failing_in_the_datab
     message = str(raised.value)
     assert "could not be called" in message
     assert "defaults=" in message
-    # The driver's own words are quoted here on purpose: unlike a refusal about
-    # a declaration, the caller needs to see which column their factory left
-    # empty, and nothing here retains a value this package generated.
     assert "IntegrityError" in message
 
 
@@ -268,9 +242,7 @@ def test_defaults_are_passed_to_every_call() -> None:
 
 
 def test_a_factory_that_fails_for_its_own_reasons_says_which_call_it_was() -> None:
-    # Not every failure is a missing argument. A factory that works and then
-    # stops -- a unique constraint met on the fourth call, say -- needs the call
-    # number, because "it failed" and "it failed after three" are different bugs.
+    # Not every failure is a missing argument.
     calls = {"n": 0}
 
     def eventually_fails() -> Session:
@@ -286,13 +258,7 @@ def test_a_factory_that_fails_for_its_own_reasons_says_which_call_it_was() -> No
 
 
 def _built(report: str, model: type[Model], rows: int = 100) -> Table:
-    """Build the emitted source against ``Table``, which is the whole claim.
-
-    The report is source with ``rows=...`` left for the reader to fill, so the
-    only edit made is the one a reader would: a row count. Everything else is
-    evaluated as written, so a declaration ``Table`` refuses -- the defect this
-    guards -- raises here rather than passing as a string that merely looks right.
-    """
+    """Build the emitted source against ``Table``, which is the whole claim."""
     names = {**vars(django_data_shape), model.__name__: model}
     table = eval(report.replace("rows=...", f"rows={rows}"), names)  # noqa: S307
     assert isinstance(table, Table)
@@ -300,11 +266,7 @@ def _built(report: str, model: type[Model], rows: int = 100) -> Table:
 
 
 def _tree_factory(model: type[Model], parents: Callable[[int], int | None]) -> Callable[[], Model]:
-    """A factory over a self-keyed model; ``parents(n)`` is the nth call's parent index.
-
-    The index counts calls, 1-based, and ``None`` makes a root. A parent is
-    always an earlier call's row, so the factory could be a real one.
-    """
+    """A factory over a self-keyed model; ``parents(n)`` is the nth call's parent index."""
     made: list[Model] = []
 
     def factory() -> Model:
@@ -333,8 +295,7 @@ def test_a_self_referential_key_is_a_tree_that_table_accepts() -> None:
 
 
 def test_the_measured_root_share_counts_the_nulls_and_not_a_parent_called_none() -> None:
-    # Every child points at the one root, so a Counter over the values would see
-    # two "parents" -- the root's key and None -- and call this a flat fan-out.
+    # Every child points at one root, so a Counter would see two parents and call it flat.
     factory = _tree_factory(Category, lambda n: None if n == 1 else 0)
 
     report = shape_from_factory(factory, samples=40)
@@ -344,9 +305,7 @@ def test_the_measured_root_share_counts_the_nulls_and_not_a_parent_called_none()
 
 
 def test_a_self_key_nobody_left_null_is_the_figure_table_offers_and_a_finding() -> None:
-    # A root made outside the calls, so every measured row has a parent: a root
-    # share of zero, which Tree refuses, so the figure Table's own refusal
-    # offers is written instead and the finding says it is not a measurement.
+    # Tree refuses a root share of zero, so the finding says it is not a measurement.
     root = Category.objects.create(name="root")
 
     report = shape_from_factory(lambda: Category.objects.create(name="x", parent=root), samples=20)
@@ -367,8 +326,7 @@ def test_a_self_key_always_left_null_is_the_figure_table_offers_and_a_finding() 
 
 
 def test_a_root_share_that_rounds_to_one_is_written_in_full() -> None:
-    # 2499 roots in 2500 calls is a share of 0.9996, which three figures write
-    # as 1 -- and Tree refuses a share of 1. So it is written as it was measured.
+    # So it is written as it was measured.
     first = Category.objects.create(name="root")
     calls = {"n": 0}
 
@@ -392,19 +350,13 @@ def test_a_root_share_that_rounds_to_one_is_written_in_full() -> None:
 def test_a_self_key_no_shape_can_fill_is_a_comment_and_a_finding_not_a_tree(
     model: type[Model], why: str
 ) -> None:
-    """``Table`` refuses a ``Tree`` here and a ``FanOut`` everywhere, so neither is written.
-
-    The report does not raise either: the rest of the factory was measured
-    and is worth reading, and a comment sits where the declaration would be.
-    """
+    """``Table`` refuses a ``Tree`` here and a ``FanOut`` everywhere, so neither is written."""
     link = "parent_id" if model is RootlessNode else "previous_id"
     calls = {"n": 0}
 
     def factory() -> Model:
         calls["n"] += 1
-        # A required self-key is pointed at a row that is never committed: the
-        # call runs in a transaction that is rolled back, and the constraint is
-        # deferred, so nothing checks it. A unique one needs a new row each call.
+        # A unique one needs a new row each call.
         key = 1 if model is RootlessNode else calls["n"]
         return model._default_manager.create(**{link: key})
 
@@ -416,7 +368,6 @@ def test_a_self_key_no_shape_can_fill_is_a_comment_and_a_finding_not_a_tree(
     assert f"    # {field}: nothing written here" in report
     assert f"{model.__name__}.{field}: {why}" in report
     assert f"{field}=" not in report
-    # Being unique is no longer why nothing fills it.
     assert "a unique key cannot" not in report
 
 
@@ -434,17 +385,11 @@ def _report_over_a_self_key_no_shape_can_fill(model: type[Model]) -> str:
 
 
 def test_a_self_key_that_refuses_null_is_not_told_to_be_left_out() -> None:
-    """``Table`` refuses ``RootlessNode`` when ``parent`` is left out, so that remedy is false.
-
-    The remedy has to be one ``Table`` accepts: the column made ``null=True`` (after
-    which leaving it out, or a ``Tree``, is a shape), or the table filled by a
-    ``Projection`` with ``columns=`` and ``sql=``.
-    """
+    """``Table`` refuses ``RootlessNode`` when ``parent`` is left out, so that remedy is false."""
     report = _report_over_a_self_key_no_shape_can_fill(RootlessNode)
 
     assert "Leave it out and fill it after the build" not in report
     assert "Make the column null=True, or fill the table with a Projection" in report
-    # The sentence is read against what Table does, not taken on trust.
     with pytest.raises(InvalidShape, match="RootlessNode.parent cannot be null"):
         _built(report, RootlessNode)
 
@@ -453,8 +398,7 @@ def test_a_self_key_that_refuses_null_is_not_told_to_be_left_out() -> None:
 def test_a_nullable_unique_self_key_is_written_as_a_flat_tree_not_told_to_be_left_out(
     model: type[Model],
 ) -> None:
-    # A tree that gives no row two children fills it, as FanOut(max_children=1)
-    # fills a unique key to another table, so the comment and its remedy are gone.
+    # A tree giving no row two children fills a unique key, as FanOut(max_children=1) does.
     report = _report_over_a_self_key_no_shape_can_fill(model)
 
     assert "previous=Tree(roots=0.1, sizes=Constant(1))," in report
@@ -468,8 +412,7 @@ def test_a_nullable_unique_self_key_is_written_as_a_flat_tree_not_told_to_be_lef
 def test_a_report_over_a_unique_self_key_is_source_a_shape_builds(
     model: type[Model],
 ) -> None:
-    # Through Shape and build rather than Table alone: Table cannot see a
-    # constraint, so it accepted Chain and Relay even while Shape refused them.
+    # Table cannot see a constraint, so the report runs through Shape and build.
     report = _report_over_a_self_key_no_shape_can_fill(model)
 
     table = _built(report, model, rows=200)
@@ -496,9 +439,7 @@ def test_a_unique_self_key_always_left_null_is_the_figure_table_offers_and_a_fin
 
 @_NEEDS_NULLS_DISTINCT
 def test_a_self_key_whose_nulls_count_as_one_is_still_a_comment_and_a_finding() -> None:
-    # One root is all that fits, and its share depends on the rows, which the report
-    # leaves as rows=..., so it names that tree and cannot write it. The column left
-    # out holds one NULL many times, so that is not what the report may offer.
+    # The column left out holds one NULL many times, so that is not what the report may offer.
     report = _report_over_a_self_key_no_shape_can_fill(TiedLink)
 
     assert "previous=" not in report
@@ -512,8 +453,7 @@ def test_a_self_key_whose_nulls_count_as_one_is_still_a_comment_and_a_finding() 
 
 @_NEEDS_NULLS_DISTINCT
 def test_the_tree_the_finding_names_under_nulls_counted_as_one_is_accepted() -> None:
-    # The finding is true at the rows it describes, and false one root later. Rows 11 is
-    # where roots=1/rows is already two roots, so the finding writes 1/(rows + 1).
+    # The finding is true at the rows it describes, and false one root later.
     rows = 11
     Shape(Table(TiedLink, rows=rows, previous=Tree(roots=1 / (rows + 1), sizes=Constant(1))))
     with pytest.raises(InvalidShape):
@@ -528,13 +468,7 @@ def _chain_with_roots(n: int) -> int | None:
 
 
 def test_a_key_in_a_composite_unique_constraint_is_not_unique_on_its_own() -> None:
-    """Fails without the whole-tuple match in ``_is_unique``: ``name in constraint.fields``.
-
-    ``Folder`` is unique on ``(parent, name)``, which lets a parent have many
-    children so long as their names differ, so ``parent`` alone is a tree's column.
-    The factory repeats names; distinct ones would be written as a ``Sequential``
-    that does not build, which is a separate defect.
-    """
+    """Fails without the whole-tuple match in ``_is_unique``: ``name in constraint.fields``."""
     report = shape_from_factory(_tree_factory(Folder, _chain_with_roots), samples=20)
 
     assert "parent=Tree(roots=0.25, sizes=Zipf())" in report
@@ -550,12 +484,7 @@ def test_a_conditional_unique_constraint_does_not_make_the_key_unique() -> None:
 
 
 def test_a_check_constraint_is_not_read_as_a_unique_one() -> None:
-    """A check constraint has no ``fields``: reading it as a unique one raises.
-
-    From Django 5.1 its predicate is its ``condition``, which is never ``None``,
-    so ``condition is None`` short-circuits first there and this alone does not
-    need ``isinstance``; the test below is the one that does.
-    """
+    """A check constraint has no ``fields``: reading it as a unique one raises."""
     report = shape_from_factory(_tree_factory(Checked, _chain_with_roots), samples=20)
 
     assert "parent=Tree(roots=0.25, sizes=Zipf())" in report
@@ -563,11 +492,7 @@ def test_a_check_constraint_is_not_read_as_a_unique_one() -> None:
 
 
 def test_a_constraint_that_is_not_a_unique_one_is_not_read_as_one() -> None:
-    """Fails without ``isinstance(constraint, UniqueConstraint)`` in ``_is_unique``.
-
-    It has no ``fields`` and its ``condition`` is ``None``, so on every Django the
-    unguarded read raises ``AttributeError``.
-    """
+    """Fails without ``isinstance(constraint, UniqueConstraint)`` in ``_is_unique``."""
     report = shape_from_factory(_tree_factory(Exclusive, _chain_with_roots), samples=20)
 
     assert "parent=Tree(roots=0.25, sizes=Zipf())" in report
@@ -614,11 +539,7 @@ def _named_factory(
     *,
     code: Callable[[int], str] = lambda n: f"k{n}",
 ) -> Callable[[], Model]:
-    """A tree factory whose ``n``th row is called ``name(n)``, to make a column distinct or not.
-
-    ``code`` is each row's own unless given: a model with a uniqueness over
-    ``code`` needs one that does not repeat with ``name``.
-    """
+    """A tree factory whose ``n``th row is called ``name(n)``, to make a column distinct or not."""
     made: list[Model] = []
 
     def factory() -> Model:
@@ -646,12 +567,7 @@ def _compiles(report: str) -> None:
 
 @pytest.mark.parametrize("model", [Folder, SpelledFolder, Shelf])
 def test_source_over_columns_that_are_all_distinct_compiles(model: type[Model]) -> None:
-    """Fails without the comma moved before the comment: it landed inside it.
-
-    ``name=Sequential(...)  # every value distinct,`` left the next column
-    without a separator, so a model with a column after it was a SyntaxError.
-    The 0.25.1 tests all used repeated names, so none reached this line.
-    """
+    """Fails without the comma moved before the comment: it landed inside it."""
     report = shape_from_factory(
         _named_factory(model, lambda n: f"n{n}", code=_one_code), samples=20
     )
@@ -704,7 +620,6 @@ def test_a_self_key_under_a_composite_uniqueness_over_repeated_values_is_a_findi
     assert "name is declared as a draw" in finding
     assert "Sequential" in finding
     assert "Projection" in finding
-    # The finding is true: the source as written is the one Shape refuses.
     with pytest.raises(InvalidShape, match="is a Tree beside"):
         Shape(_built(report, model))
 
@@ -724,12 +639,7 @@ def test_a_self_key_under_a_composite_uniqueness_over_distinct_values_needs_no_f
 
 
 def test_a_self_key_beside_a_relation_in_the_uniqueness_is_still_a_finding() -> None:
-    """A relation is written as a fan-out, never as a column distinct in every row.
-
-    Fails without ``not field.is_relation`` in ``_is_distinct``: every call here
-    gets a company of its own, so the values are all different, and a fan-out
-    over them is still a draw.
-    """
+    """A relation is written as a fan-out, never as a column distinct in every row."""
     made: list[Mirror] = []
 
     def factory() -> Mirror:
@@ -743,8 +653,6 @@ def test_a_self_key_beside_a_relation_in_the_uniqueness_is_still_a_finding() -> 
 
     assert "company=FanOut(Zipf())" in report
     finding = _the_finding_about(report, "Mirror.parent")
-    # A key to another table is a fan-out, which Table refuses to fill with Sequential, so
-    # the remedy is a cap of one that gives no parent two rows, and a Projection.
     assert "company is a fan-out" in finding
     assert "company is declared as a draw" not in finding
     assert "max_children=1" in finding
@@ -752,7 +660,6 @@ def test_a_self_key_beside_a_relation_in_the_uniqueness_is_still_a_finding() -> 
     assert "Projection" in finding
     assert "Shape refuses" in finding
     assert "Table refuses" not in finding
-    # The finding is true: the source as written is refused, and with the cap it is not.
     companies = Table(Company, rows=100, name=Constant("c"))
     with pytest.raises(InvalidShape):
         Shape(companies, _built(report, Mirror))
@@ -782,12 +689,7 @@ def test_a_self_key_beside_a_key_and_a_plain_column_in_the_uniqueness_gets_both_
 
 
 def test_a_unique_self_key_needs_no_finding_about_a_composite_uniqueness() -> None:
-    """The flat tree it writes gives no row two children, so ``(parent, name)`` holds.
-
-    Fails without ``unique`` in ``_composite_finding``: the names repeat, so the finding
-    told the caller to make them distinct on a source ``Shape`` accepts. Under NULLs counted
-    as one value the flat tree keeps nothing, which is the test below.
-    """
+    """The flat tree it writes gives no row two children, so ``(parent, name)`` holds."""
     report = shape_from_factory(
         _named_factory(OnlyChild, lambda n: f"n{n % 3}", code=_one_code), samples=20
     )
@@ -801,12 +703,7 @@ def test_a_unique_self_key_needs_no_finding_about_a_composite_uniqueness() -> No
 
 @_NEEDS_NULLS_DISTINCT
 def test_a_unique_self_key_under_nulls_counted_as_one_is_a_finding() -> None:
-    """The flat tree keeps no uniqueness the roots take part in, because their NULLs are one value.
-
-    Five roots in twenty rows, every root named differently and every other row alike: the
-    source the report wrote was refused by ``Shape`` with no word of it, and with the check
-    off it loaded 0 of 20. Fails without ``apart`` in ``_composite_finding``.
-    """
+    """Fails without ``apart`` in ``_composite_finding``."""
     report = shape_from_factory(
         _named_factory(TiedOnlyChild, lambda n: f"r{n}" if n % 4 == 1 else "same", code=_one_code),
         samples=20,
@@ -818,8 +715,6 @@ def test_a_unique_self_key_under_nulls_counted_as_one_is_a_finding() -> None:
     assert "name is declared as a draw" in finding
     assert "Sequential" in finding
     assert "Projection" in finding
-    # The finding is true: the source as written is the one Shape refuses, and the remedy
-    # it names is accepted.
     with pytest.raises(InvalidShape, match="is a Tree beside"):
         Shape(_built(report, TiedOnlyChild))
     distinct = re.sub(r"name=Skew\(.*\),", "name=Sequential(1, 1),", report)
@@ -831,10 +726,7 @@ def test_a_unique_self_key_under_nulls_counted_as_one_is_a_finding() -> None:
 def test_a_uniqueness_spelled_with_the_attname_still_makes_the_self_key_unique(
     model: type[Model],
 ) -> None:
-    """Fails without ``get_field(...).name``: ``previous_id`` is not ``previous``.
-
-    Unread, the key got ``sizes=Zipf()``, which ``Shape`` refuses on a unique column.
-    """
+    """Fails without ``get_field(...).name``: ``previous_id`` is not ``previous``."""
     report = _report_over_a_self_key_no_shape_can_fill(model)
 
     assert "previous=Tree(roots=0.1, sizes=Constant(1))," in report
@@ -864,11 +756,7 @@ def test_a_uniqueness_over_the_self_key_alone_is_no_composite_finding(
 
 
 def test_a_composite_unique_together_spelled_with_the_attname_is_a_finding() -> None:
-    """Fails with ``unique_together`` read as written: ``parent_id`` is not ``parent``.
-
-    Unread, the report wrote ``Tree`` beside ``Skew`` with nothing said, which ``Shape``
-    refuses. The finding names the columns by field name, whichever way ``Meta`` spelled them.
-    """
+    """Fails with ``unique_together`` read as written: ``parent_id`` is not ``parent``."""
     report = shape_from_factory(
         _named_factory(SpelledShelf, lambda n: f"n{n % 3}", code=_one_code), samples=20
     )
@@ -880,12 +768,7 @@ def test_a_composite_unique_together_spelled_with_the_attname_is_a_finding() -> 
 
 
 def test_a_self_key_with_no_declaration_gets_no_finding_about_a_composite_uniqueness() -> None:
-    """Fails without ``declaration is not None`` at the call in ``_render``.
-
-    A key that refuses NULL is written as a comment, not a tree, so a finding about a tree
-    beside a draw would describe source the report never wrote. Each call points at a key of
-    its own, deferred and rolled back, so ``(parent, name)`` holds while ``name`` repeats.
-    """
+    """Fails without ``declaration is not None`` at the call in ``_render``."""
     calls = {"n": 0}
 
     def factory() -> Model:

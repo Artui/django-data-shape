@@ -1,17 +1,3 @@
-"""The documented ``values=`` idiom, executed against UUID-keyed models.
-
-The example in ``SqlValue`` and in ``docs/projections.md`` used to be
-``({per}.id * 31 + {source}.id * 17) % 5 + 1``, which is a type error on any
-schema whose models carry ``id = UUIDField(primary_key=True)`` -- a shared
-abstract base doing exactly that is an ordinary Django layout. So the first
-thing a reader copied out of the documentation did not run, and it failed at
-build time from inside a generated statement rather than at declaration.
-
-The documentation's Python blocks are parsed by ``test_documentation.py`` and
-nothing more, which is precisely why this shipped: the expression is a string
-literal and parses perfectly. The guard for an expression has to run it.
-"""
-
 from __future__ import annotations
 
 import pytest
@@ -76,17 +62,13 @@ def test_the_documented_expression_runs_on_uuid_keys() -> None:
 
     amounts = list(Shipment.objects.values_list("requested_amount", flat=True))
     assert amounts, "the projection wrote no rows, so nothing below is being checked"
-    # Varied, which is the entire reason values= exists: one value across every
-    # row is n_distinct = 1 and the exact shape a planner cannot use.
-    assert len(set(amounts)) > 1
     # In the range the expression claims, which is what the two casts buy.
+    assert len(set(amounts)) > 1
     assert all(100 <= amount < 600 for amount in amounts)
 
 
 def test_integer_arithmetic_on_a_uuid_key_has_no_operator() -> None:
-    # The falsification for the test above: it pins *why* the documented idiom
-    # is written the way it is, so that a later simplification back to `id * 31`
-    # fails here rather than in a consumer's build.
+    # Pins why the idiom is written as it is, so a simplification back to id * 31 fails here.
     with pytest.raises(Exception, match="uuid"):
         build(
             _shape(
@@ -98,8 +80,7 @@ def test_integer_arithmetic_on_a_uuid_key_has_no_operator() -> None:
 
 
 def test_a_reference_carries_the_join_aliases_into_the_expression_it_names() -> None:
-    # `{per}` and `{source}` inside a referenced expression are substituted
-    # because resolution runs first and rendering runs once over the result.
+    # Resolution runs first, so per and source are substituted inside the named expression.
     build(
         _shape(
             requested_amount=SqlValue(_VARIED),
@@ -114,10 +95,7 @@ def test_a_reference_carries_the_join_aliases_into_the_expression_it_names() -> 
 
 
 def test_the_stated_relationship_and_the_invariant_that_nets_it() -> None:
-    # The pairing the documentation now recommends: the declaration states the
-    # relationship, and an Invariant checks it once the rows are in. The second
-    # is what catches a volatile expression, where substitution means the two
-    # copies are two different values and the rule silently stops holding.
+    # An Invariant checks the relationship once the rows are in, catching volatile expressions.
     shape = Shape(
         Table(Region, rows=3, name=Constant("r")),
         Table(Depot, rows=12, region=FanOut(Uniform(1, 4)), name=Constant("d")),

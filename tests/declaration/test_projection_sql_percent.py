@@ -1,20 +1,3 @@
-"""A lone ``%`` in a supplied select, refused where the declaration is.
-
-``sql=`` is a parameterised statement -- the caller writes ``%s`` and passes
-``params=``, which is the documented interface -- so pyformat is part of that
-contract and a literal ``%`` has to be doubled. That is correct and stays.
-
-What was wrong is where it was discovered. The statement reaches the driver with
-a parameter sequence, so an unescaped ``%`` is an incomplete placeholder, and
-the exception comes from ``psycopg/cursor.py`` at build time naming nothing in
-the shape. A caller who passed no parameters at all has no model that explains
-it.
-
-The asymmetry with ``SqlValue`` is deliberate and the refusal says so: on the
-derived path the caller supplies no parameters and has no reason to know one
-exists, so ``render()`` escapes for them.
-"""
-
 from __future__ import annotations
 
 import pytest
@@ -42,8 +25,7 @@ def test_a_lone_percent_is_refused_at_declaration_time() -> None:
     message = str(caught.value)
     assert "EventSession" in message, "the refusal has to name the declaration"
     assert "%%" in message, "and say what to write instead"
-    # Named, so the refusal cannot be mistaken for a complaint about the
-    # placeholders the same statement is allowed to carry.
+    # Named, so it cannot be mistaken for a complaint about allowed placeholders.
     assert "e.id % 5" in message
 
 

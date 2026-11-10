@@ -1,5 +1,3 @@
-"""Which table loads first, and why it has to be decided at all."""
-
 from __future__ import annotations
 
 import pytest
@@ -23,9 +21,7 @@ def test_a_parent_is_ordered_before_its_child() -> None:
     child = Table(Session, rows=10, company=FanOut(Zipf()), label=Constant("s"))
     parent = Table(Company, rows=5, name=Constant("acme"))
 
-    # Declared child-first, loaded parent-first. Not because the database
-    # insists -- Django's foreign keys are deferred, so any order commits -- but
-    # because a fan-out reads the parent's real keys.
+    # Declared child-first, loaded parent-first.
     assert [t.model for t in order_tables((child, parent))] == [Company, Session]
 
 
@@ -37,9 +33,7 @@ def test_an_order_that_is_already_correct_is_left_alone() -> None:
 
 
 def test_a_parent_outside_the_shape_is_not_ordered_against() -> None:
-    # The supported hybrid: the parent was built by the ORM because its row
-    # count is small, and only the child is declared here. Its keys get read at
-    # resolve time like any other parent's.
+    # Its keys get read at resolve time like any other parent's.
     child = Table(Session, rows=10, company=FanOut(Zipf()), label=Constant("s"))
 
     assert [t.model for t in order_tables((child,))] == [Session]
@@ -71,9 +65,7 @@ def test_a_projection_is_ordered_after_both_tables_it_reads() -> None:
 
 
 def test_a_projected_table_is_ordered_before_a_table_fanning_out_over_it() -> None:
-    # The question a projection raises about load order, answered rather than
-    # refused: running every projection last would forbid this by scheduling
-    # accident rather than by anything true about the data.
+    # Running projections last would forbid this by accident, not by anything in the data.
     projection = Projection(EventSession, per=Event, copying=TemplateSession)
     attendance = Table(Attendance, rows=5, session=FanOut(Zipf()), name=Constant("a"))
 
@@ -83,16 +75,14 @@ def test_a_projected_table_is_ordered_before_a_table_fanning_out_over_it() -> No
 
 
 def test_a_projection_whose_inputs_are_outside_the_shape_is_not_ordered_against() -> None:
-    # The same hybrid a fan-out supports: the tables it reads were built by the
-    # ORM or by an earlier fixture, and nothing here has to order them.
+    # Its inputs were built by the ORM or an earlier fixture, so nothing here orders them.
     projection = Projection(EventSession, per=Event, copying=TemplateSession)
 
     assert [t.model for t in order_tables((projection,))] == [EventSession]
 
 
 def test_a_statement_this_package_did_not_write_is_ordered_after_everything() -> None:
-    # Nothing here parses SQL, so a raw projection names nothing it reads. The
-    # only safe reading of "this could select from anything" is to run it last.
+    # Nothing here parses SQL, so a raw projection names nothing it reads.
     opaque = Projection(EventSession, columns=("id",), sql="SELECT 1")
     company = Table(Company, rows=5, name=Constant("acme"))
 
@@ -100,8 +90,7 @@ def test_a_statement_this_package_did_not_write_is_ordered_after_everything() ->
 
 
 def test_two_raw_projections_keep_the_order_they_were_declared_in() -> None:
-    # They have no edge between them, and inventing one would make two
-    # independent escape hatches a cycle.
+    # An edge between them would make two independent escape hatches a cycle.
     first = Projection(EventSession, columns=("id",), sql="SELECT 1")
     second = Projection(Session, columns=("id",), sql="SELECT 2")
 
@@ -120,11 +109,7 @@ def test_a_projection_and_a_table_reading_each_other_are_refused_by_name() -> No
 
 
 def test_a_table_fanning_out_over_a_raw_projection_is_not_a_cycle() -> None:
-    # The refusal that was simply wrong. A raw projection used to carry an edge
-    # to every other declaration, so a table fanning out over one met its own
-    # edge coming back and was told "A -> B -> A" about a chain -- with no
-    # after= anywhere to correct it with. "Run it last" is a preference, and a
-    # preference cannot contradict a declared edge; an edge can, and did.
+    # The refusal that was simply wrong.
     opaque = Projection(EventSession, columns=("id",), sql="SELECT 1")
     attendance = Table(Attendance, rows=5, session=FanOut(Zipf()), name=Constant("a"))
 
@@ -132,9 +117,7 @@ def test_a_table_fanning_out_over_a_raw_projection_is_not_a_cycle() -> None:
 
 
 def test_a_raw_projection_that_names_what_it_reads_is_ordered_after_it() -> None:
-    # And the reason reads= is needed rather than nice: once the preference can
-    # be overridden by a dependent, the statement may run before a table it
-    # selects from. Naming it puts the edge back.
+    # Naming it puts the edge back.
     opaque = Projection(
         EventSession,
         columns=("id",),
@@ -150,12 +133,7 @@ def test_a_raw_projection_that_names_what_it_reads_is_ordered_after_it() -> None
 
 
 def test_two_raw_projections_with_a_dependent_each_are_still_not_a_cycle() -> None:
-    # The sharper version of the same arrangement, and the one the old edges
-    # could not express at all: two opaque statements, each needed by a
-    # different table, so "run each of them after every table" was two
-    # preferences that contradicted each other as well as the declared edges.
-    # There is an order satisfying every declared edge, and only the preferences
-    # were unsatisfiable together -- which is what makes them preferences.
+    # Two opaque statements, each needed by one table, still have an order meeting every edge.
     sessions = Projection(EventSession, columns=("id",), sql="SELECT 1")
     rights = Projection(Right, columns=("id",), sql="SELECT 2")
     attendance = Table(Attendance, rows=5, session=FanOut(Zipf()), name=Constant("a"))

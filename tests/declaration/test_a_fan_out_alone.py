@@ -1,11 +1,3 @@
-"""A fan-out alone under a uniqueness, spelled on the field or as a constraint.
-
-``unique=True`` and ``UniqueConstraint(fields=["company"])`` write one index, so a
-shape has to answer them alike. They used to be decided by two checks that did not
-agree at one row: the constraint was let through, since a collision takes two rows,
-and the field was refused, since its check read the partition and not the row count.
-"""
-
 from __future__ import annotations
 
 import pytest
@@ -49,8 +41,7 @@ def _companies() -> Table:
 
 @_SPELLINGS
 def test_one_row_under_a_fan_out_alone_is_accepted_either_way(model: type[models.Model]) -> None:
-    # Failed first on unique_true, refused with "is unique, so it holds one row at most
-    # per parent", while unique_constraint passed: one row has no second to collide with.
+    # One row has no second to collide with, so a fan-out alone is accepted either way.
     Shape(_companies(), Table(model, rows=1, company=FanOut(Zipf())))
 
 
