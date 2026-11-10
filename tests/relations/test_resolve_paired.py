@@ -1,5 +1,3 @@
-"""Reading the partner table, and the refusals only a resolved partition can make."""
-
 from __future__ import annotations
 
 from contextlib import contextmanager
@@ -62,9 +60,7 @@ def _resolve(rows: int, groups: int, partners: int, weights: Any = None, sizes: 
 
 
 def test_the_partner_keys_are_read_rather_than_assumed() -> None:
-    # The same correction a fan-out carries: a project may have built the
-    # partner table with the ORM, so its keys are whatever the sequence handed
-    # out and a pairing pointing at 1..N would point at nothing.
+    # The ORM may have built the partner table, so keys are read, not assumed to be 1..N.
     plan = _resolve(rows=20, groups=10, partners=8)
 
     assert all(plan.partner_for(0, i) >= 100 for i in range(plan.sizes()[0]))
@@ -76,28 +72,18 @@ def test_an_empty_partner_table_is_refused_by_name() -> None:
 
 
 def test_an_empty_partner_table_is_fine_when_there_is_nothing_to_pair() -> None:
-    # Zero rows is a legitimate declaration -- it is what an edge table nobody
-    # has written to looks like -- so it must not be refused for being empty.
+    # Zero rows is a legitimate declaration, what an unwritten edge table looks like.
     assert _resolve(rows=0, groups=10, partners=0).sizes() == [0] * 10
 
 
 def test_the_busiest_group_is_what_has_to_fit_and_the_refusal_says_so() -> None:
-    """Not the row count against the product, which is far larger.
-
-    Every row of one group needs a different partner, so what binds is the
-    largest group against the partner count. A heavy tail puts a large share of
-    every edge on one group, so a declaration that looks sparse -- twenty rows
-    over ten groups and five partners, a product of fifty -- is still
-    impossible, and only once the partition is resolved does anyone know it.
-    """
+    """Not the row count against the product, which is far larger."""
     with pytest.raises(InvalidShape) as raised:
         _resolve(rows=20, groups=10, partners=5)
 
     message = str(raised.value)
     assert "distinct partners -- more than there are" in message
     assert "largest group against the partner count" in message
-    # The cap on the grouping fan-out is a remedy too: the plan it pairs with
-    # is that fan-out's partition, so capping it at the partner count fits.
     assert "max_children=5" in message
 
 
@@ -107,14 +93,11 @@ def test_a_weight_that_is_not_a_number_is_refused() -> None:
 
 
 def test_weighing_every_partner_at_zero_is_refused() -> None:
-    # Not a division by zero from inside the allocation: a declaration saying
-    # no partner is ever chosen has no reading that builds.
+    # A declaration that no partner is ever chosen has no reading that builds.
     with pytest.raises(InvalidShape, match="weighs every"):
         _resolve(rows=20, groups=10, partners=40, weights=Constant(0))
 
 
 def test_a_rounded_distribution_can_weigh_partners_too() -> None:
-    # The same tower a fan-out's sizes accept, and for the same reason: a
-    # rounded Uniform hands back a Decimal, which is a Number and deliberately
-    # not a Real.
+    # A rounded Uniform hands back a Decimal, a Number and deliberately not a Real.
     assert _resolve(rows=20, groups=10, partners=40, weights=Uniform(1, 10, places=0)).sizes()

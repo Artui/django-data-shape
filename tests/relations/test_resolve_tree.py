@@ -1,5 +1,3 @@
-"""Resolving a tree into one earlier parent per row: pure arithmetic, no database."""
-
 from __future__ import annotations
 
 import math
@@ -70,8 +68,7 @@ def test_an_empty_table_resolves_to_no_rows() -> None:
 
 
 def test_a_table_of_roots_alone_weighs_nothing() -> None:
-    # One row is one root and no child, so there is no share to divide and a
-    # distribution that could not be weighed is never asked.
+    # One row is one root and no child, so no share is ever divided.
     assert _resolve(Tree(roots=0.5, sizes=_Sizes("not a number")), 1) == [None]
 
 
@@ -82,9 +79,7 @@ def test_two_resolutions_of_one_declaration_agree() -> None:
 
 
 def test_the_families_follow_the_weights_rather_than_flattening_them() -> None:
-    # Uniform(1, 2) gives every row a share of about one child; a Zipf tail
-    # gives a few rows hundreds. A construction that ignored the weights would
-    # make the two look alike.
+    # A construction that ignored the weights would make the two look alike.
     def largest(sizes: object) -> int:
         parents = _resolve(Tree(roots=0.05, sizes=sizes), 5_000)
         return max(Counter(parent for parent in parents if parent is not None).values())
@@ -94,10 +89,7 @@ def test_the_families_follow_the_weights_rather_than_flattening_them() -> None:
 
 
 def test_a_child_with_no_earlier_room_goes_to_an_earlier_row_by_weight() -> None:
-    # Ten rows weighing nothing come first, so none of them has room for a
-    # child and the rows among them cannot find one by room. They still need
-    # a parent, and with every earlier weight zero the nearest earlier row is
-    # the one they get: a chain.
+    # With every earlier weight zero, the nearest earlier row is the one a child gets.
     parents = _resolve(Tree(roots=0.01, sizes=_Sizes(0.0, below=10)), 100)
     assert parents[:10] == [None, 0, 1, 2, 3, 4, 5, 6, 7, 8]
 
@@ -127,8 +119,7 @@ def test_sizes_that_sum_to_nothing_or_past_a_float_are_refused(weight: float) ->
 
 
 def test_a_parent_key_is_the_key_its_own_strategy_gives_that_row() -> None:
-    # Not ``row + 1``: the parent's key comes from the table's own strategy,
-    # so keys that start somewhere else are followed rather than assumed.
+    # The parent key comes from the table's own strategy, not row + 1.
     table = Table(
         Category,
         rows=200,

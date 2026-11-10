@@ -1,15 +1,3 @@
-"""`Paired` narrowed to a subset of partners.
-
-Two through tables over one partner model cannot be made disjoint without this,
-so a rule of the form *these two relationships must not overlap* is violated by
-construction -- and that is the shape of every separation-of-duties constraint
-there is: reviewer-is-not-author, approver-is-not-requester,
-auditor-is-not-audited.
-
-`FanOut` gained `parents=` for the same class of problem. This is that gap one
-primitive over.
-"""
-
 from __future__ import annotations
 
 import pytest
@@ -81,12 +69,7 @@ def test_two_pairings_over_disjoint_halves_never_overlap(a_world: None) -> None:
 
 
 def test_a_named_partner_that_matches_no_row_is_refused_by_key(a_world: None) -> None:
-    """Silent narrowing is the failure this prevents.
-
-    The database does the narrowing, so a key matching nothing simply does not
-    come back and its edges go to whatever else was named -- a world the
-    declaration does not describe, built without complaint.
-    """
+    """Silent narrowing is the failure this prevents."""
     real = list(Person.objects.order_by("id").values_list("id", flat=True))[:2]
 
     shape = Shape(
@@ -104,8 +87,7 @@ def test_a_named_partner_that_matches_no_row_is_refused_by_key(a_world: None) ->
 
 
 def test_a_partner_named_by_its_string_is_that_partner(a_world: None) -> None:
-    # The same coercion a fan-out's parents= takes: the keys come back as the
-    # primary key's own type, so a string naming one is read as that type.
+    # The same coercion a fan-out's parents= takes: a string is read as the key's type.
     real = list(Person.objects.order_by("id").values_list("id", flat=True))[:4]
 
     build(
@@ -142,16 +124,10 @@ def test_one_partner_named_in_two_spellings_is_refused_as_a_repeat(a_world: None
 
 
 def test_a_subset_too_small_for_the_busiest_group_is_refused(a_world: None) -> None:
-    """The constraint `Paired` already enforces, now over the narrowed set.
-
-    A group of size k needs k distinct partners, so narrowing can make a
-    declaration impossible that was fine over the whole table.
-    """
+    """The constraint `Paired` already enforces, now over the narrowed set."""
     only_one = list(Person.objects.order_by("id").values_list("id", flat=True))[:1]
     one_company = list(Company.objects.order_by("id").values_list("id", flat=True))[:1]
 
-    # Every row in one group, so the busiest group needs nine distinct
-    # partners and exactly one is on offer.
     shape = Shape(
         Table(
             Membership,
@@ -174,11 +150,7 @@ def test_the_declaration_still_digests(a_world: None) -> None:
 
 
 def test_the_narrowing_shows_in_the_repr() -> None:
-    """A repr a reader can paste back into a declaration.
-
-    Without the subset the repr is unchanged, because a declaration that did
-    not narrow should not start reading as though it did.
-    """
+    """A repr a reader can paste back into a declaration."""
     assert repr(Paired("company", Zipf())) == "Paired('company', Zipf(1.2))"
     assert repr(Paired("company", Zipf(), parents=[1, 2])) == (
         "Paired('company', Zipf(1.2), parents=[1, 2])"

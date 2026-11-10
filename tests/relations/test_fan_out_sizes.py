@@ -1,5 +1,3 @@
-"""Reading a fan-out back: which parents got the children, without an aggregate."""
-
 from __future__ import annotations
 
 from collections.abc import Iterator
@@ -56,13 +54,7 @@ def _graph(companies: int = 40, sessions: int = 3000, seed: int = 5) -> Shape:
 
 
 def _loaded() -> dict[int, int]:
-    """What the child table actually holds, the expensive way, for comparison.
-
-    The ``GROUP BY`` this function exists to spare a consumer. Fine in a test of
-    three thousand rows and the whole point at two million: it is the aggregate
-    over the entire world that a plan measurement would otherwise have to run
-    before it started.
-    """
+    """What the child table actually holds, the expensive way, for comparison."""
     return dict(
         Session.objects.values("company_id")
         .annotate(loaded=Count("pk"))
@@ -70,10 +62,7 @@ def _loaded() -> dict[int, int]:
     )
 
 
-# The three refusals happen before the connection is reached, so they need no
-# database at all -- which is also the claim: a declaration this function cannot
-# answer for is refused by reading the declaration, not by querying and finding
-# nothing.
+# Refusals read the declaration before any connection, so no database is needed.
 def test_a_model_the_shape_does_not_declare_is_refused_by_name() -> None:
     shape = Shape(Table(Company, rows=5, name=Constant("acme")))
 
@@ -81,8 +70,6 @@ def test_a_model_the_shape_does_not_declare_is_refused_by_name() -> None:
         fan_out_sizes(shape, Session, "company")
 
     assert "Session" in str(raised.value)
-    # And what the shape does hold, because the usual cause is asking about the
-    # parent instead of the child.
     assert Company._meta.db_table in str(raised.value)
 
 
@@ -92,9 +79,7 @@ def test_a_projection_has_no_partition_to_invert() -> None:
     with pytest.raises(InvalidShape) as raised:
         fan_out_sizes(shape, EventSession, "event")
 
-    # A different sentence from the one above, because the answer is different:
-    # the model is declared, and its foreign keys are copied along a join rather
-    # than spread by anything this could invert.
+    # A projection's foreign keys are copied along a join, so nothing here can invert them.
     assert "Projection" in str(raised.value)
 
 
@@ -111,10 +96,7 @@ def test_a_column_that_is_not_a_fan_out_is_refused_and_lists_what_is_declared() 
 @pytest.mark.django_db(transaction=True)
 @_POSTGRES_ONLY
 def test_the_counts_are_the_rows_the_build_actually_wrote() -> None:
-    # The claim the whole surface rests on. The counts are derived from the
-    # declaration and the parent keys rather than read off the child table, so
-    # the only thing worth asserting is that the derivation and the table agree
-    # -- for every parent, including the ones with nothing.
+    # The claim the whole surface rests on.
     shape = _graph()
     build_shape(shape)
 
@@ -134,13 +116,9 @@ def test_the_head_of_the_distribution_is_reachable_without_aggregating_the_child
     counts = fan_out_sizes(shape, Session, "company")
 
     whale, children = counts.ranked()[0]
-    # The sentence a plan assertion wants to write: this parent, that many
-    # children, and a query over it takes a different plan from one over the
-    # body of the distribution.
+    # A Zipf head is a head, not a slightly larger average.
     assert children == Session.objects.filter(company_id=whale).count()
     assert children == max(counts.values())
-    # A Zipf head is a head, not a slightly larger average. Without that the
-    # skew is not doing the thing it was declared for.
     assert children > 3000 / 40 * 3
 
 
@@ -161,11 +139,7 @@ def test_the_childless_tail_is_named_and_really_is_childless() -> None:
 @pytest.mark.django_db(transaction=True)
 @_POSTGRES_ONLY
 def test_the_sizes_are_not_rank_ordered_on_the_parent_key() -> None:
-    # Documented rather than fixed, and pinned here so it cannot be "fixed" by
-    # accident. Ordering the sizes on the parent key would put a correlation
-    # between a company's id and its size into the child table that no real
-    # system has, which is the opposite of what this package is for -- so "the
-    # whales are the low ids" is false, in both directions.
+    # Documented rather than fixed, and pinned here so it cannot be "fixed" by accident.
     shape = _graph()
     build_shape(shape)
 
@@ -174,11 +148,6 @@ def test_the_sizes_are_not_rank_ordered_on_the_parent_key() -> None:
     in_key_order = list(counts.values())
     assert in_key_order != sorted(in_key_order, reverse=True)
     assert in_key_order != sorted(in_key_order)
-    # Which is the same thing said from the other side: the ranking is a real
-    # reordering of the parent keys rather than them read forwards or backwards.
-    # Deliberately not an assertion about where any particular parent landed --
-    # the head can fall on the lowest key by chance, and pinning that would be
-    # asserting the seed rather than the mechanism.
     ranked_keys = [parent for parent, _count in counts.ranked()]
     assert ranked_keys != list(counts)
     assert ranked_keys != list(reversed(list(counts)))
@@ -187,10 +156,7 @@ def test_the_sizes_are_not_rank_ordered_on_the_parent_key() -> None:
 @pytest.mark.django_db(transaction=True)
 @_POSTGRES_ONLY
 def test_parents_built_outside_the_shape_are_taken_as_they_are() -> None:
-    # The hybrid this package is written for: the parents come from the ORM and
-    # only the large table is declared. Nothing in the declaration says how many
-    # companies there should be, so nothing is checked -- the answer is about the
-    # parents that are there.
+    # Parents come from the ORM and only the large table is declared, so nothing is checked.
     made = [Company.objects.create(name=f"c{index}") for index in range(12)]
     shape = Shape(Table(Session, rows=600, company=FanOut(Zipf(1.2)), label=Constant("s")), seed=6)
     build_shape(shape)
@@ -204,9 +170,7 @@ def test_parents_built_outside_the_shape_are_taken_as_they_are() -> None:
 @pytest.mark.django_db(transaction=True)
 @_POSTGRES_ONLY
 def test_a_parent_table_that_has_moved_since_the_build_is_refused_rather_than_answered() -> None:
-    # The failure recomputation makes possible, so it is the one that has to be
-    # loud. Every number would still add up; they would add up over a partition
-    # of a world nobody built, and nothing about the result would look wrong.
+    # The failure recomputation makes possible, so it is the one that has to be loud.
     shape = _graph()
     build_shape(shape)
     Company.objects.create(name="created after the build")
@@ -221,10 +185,7 @@ def test_a_parent_table_that_has_moved_since_the_build_is_refused_rather_than_an
 @pytest.mark.django_db(transaction=True)
 @_POSTGRES_ONLY
 def test_a_null_share_leaves_the_counts_an_upper_bound_and_says_so() -> None:
-    # The one case where a count here is not a row count. A null share thins the
-    # partition per row after it is computed, so the sizes are the partition and
-    # the rows are fewer -- carried on the result rather than left in the
-    # declaration, because the caller comparing the two has the result in hand.
+    # The one case where a count here is not a row count.
     shape = Shape(
         Table(Company, rows=20, name=Constant("acme")),
         Table(
@@ -263,14 +224,7 @@ def temporary_databases() -> Iterator[list[str]]:
 
 @contextmanager
 def _pointed_at(database: str) -> Iterator[None]:
-    """Run the rest of the block against a cloned database.
-
-    Rewriting ``settings_dict["NAME"]`` and closing is Django's own way of
-    moving a connection to another database -- it is what its test runner does
-    and what filling a template does here. It stands in for what a consumer
-    configures once in their settings, and it is what makes the block below a
-    real cache-path test: this process reads a database it did not generate.
-    """
+    """Run the rest of the block against a cloned database."""
     default = connections["default"]
     original = default.settings_dict["NAME"]
     default.close()
@@ -287,10 +241,7 @@ def _pointed_at(database: str) -> Iterator[None]:
 def test_the_inversion_survives_the_template_database_cache(
     temporary_databases: list[str],
 ) -> None:
-    # The question this function was designed against. A cache hit clones a
-    # database and generates nothing, so anything carried off a build result
-    # would simply not exist on this path. Recomputation does not care: the
-    # clone holds the parents, the declaration holds the rest.
+    # The question this function was designed against.
     shape = _graph(companies=25, sessions=1500, seed=8)
     name = template_database(shape)
     temporary_databases.append(name)
@@ -310,15 +261,7 @@ def test_the_inversion_survives_the_template_database_cache(
 @_POSTGRES_ONLY
 @pytest.mark.django_db(transaction=True)
 def test_a_narrowed_fan_out_is_not_a_world_that_changed() -> None:
-    """The check has to compare against what was narrowed to, not the table.
-
-    ``WorldChanged`` exists for a parent that gained or lost rows since the
-    build, because the partition would then describe a world nobody built. A
-    ``parents=`` fan-out covers the keys it named and no others, so the parent
-    table holding fifty rows while the partition covers two is the declaration
-    working, not the world moving -- and a key among the named ones going
-    missing is already refused by name when the partition is resolved.
-    """
+    """The check has to compare against what was narrowed to, not the table."""
     shape = Shape(
         Table(Company, rows=50, name=Constant("c")),
         Table(
@@ -339,8 +282,7 @@ def test_a_narrowed_fan_out_is_not_a_world_that_changed() -> None:
 
 @pytest.mark.django_db
 def test_a_capped_fan_out_reports_the_capped_sizes() -> None:
-    # fan_out_sizes reads the partition the build wrote, so the cap has to show
-    # in its answer and agree with the child table.
+    # The cap must show in fan_out_sizes' answer, which reads the partition the build wrote.
     shape = Shape(
         Table(Company, rows=40, name=Constant("acme")),
         Table(
@@ -375,9 +317,7 @@ def _capped(companies: int = 10, sessions: int = 50) -> Shape:
 @pytest.mark.django_db(transaction=True)
 @_POSTGRES_ONLY
 def test_a_cap_the_shrunk_parents_cannot_hold_is_the_world_changing() -> None:
-    # Ten parents capped at five hold the fifty rows exactly; nine cannot. The
-    # partition refuses that, and the refusal is about the world rather than
-    # the declaration, which built.
+    # Ten parents capped at five hold the fifty rows exactly; nine cannot.
     shape = _capped()
     build_shape(shape, require_statistics=False)
     Company.objects.filter(pk=Company.objects.order_by("pk").values("pk")[:1]).delete()
@@ -392,10 +332,7 @@ def test_a_cap_the_shrunk_parents_cannot_hold_is_the_world_changing() -> None:
 @pytest.mark.django_db(transaction=True)
 @_POSTGRES_ONLY
 def test_an_emptied_parent_table_is_the_world_changing_too() -> None:
-    # A transactional test truncating the tables a session world built is a
-    # cause the docstring names. The partition refuses an empty parent before
-    # the count comparison below it runs, so that refusal is the one turned
-    # into the world having moved.
+    # The partition refuses an empty parent before any count comparison runs.
     shape = _capped()
     build_shape(shape, require_statistics=False)
     Company.objects.all().delete()
@@ -407,8 +344,7 @@ def test_an_emptied_parent_table_is_the_world_changing_too() -> None:
 @pytest.mark.django_db(transaction=True)
 @_POSTGRES_ONLY
 def test_a_cap_refused_over_the_parents_the_shape_declares_is_still_the_shape() -> None:
-    # The parent table holds what the shape says, so the refusal is the
-    # declaration's own and is not dressed up as a world that moved.
+    # The parent table holds what the shape says, so the refusal is the declaration's own.
     build_shape(Shape(Table(Company, rows=10, name=Constant("acme"))), require_statistics=False)
 
     with pytest.raises(InvalidShape, match="at most 50 rows fit"):
@@ -418,8 +354,7 @@ def test_a_cap_refused_over_the_parents_the_shape_declares_is_still_the_shape() 
 @pytest.mark.django_db(transaction=True)
 @_POSTGRES_ONLY
 def test_a_cap_refused_over_parents_built_elsewhere_is_the_shape() -> None:
-    # With the parents outside the shape there is no declared count to have
-    # moved from, so the refusal is passed on as it is.
+    # With parents outside the shape there is no declared count to have moved from.
     Company.objects.bulk_create([Company(name="acme") for _ in range(10)])
     shape = Shape(
         Table(
@@ -437,9 +372,7 @@ def test_a_cap_refused_over_parents_built_elsewhere_is_the_shape() -> None:
 @pytest.mark.django_db(transaction=True)
 @_POSTGRES_ONLY
 def test_the_moved_world_counts_the_parents_a_default_manager_hides() -> None:
-    # The partition reads every parent row, so the count it is compared with
-    # has to as well: Vendor's default manager hides the retired ones, and
-    # counting through it would report a number the partition never saw.
+    # The partition reads every parent row, so the count must bypass the default manager.
     shape = Shape(
         Table(Vendor, rows=10, name=Constant("v"), retired=Skew({True: 1, False: 1})),
         Table(
