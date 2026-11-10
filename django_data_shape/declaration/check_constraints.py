@@ -190,8 +190,10 @@ def _check_independent_fan_outs(
         "matter of the seed. The combinations do fit, which is why the pigeonhole arithmetic "
         "lets this through -- what is missing is anything that enumerates them, and the load "
         "then fails inside COPY at a row number that moves when the seed does. An edge table "
-        f"declares one side and pairs the other: {fanned[1]}=Paired({fanned[0]!r}, Zipf()){no_null} "
-        f"takes distinct partners inside each {fanned[0]} group, so no pair can repeat and the edge "
+        f"declares one side and pairs the other: {fanned[1]}=Paired({fanned[0]!r}, "
+        f"Zipf()){no_null} "
+        f"takes distinct partners inside each {fanned[0]} group, so no pair can repeat and the "
+        "edge "
         "count is still exactly the row count. An edge set that has to be a particular one is "
         f"filled by a statement instead -- Projection({where}, columns=(...), sql=...)."
     )
@@ -353,7 +355,8 @@ def _a_tree_alone(table: Table, name: str, where: str, column: str) -> str:
             f"{name} permits one row per {where}.{column} and counts every NULL as one value "
             "under nulls_distinct=False. A tree's roots are the rows whose parent is NULL, so "
             "two roots collide as two children of one row do, and a column left out of the "
-            f"shape holds that one NULL in every row. What fills it is {_a_flat_tree(table, name)}, or, "
+            "shape holds that one NULL in every row. What fills it is "
+            f"{_a_flat_tree(table, name)}, or, "
             "where the rows have to be a particular set, a Projection with columns= and sql=."
         )
     return (
@@ -476,7 +479,10 @@ def _one_group(table: Table, paired: Paired, rows_of: dict[type[Model], int]) ->
 def _a_flat_tree(table: Table, name: str) -> str:
     """The tree a refusal may offer to keep this constraint on its own, in words."""
     if _each_null_is_its_own_group(table, name):
-        return "a tree with sizes that hold one value, such as Constant(1), which give no row two children"
+        return (
+            "a tree with sizes that hold one value, such as Constant(1), which give no row two "
+            "children"
+        )
     return (
         f"a tree with one root, roots at most 1/{table.rows + 1}, whose sizes hold one value, "
         "since one root is one NULL"
@@ -596,7 +602,8 @@ def _what_makes_a_unique_column_new(field: Field[Any, Any], rows: int) -> str:
             "fill it with a Projection with columns= and sql=."
         )
     return (
-        f"Declare the column with a distribution that is Distinct, such as {field.name}={offered!r} "
+        "Declare the column with a distribution that is Distinct, such as "
+        f"{field.name}={offered!r} "
         "(Sequential implements Distinct)."
     )
 
@@ -622,7 +629,8 @@ def _check_a_unique_column_left_to_one_value(table: Table) -> None:
         if field.unique and isinstance(held, _LeftOut) and not held.holds_null:
             raise InvalidShape(
                 f"{table.model.__name__}.{field.name} is unique and holds {held!r}, so "
-                f"{table.rows} rows cannot load. {_what_makes_a_unique_column_new(field, table.rows)}"
+                f"{table.rows} rows cannot load. "
+                f"{_what_makes_a_unique_column_new(field, table.rows)}"
             )
 
 
@@ -710,7 +718,8 @@ def _check_conditional(
     raise InvalidShape(
         f"{name} permits {permits}; {where} is filled by {declared!r}, which {asks}. A rule about "
         "a group cannot be kept by a draw made per row, at any weight -- a smaller share only "
-        f"moves the collision later into the load. {_what_keeps_a_draw_out(table, column, fanned, values)}"
+        "moves the collision later into the load. "
+        f"{_what_keeps_a_draw_out(table, column, fanned, values)}"
     )
 
 
@@ -725,8 +734,10 @@ def _what_keeps_a_draw_out(
             else ""
         )
         return (
-            f"Declare the column with PerParent({fanned!r}, last={values[0]!r}, rest=...){no_null}, "
-            "which puts it on one row of each group and makes the count derived from the fan-out rather "
+            f"Declare the column with PerParent({fanned!r}, last={values[0]!r}, "
+            f"rest=...){no_null}, "
+            "which puts it on one row of each group and makes the count derived from the fan-out "
+            "rather "
             "than chosen beside it. rest= has to sit outside the condition, which is the whole of "
             "what makes the group's other rows invisible to it."
         )
@@ -842,7 +853,8 @@ def _check_conditional_over_draws(
         "partitioned, so nothing is decided per group and no row inside the condition can see "
         "whether another in its group is inside too. Two of them sharing a group is a matter of "
         "the seed at any weight, and the load then fails inside COPY at a row number that moves "
-        f"when the seed does. What keeps it: {'; '.join([*offers, 'a Projection with columns= and sql='])}."
+        "when the seed does. What keeps it: "
+        f"{'; '.join([*offers, 'a Projection with columns= and sql='])}."
     )
 
 
@@ -957,7 +969,8 @@ def _what_keeps_a_relation_out(
         offers.extend(_what_keeps_a_fan_out_out(table, column, inside, declared, rows_of))
     elif isinstance(declared, Tree) and len(inside) == 1 and _is_literal(inside[0]):
         offers.append(
-            f"{column}=Tree(roots=1/{table.rows + 1}, sizes=...), since one root is one row with NULL"
+            f"{column}=Tree(roots=1/{table.rows + 1}, sizes=...), since one root is one row with "
+            "NULL"
             if inside[0] is None
             else "a tree with sizes that hold one value, such as Constant(1), which give that row "
             "one child at most"

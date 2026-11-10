@@ -441,7 +441,8 @@ def test_the_delete_route_empties_children_before_parents() -> None:
         constraints = connection.introspection.get_constraints(cursor, "testapp_session")
         (foreign_key,) = (name for name, info in constraints.items() if info["foreign_key"])
         cursor.execute(
-            f"ALTER TABLE testapp_session ALTER CONSTRAINT {connection.ops.quote_name(foreign_key)} "
+            "ALTER TABLE testapp_session ALTER CONSTRAINT "
+            f"{connection.ops.quote_name(foreign_key)} "
             "NOT DEFERRABLE"
         )
     company = Company.objects.create(name="caller")
@@ -498,7 +499,8 @@ def test_a_reference_the_database_does_not_enforce_is_not_seen() -> None:
         constraints = connection.introspection.get_constraints(cursor, "testapp_memberfee")
         (foreign_key,) = (name for name, info in constraints.items() if info["foreign_key"])
         cursor.execute(
-            f"ALTER TABLE testapp_memberfee DROP CONSTRAINT {connection.ops.quote_name(foreign_key)}"
+            "ALTER TABLE testapp_memberfee DROP CONSTRAINT "
+            f"{connection.ops.quote_name(foreign_key)}"
         )
     club = _callers_club("default", fee=True)
     (section,) = Section.objects.values_list("pk", flat=True)

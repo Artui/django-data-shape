@@ -76,7 +76,8 @@ def _targets(tree: Tree, weights: list[float], children: int, table: str, field:
     if not math.isfinite(total) or total <= 0:
         raise InvalidShape(
             f"{table}.{field} draws tree sizes from {tree.sizes!r} that sum to {total!r} over "
-            f"{len(weights)} rows, so there is no share of the {children} children to give any of them. "
+            f"{len(weights)} rows, so there is no share of the {children} children to give any of "
+            "them. "
             "The sizes are normalised: declare a distribution with some weight, and with numbers "
             "small enough to add up."
         )

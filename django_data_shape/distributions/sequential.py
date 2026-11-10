@@ -6,7 +6,7 @@ from typing import Any
 class Sequential:
     """``start`` plus ``row`` steps: monotonic, and correlated with the key.
 
-    The point is the correlation, not the convenience: Postgres keeps a statistic for it per column."""
+    The point is correlation, not convenience: Postgres keeps a statistic for it per column."""
 
     def __init__(self, start: Any, step: Any) -> None:
         self._start = start

@@ -127,7 +127,8 @@ def _relation(values: list[object], rows: int) -> tuple[str, str | None]:
             "references.",
         )
     return (
-        f"FanOut(Zipf()),  # {parents} parents, {spread[0]} at the head and {spread[-1]} at the tail",
+        f"FanOut(Zipf()),  # {parents} parents, {spread[0]} at the head and {spread[-1]} at the "
+        "tail",
         None,
     )
 

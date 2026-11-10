@@ -3899,7 +3899,8 @@ def test_the_statement_a_fan_out_beside_a_key_offers_builds() -> None:
                 cursor.execute(f"SELECT COUNT(*) FROM {quote(model._meta.db_table)}")
                 assert cursor.fetchone()[0] == 50
                 cursor.execute(
-                    f"TRUNCATE {quote(Company._meta.db_table)}, {quote(model._meta.db_table)} CASCADE"
+                    f"TRUNCATE {quote(Company._meta.db_table)}, {quote(model._meta.db_table)} "
+                    "CASCADE"
                 )
     finally:
         with connection.schema_editor() as editor:

@@ -7,7 +7,7 @@ from django_data_shape.distributions.distribution import Distribution
 class Tree:
     """Each row's parent is an earlier row of the same table, or nobody.
 
-    The self-referential relation, such as an org unit's parent unit, which a ``FanOut`` cannot fill."""
+    The self-referential relation, like an org unit's parent unit, which ``FanOut`` cannot fill."""
 
     def __init__(self, *, roots: float, sizes: Distribution) -> None:
         if not isinstance(roots, (int, float)) or not 0 < roots < 1:

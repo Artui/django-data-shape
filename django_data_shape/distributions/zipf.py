@@ -8,7 +8,7 @@ from django_data_shape.declaration.invalid_shape import InvalidShape
 class Zipf:
     """Positive weights following a power law of exponent ``s``.
 
-    The distribution fan-out is realistically drawn from, and the reason fan-out is worth declaring."""
+    The distribution fan-out is realistically drawn from, and why fan-out is worth declaring."""
 
     def __init__(self, s: float = 1.2) -> None:
         if not math.isfinite(s) or s <= 0:
