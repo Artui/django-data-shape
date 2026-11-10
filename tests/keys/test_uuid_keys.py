@@ -1,5 +1,3 @@
-"""UUID keys, derived rather than drawn."""
-
 from __future__ import annotations
 
 import uuid
@@ -10,16 +8,14 @@ from django_data_shape import UuidKeys
 def test_it_produces_well_formed_version_four_uuids() -> None:
     key = UuidKeys().key_for(0, stream=1234)
 
-    # Applications store v4 keys, so something merely UUID-shaped would be
-    # unlike the thing this stands in for.
+    # Applications store v4 keys, so a merely UUID-shaped key would be unlike the real thing.
     assert isinstance(key, uuid.UUID)
     assert key.version == 4
     assert key.variant == uuid.RFC_4122
 
 
 def test_the_same_seed_and_row_give_the_same_key() -> None:
-    # The reason this is not uuid4: a random key would make the primary key, and
-    # every foreign key pointing at it, differ between two builds of one shape.
+    # A random key would make every foreign key differ between two builds of one shape.
     assert UuidKeys().key_for(41, 99) == UuidKeys().key_for(41, 99)
 
 

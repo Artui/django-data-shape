@@ -1,12 +1,3 @@
-"""What ``is_disjoint`` reads a key strategy as, and that ``build`` reads it so.
-
-The predicate ``build`` and ``scaled_world`` both act on, so that a table one of
-them builds beside existing rows is never one the other empties or refuses.
-The world's half is held in ``tests/scaling``; the build's is held here, since
-the build is where the predicate decides whether rows already in a table are
-refused.
-"""
-
 from __future__ import annotations
 
 import pytest
@@ -55,9 +46,7 @@ def test_a_strategy_that_says_it_is_not_is_not() -> None:
     ids=["sequential", "key-function", "none"],
 )
 def test_a_strategy_that_does_not_implement_it_is_not(keys: object) -> None:
-    # Read as not disjoint rather than asked, which is the safe direction: a
-    # strategy that never said its keys cannot collide is treated as one whose
-    # keys can.
+    # Read as not disjoint, the safe direction: unproven keys are treated as colliding.
     assert is_disjoint(keys) is False
 
 
@@ -76,10 +65,7 @@ def test_build_builds_beside_rows_where_the_strategy_says_it_is_disjoint() -> No
 
 @pytest.mark.django_db
 def test_build_refuses_rows_where_the_strategy_says_it_is_not() -> None:
-    # Implementing the protocol does not exempt the table: the build asks, and
-    # a strategy answering no is refused for the caller's row like one whose
-    # keys can collide. Caught as Exception and checked by name, so this
-    # collects on a tree where the build reads the protocol some other way.
+    # Implementing the protocol does not exempt the table: a strategy answering no is refused.
     shape = _over_a_callers_tenant(disjoint=False)
 
     with pytest.raises(Exception) as refused:

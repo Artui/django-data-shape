@@ -1,5 +1,3 @@
-"""UUID keys with a SQL twin, so a projection can carry them."""
-
 from __future__ import annotations
 
 import uuid
@@ -16,8 +14,7 @@ from django_data_shape.utils import field_stream
 def test_it_produces_well_formed_version_four_uuids() -> None:
     made = [Md5Keys().key_for(row, stream=7) for row in range(50)]
 
-    # Applications store v4 keys, so something merely UUID-shaped would be
-    # unlike the thing this stands in for.
+    # Applications store v4 keys, so a merely UUID-shaped key would be unlike the real thing.
     assert all(isinstance(key, uuid.UUID) for key in made)
     assert {key.version for key in made} == {4}
     assert {key.variant for key in made} == {uuid.RFC_4122}
@@ -29,15 +26,9 @@ def test_the_same_seed_and_row_give_the_same_key() -> None:
 
 
 def test_it_is_a_different_strategy_and_not_a_second_meaning_for_uuid_keys() -> None:
-    # They draw different keys for the same row, so silently substituting one
-    # where a SQL twin was needed would change every key in every world already
-    # built -- and would give one declaration two meanings depending on which
-    # statement filled the table.
+    # Substituting it for a SQL twin would change every key already built, with two meanings.
     assert Md5Keys().key_for(0, 1) != UuidKeys().key_for(0, 1)
     assert repr(Md5Keys()) == "Md5Keys()"
-    # Both have nothing to say about themselves, and that is not them being the
-    # same: the strategy's own type name is part of the shape digest, so two
-    # shapes differing only in which they use are two different worlds.
     assert Md5Keys().canonical() == UuidKeys().canonical() == ()
 
 
@@ -64,12 +55,7 @@ _STREAMS = [
 
 
 def test_the_pair_of_streams_this_module_uses_straddles_the_bigint_limit() -> None:
-    """The fixture is the assertion, so it is checked rather than trusted.
-
-    A later change to how streams are derived could quietly move both of these
-    below the limit, and the tests below would keep passing while testing
-    nothing about the overflow.
-    """
+    """The fixture is the assertion, so it is checked rather than trusted."""
     signed_bigint_max = 2**63 - 1
 
     assert _STREAMS[0] <= signed_bigint_max < _STREAMS[1]
@@ -79,14 +65,7 @@ def test_the_pair_of_streams_this_module_uses_straddles_the_bigint_limit() -> No
 @pytest.mark.skipif(connection.vendor != "postgresql", reason="the SQL half needs PostgreSQL")
 @pytest.mark.parametrize("stream", _STREAMS)
 def test_the_two_halves_agree_for_a_stream_postgres_cannot_hold_as_bigint(stream: int) -> None:
-    """The bug a consumer found, and the reason it was never caught here.
-
-    ``to_hex(<stream>::bigint)`` asks PostgreSQL to re-derive a number Python
-    produced as *unsigned*, and bigint is signed -- so the statement raised
-    ``NumericValueOutOfRange`` for every seed on any table whose name hashes
-    high. The stream is a constant when the statement is built, so nothing has
-    to be re-derived at all: the sixteen hex digits are embedded.
-    """
+    """The bug a consumer found, and the reason it was never caught here."""
     keys = Md5Keys()
 
     with connection.cursor() as cursor:
@@ -99,14 +78,7 @@ def test_the_two_halves_agree_for_a_stream_postgres_cannot_hold_as_bigint(stream
 @pytest.mark.django_db
 @pytest.mark.skipif(connection.vendor != "postgresql", reason="the SQL half needs PostgreSQL")
 def test_the_two_halves_agree_against_a_real_server() -> None:
-    """The only form of agreement that means anything for a SQL twin.
-
-    A projection's rows never pass through Python, so the server assigns these
-    keys -- which makes a Python half and a SQL half that merely look like the
-    same rule worth nothing. They are computed for the same fifty rows and
-    compared. A checked-in fixture would prove only that the generator has not
-    changed, which is the thing already known.
-    """
+    """The only form of agreement that means anything for a SQL twin."""
     keys = Md5Keys()
     stream = 12345
 
