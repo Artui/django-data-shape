@@ -1,5 +1,3 @@
-"""One shape, offered at whatever size the test asks for."""
-
 from __future__ import annotations
 
 from functools import partial
@@ -12,8 +10,7 @@ from django_data_shape.scaling.scale_protocol import ScaleProtocol
 from django_data_shape.scaling.scaled_world import scaled_world
 
 
-# ``object`` for the same reason as in shape_fixture: the type of a fixture is
-# pytest's own and it changed shape between pytest 8.0 and 8.4.
+# ``object``, not pytest's fixture type, which changed shape between 8.0 and 8.4.
 def scale_fixture(shape: Shape, *, using: str = DEFAULT_DB_ALIAS) -> object:
     """A pytest fixture yielding a :class:`~django_data_shape.scaling.scale_protocol.ScaleProtocol`.
 
@@ -95,10 +92,7 @@ def scale_fixture(shape: Shape, *, using: str = DEFAULT_DB_ALIAS) -> object:
 
     @pytest.fixture
     def scaled_worlds(db: None) -> ScaleProtocol:
-        # Binding, not wrapping. The fixture's whole job is to attach one shape
-        # and one connection to the protocol; everything about what a world is
-        # and how it is undone belongs to scaled_world, where a consumer not
-        # using pytest can reach it too.
+        # Binding, not wrapping: the protocol does the work, and it is reachable without pytest.
         return partial(scaled_world, shape, using=using)
 
     return scaled_worlds
