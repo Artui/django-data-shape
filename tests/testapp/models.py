@@ -1436,6 +1436,28 @@ class OnlyChild(models.Model):
         ]
 
 
+class TiedOnlyChild(models.Model):
+    """A one-to-one self-key unique together with a name, where its NULLs count as one value.
+
+    The key alone keeps nothing here: every root's NULL is one group, so two roots with the
+    one name collide, which the flat tree that keeps ``OnlyChild`` cannot help. ``nulls_distinct``
+    arrived in Django 5.0, so below it this is ``OnlyChild`` and the tests reading the difference skip.
+    """
+
+    parent = models.OneToOneField("self", null=True, on_delete=models.CASCADE, related_name="+")
+    name = models.CharField(max_length=50)
+    code = models.CharField(max_length=50)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["parent", "name"],
+                name="one_name_per_tied_only_child",
+                **({"nulls_distinct": False} if django.VERSION >= (5, 0) else {}),
+            ),
+        ]
+
+
 class Coded(models.Model):
     """A self-key beside a uniqueness that does not include it, by constraint and by tuple."""
 

@@ -124,7 +124,7 @@ def _refusal(case: _Case) -> str:
     return str(raised.value)
 
 
-def _assert_loads(case: _Case) -> None:
+def _assert_loads(case: _Case, seeds: tuple[int, ...] = (0, 1, 7, 42, 1000)) -> None:
     """Accepted at declaration, and it loads at several seeds on a real unique index."""
     model = _model(case)
     tables = _tables(case, model)
@@ -132,7 +132,7 @@ def _assert_loads(case: _Case) -> None:
     with connection.schema_editor() as editor:
         editor.create_model(model)
     try:
-        for seed in (0, 1, 7, 42, 1000):
+        for seed in seeds:
             build_shape(Shape(*tables, seed=seed))
             with connection.cursor() as cursor:
                 cursor.execute(f"TRUNCATE {names} CASCADE")
@@ -1947,3 +1947,68 @@ def test_leaving_the_condition_column_out_is_not_offered_where_its_null_is_insid
 
     assert "No column of the constraint is partitioned" in message
     assert "state left out" not in message
+
+
+def test_a_rule_per_parent_that_leaves_a_member_in_the_rest_is_refused() -> None:
+    # Held by the ``rest`` conjunct in _check_conditional_over_draws: ``last`` writes none
+    # of the condition and ``rest`` is the value inside it, in every row but one per company.
+    message = _refusal(
+        _over_draws("rule_per_parent_over_a_draw")._replace(
+            name="rule_per_parent_with_the_member_in_the_rest",
+            columns={
+                "company": FanOut(Zipf()),
+                "state": PerParent("company", last="y", rest="x"),
+                "label": _skew(),
+            },
+        )
+    )
+
+    assert "is decided per company, which is no group of this constraint" in message
+
+
+def test_a_derivation_filling_a_drawn_condition_is_left_to_the_other_two_nets() -> None:
+    # Held by the ``Derivation`` conjunct in _check_conditional_over_draws: what a ``compute=``
+    # writes is not readable here, and ``_produces`` answers unknown for it, which is refused.
+    case = _over_draws("drawn_condition_over_a_draw")._replace(
+        name="derivation_fills_the_drawn_condition",
+        columns={
+            "company": FanOut(Zipf()),
+            "state": Derived("company", compute=_named_for_position, scope="group"),
+            "label": _skew(),
+        },
+    )
+
+    Shape(*_tables(case, _model(case)))
+
+
+def test_a_pairing_in_a_condition_is_offered_no_tree() -> None:
+    # Held by ``isinstance(declared, Tree)`` in _what_keeps_a_relation_out: one key inside is
+    # the shape a tree is offered for, and a pairing is no tree, so it would offer a column
+    # that Table refuses to fill with one.
+    message = _refusal(_refused("paired_under_another_fan_out"))
+
+    assert "owner left out of the shape" in message
+    assert "Tree(" not in message
+    assert "sizes that hold one value" not in message
+
+
+@pytest.mark.parametrize(
+    ("read", "offered"), [("company", True), ("owner", False)], ids=["unrelated", "reads_it"]
+)
+def test_only_a_derivation_that_reads_the_column_takes_back_the_left_out_offer(
+    read: str, offered: bool
+) -> None:
+    # Held by ``column in one.sources`` in _may_be_left_out: a derivation of ``company`` is
+    # beside the refusal and leaves ``owner`` free to be left out, one of ``owner`` does not.
+    message = _refusal(
+        _refused("key_over_a_fan_out")._replace(
+            name=f"derivation_reads_{read}",
+            columns={
+                "company": FanOut(Zipf()),
+                "owner": FanOut(Zipf()),
+                "label": Derived(read, compute=_named_for_position, scope="group"),
+            },
+        )
+    )
+
+    assert ("owner left out of the shape" in message) is offered

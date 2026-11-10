@@ -321,16 +321,25 @@ def _unconditional_constraints(model: type[Model]) -> Iterator[UniqueConstraint]
 
 def _composite_uniqueness(
     model: type[Model], field: Field[Any, Any]
-) -> Iterator[tuple[str, tuple[str, ...]]]:
-    """Each uniqueness over this column together with others: how it is named, and its columns."""
+) -> Iterator[tuple[str, tuple[str, ...], bool]]:
+    """Each uniqueness over this column together with others: its name, its columns, and
+    whether it keeps each NULL apart.
+
+    ``nulls_distinct=False`` makes the NULLs one value, read with ``getattr`` because it
+    arrived in Django 5.0. A ``unique_together`` always keeps them apart.
+    """
     for constraint in _unconditional_constraints(model):
         names = field_names(model, constraint.fields)
         if field.name in names and len(names) > 1:
-            yield constraint.name, names
+            yield (
+                constraint.name,
+                names,
+                getattr(constraint, "nulls_distinct", None) is not False,
+            )
     for entry in model._meta.unique_together:
         names = field_names(model, entry)
         if field.name in names and len(names) > 1:
-            yield f"unique_together {names!r}", names
+            yield f"unique_together {names!r}", names, True
 
 
 def _is_distinct(field: Field[Any, Any], values: list[object]) -> bool:
@@ -358,9 +367,22 @@ def _composite_finding(
     **A key to another table is not a column to make distinct.** It is written as a
     fan-out, which ``Sequential`` cannot fill, so the remedy for it is a cap of one,
     which gives no parent two rows, and a ``Projection`` for either kind.
+
+    **A unique key gets none where the uniqueness keeps each NULL apart.** It is written
+    with sizes of one value, a flat tree, which gives no row two children and so keeps any
+    uniqueness that includes the key itself. Where the NULLs are one value the roots are
+    one group, and the others drawn beside them collide, so the finding stands.
+    ``test_a_unique_self_key_needs_no_finding_about_a_composite_uniqueness`` holds the
+    ``apart`` conjunct from one side and
+    ``test_a_unique_self_key_under_nulls_counted_as_one_is_a_finding`` from the other;
+    ``test_a_self_key_under_a_composite_uniqueness_over_repeated_values_is_a_finding``
+    holds ``unique``, since a key that is not unique is a finding either way.
     """
     findings = []
-    for label, names in _composite_uniqueness(model, field):
+    unique = _is_unique(model, field)
+    for label, names, apart in _composite_uniqueness(model, field):
+        if unique and apart:
+            continue
         others = [name for name in names if name != field.name]
         if any(_is_distinct(*columns[name]) for name in others):
             continue
@@ -439,9 +461,7 @@ def _render(
         extra: list[str] = []
         if field.is_relation and field.related_model is model:
             declaration, finding = _self_key(model, field, values, len(made))
-            # A unique key is written with sizes of one value, a flat tree, which gives no
-            # row two children and so keeps any uniqueness that includes the key itself.
-            if declaration is not None and not _is_unique(model, field):
+            if declaration is not None:
                 extra = _composite_finding(model, field, columns)
         elif field.is_relation:
             declaration, finding = _relation(values, len(made))

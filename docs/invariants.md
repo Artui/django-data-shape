@@ -392,7 +392,15 @@ how many companies there are.
   `Derived(..., scope="group")` beside it and a cap of one are each offered with "no null
   share", and a `Paired` whose relation keeps one is refused: beside two tied fan-outs it
   loaded 0 times in 20, and 20 with the share dropped. A cap of one over a fan-out with a
-  share loaded 0 times beside a draw, and 20 without it.
+  share loaded 0 times beside a draw, and 20 without it. A `PerParent` offered under a
+  condition over a fan-out with a share says "over company with no null share" too, since
+  `Table` refuses one over a share; with the share dropped it loaded 20 times in 20.
+- **`Distinct` is offered only where a column of the constraint is not a key.** A key is
+  filled by a `FanOut`, a `Paired` or a `Tree` and `Table` refuses a distribution on it, so
+  a nullable key the shape leaves out is not a column to make `Distinct`. `(company, prev)`
+  with `prev` left out, `(owner, other)` over a `Paired` with `other` left out, and
+  `(other)` under `Q(state="x")` were offered one; each now offers what it still can, and
+  that loaded 20 times in 20.
 - **A cap of one is offered only where it can place every row**, or where the parents
   are not declared in this shape. `max_children=1` over
   fewer parents than rows cannot be partitioned, and the build refuses it before a row is

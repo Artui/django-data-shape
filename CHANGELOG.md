@@ -42,7 +42,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Paired` were accepted and the load failed in `COPY` at some seeds. They are refused
   now, and everything the message offers loads over draws alone. `Q(company=1)` over
   `(person)` with `person` paired on `company` is accepted wherever it stands, since one
-  company's partners are distinct, and that takes back a refusal beside another `FanOut`.
+  company's partners are distinct.
   `Q(owner=99)` and a key over a `Uniform(1, 10**9)` are refused although each loads.
 - **A `Paired` beside its own relation keeps a conditional uniqueness.** Its partners are
   distinct inside each group, so `(company, person)` holds under any condition, and
@@ -58,7 +58,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `parent=Tree(...)` and `name=Skew(...)` and no finding, and `Shape` then refused it.
   A finding now names the constraint (or the `unique_together`) and the remedy: a
   column distinct in every row, `max_children=1` on a key to another table, or a
-  `Projection`. A unique self-key gets none, since its flat tree keeps the constraint.
+  `Projection`. A unique self-key gets none where the uniqueness keeps each NULL apart,
+  since its flat tree keeps the constraint; where they count as one value the roots are
+  one group, the flat tree keeps none of it, and the finding stands.
 - **A `UniqueConstraint` or `unique_together` that spells the attname is read.**
   `fields=["parent_id"]` was not the column `parent`, so `shape_from_factory` wrote
   `sizes=Zipf()` for a unique self-key, which `Shape` refuses. `fields=["parent_id",
@@ -97,8 +99,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A flat `Tree` beside two fan-outs is accepted.** It was refused by the check for
   the two fan-outs, which did not read the proof the others read, and it loads.
 - **One root is a proof under `nulls_distinct=False`.** A `Tree` with one root and
-  sizes of one value holds one NULL and no repeated key, and it was refused whatever
-  it was beside. It loads, and a refusal there now names it as `roots=1/(rows + 1)`,
+  sizes of one value holds one NULL and no repeated key, and it was refused alone, beside
+  a draw or two fan-outs, and under a condition. It loads, and a refusal there now names
+  it as `roots=1/(rows + 1)`,
   since `1/rows` reads as two roots at some counts, 11 and 13 among them. A tree of many
   roots stays refused.
 - **A fan-out that gives no group two rows keeps a conditional constraint.**
@@ -120,18 +123,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A conditional uniqueness that nothing partitions is refused.** A constraint over
   draws alone, or a `Paired` alone, with a condition a row can meet, was skipped, and
   seven such shapes loaded 0 times in 20. The refusal offers a `Distinct` column of the
-  constraint, the condition column left out where it is nullable, and a `Projection`,
-  each loaded. A derivation in the group stays with the other two nets.
+  constraint that is not a key, the condition column left out where it is nullable, and a
+  `Projection`, each loaded. A key the shape leaves out is no column to make `Distinct`,
+  so a constraint of keys alone is offered none. A derivation in the group stays with
+  the other two nets.
 - **Under `nulls_distinct=False` a refusal no longer offers a remedy that keeps a null
   share**, and a `Paired` whose relation keeps one is refused: offered beside two fan-outs,
   it loaded 0 times in 20. A cap of one is no longer offered over fewer parents than rows,
   and one declared there beside a tree is refused at `Shape()`, where it was accepted and
   failed in the build. `Constant(None)`, and a Python `default=None`, are read as a NULL
   in every row, which keeps every row apart while each NULL is its own group and is one
-  value where they tie; the pigeonhole counted them as one value either way.
-- **A `Paired` whose relation has one parent keeps any uniqueness over it.** Its one
-  group gives every row a different partner, and it was refused under a condition
-  although it loads.
+  value where they tie; the pigeonhole counted them as one value either way. A `PerParent`
+  offered under a condition over a fan-out with a null share says "over company with no
+  null share" as the others do, and loads with the share dropped.
 - **A uniqueness over a `Paired` that does not name its relation is refused.** `Paired`
   keeps partners apart only inside each group of its relation, so `unique(owner)` with
   `owner=Paired("company", ...)` over fifty companies was accepted and loaded 0 times in

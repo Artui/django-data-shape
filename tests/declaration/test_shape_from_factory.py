@@ -7,6 +7,7 @@ flat world this package exists to argue against, so the value is in saying so.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 
 import django
@@ -41,6 +42,7 @@ from tests.testapp.models import (
     SpelledShelf,
     Successor,
     TiedLink,
+    TiedOnlyChild,
 )
 
 pytestmark = [
@@ -782,8 +784,9 @@ def test_a_self_key_beside_a_key_and_a_plain_column_in_the_uniqueness_gets_both_
 def test_a_unique_self_key_needs_no_finding_about_a_composite_uniqueness() -> None:
     """The flat tree it writes gives no row two children, so ``(parent, name)`` holds.
 
-    Fails without ``not _is_unique`` at the call in ``_render``: the names repeat, so the
-    finding told the caller to make them distinct on a source ``Shape`` accepts.
+    Fails without ``unique`` in ``_composite_finding``: the names repeat, so the finding
+    told the caller to make them distinct on a source ``Shape`` accepts. Under NULLs counted
+    as one value the flat tree keeps nothing, which is the test below.
     """
     report = shape_from_factory(
         _named_factory(OnlyChild, lambda n: f"n{n % 3}", code=_one_code), samples=20
@@ -794,6 +797,34 @@ def test_a_unique_self_key_needs_no_finding_about_a_composite_uniqueness() -> No
     assert "unique together" not in report
     assert "one_name_per_only_child" not in report
     Shape(_built(report, OnlyChild))
+
+
+@_NEEDS_NULLS_DISTINCT
+def test_a_unique_self_key_under_nulls_counted_as_one_is_a_finding() -> None:
+    """The flat tree keeps no uniqueness the roots take part in, because their NULLs are one value.
+
+    Five roots in twenty rows, every root named differently and every other row alike: the
+    source the report wrote was refused by ``Shape`` with no word of it, and with the check
+    off it loaded 0 of 20. Fails without ``apart`` in ``_composite_finding``.
+    """
+    report = shape_from_factory(
+        _named_factory(TiedOnlyChild, lambda n: f"r{n}" if n % 4 == 1 else "same", code=_one_code),
+        samples=20,
+    )
+
+    assert "parent=Tree(roots=0.25, sizes=Constant(1))" in report
+    finding = _the_finding_about(report, "TiedOnlyChild.parent")
+    assert "one_name_per_tied_only_child" in finding
+    assert "name is declared as a draw" in finding
+    assert "Sequential" in finding
+    assert "Projection" in finding
+    # The finding is true: the source as written is the one Shape refuses, and the remedy
+    # it names is accepted.
+    with pytest.raises(InvalidShape, match="is a Tree beside"):
+        Shape(_built(report, TiedOnlyChild))
+    distinct = re.sub(r"name=Skew\(.*\),", "name=Sequential(1, 1),", report)
+    assert distinct != report
+    Shape(_built(distinct, TiedOnlyChild))
 
 
 @pytest.mark.parametrize("model", [SpelledChain, SpelledRelay])

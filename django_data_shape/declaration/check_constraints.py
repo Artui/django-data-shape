@@ -464,7 +464,10 @@ def _check_a_pairing_without_its_relation(
             )
         if _each_null_is_its_own_group(table, name) and _may_be_left_out(table, column):
             offers.append(f"{column} left out of the shape, which holds NULL so no row is in it")
-        if any(_is_drawn_per_row(_held(table, field)) for field in fields):
+        if any(
+            _is_drawn_per_row(_held(table, field)) and not _is_a_relation(table, field)
+            for field in fields
+        ):
             offers.append(
                 "a column of the constraint that is distinct in every row, which says so with "
                 "Distinct -- Sequential does"
@@ -903,7 +906,12 @@ def _a_flat_tree(table: Table, name: str) -> str:
 
 
 def _a_null_share_counted_together(table: Table, name: str | None, fanned: Iterable[str]) -> str:
-    """The sentence a refusal owes when the NULLs of a fan-out are what collide."""
+    """The sentence a refusal owes when the NULLs of a fan-out are what collide.
+
+    ``test_the_nulls_a_refusal_counts_together_are_the_constraints_own_reading`` holds the
+    ``_each_null_is_its_own_group`` conjunct, which the coverage gate cannot see: the sentence
+    is true only under ``nulls_distinct=False``.
+    """
     shares = [
         column
         for column in fanned
@@ -1383,9 +1391,15 @@ def _what_keeps_a_draw_out(
     times in twenty, and so did ``null_equal_to_an_expression``, declared.
     """
     if all(_is_literal(value) for value in values):
+        # Table refuses a PerParent over a null share, since those rows belong to no group.
+        no_null = (
+            f" over {fanned} with no null share"
+            if cast("FanOut", table.fields[fanned]).null
+            else ""
+        )
         return (
-            f"Declare the column with PerParent({fanned!r}, last={values[0]!r}, rest=...), which "
-            "puts it on one row of each group and makes the count derived from the fan-out rather "
+            f"Declare the column with PerParent({fanned!r}, last={values[0]!r}, rest=...){no_null}, "
+            "which puts it on one row of each group and makes the count derived from the fan-out rather "
             "than chosen beside it. rest= has to sit outside the condition, which is the whole of "
             "what makes the group's other rows invisible to it."
         )
@@ -1506,6 +1520,11 @@ def _check_conditional_over_draws(
     arrangement checks do: ``Derived("owner", ..., scope="group")`` keeps it, twenty times in
     twenty, and that is not readable here. So is a derivation filling the condition column,
     unless it is a ``PerParent``, whose values are.
+
+    ``rest`` is held by ``test_a_rule_per_parent_that_leaves_a_member_in_the_rest_is_refused``
+    and ``Derivation`` by ``test_a_derivation_filling_a_drawn_condition_is_left_to_the_other_two_nets``,
+    which the coverage gate cannot see. The twins in :func:`_check_conditional_over_a_tree` are
+    held in ``test_tree_uniqueness.py``.
     """
     grouped = [_held(table, field) for field in fields]
     if not all(_is_drawn_per_row(one) or isinstance(one, Paired) for one in grouped):
@@ -1529,7 +1548,8 @@ def _check_conditional_over_draws(
         for field, one in zip(fields, grouped, strict=True)
     ]
     offers: list[str] = []
-    if any(not isinstance(one, Paired) for one in grouped):
+    # A Paired is a relation too, so this is the one question: is a column left to say Distinct?
+    if any(not _is_a_relation(table, field) for field in fields):
         offers.append(
             "a column of the constraint that is distinct in every row, which says so with Distinct "
             "-- Sequential does"
@@ -1752,6 +1772,9 @@ def _what_keeps_a_relation_out(
     ``test_the_refusal_offers_only_what_builds`` loads each of them. A narrowed ``Paired``
     is not offered: it is accepted, and whether it builds depends on the busiest group
     against the partners left, which nothing reads here.
+
+    ``isinstance(declared, Tree)`` is held by ``test_a_pairing_in_a_condition_is_offered_no_tree``:
+    a ``Paired`` inside one key is the same shape to the other two conjuncts.
     """
     offers: list[str] = []
     if isinstance(declared, FanOut):
@@ -1765,7 +1788,7 @@ def _what_keeps_a_relation_out(
         )
     if None not in inside and _may_be_left_out(table, column):
         offers.append(f"{column} left out of the shape, which holds NULL so no row is inside")
-    if others:
+    if any(not _is_a_relation(table, field) for field in others):
         offers.append(
             "a column of the constraint that is distinct in every row, which says so with Distinct "
             "-- Sequential does"
@@ -1802,12 +1825,26 @@ def _what_keeps_a_fan_out_out(
     return offers
 
 
+def _is_a_relation(table: Table, column: str) -> bool:
+    """Whether this column is a key, which no ``Distinct`` can fill.
+
+    ``Table`` refuses one: "is a relation, so it needs a FanOut rather than a value
+    distribution". A relation left out of the shape reads as :class:`_LeftOut`, which is drawn
+    per row to every other reading here, so a refusal that offered ``Distinct`` for "a column
+    of the constraint" would offer it for that column. ``test_distinct_is_offered_only_over_a_column_that_can_say_it``
+    holds each of the three refusals that make the offer.
+    """
+    return cast("Field[Any, Any]", table.model._meta.get_field(column)).is_relation
+
+
 def _may_be_left_out(table: Table, column: str) -> bool:
     """Whether leaving this column out loads a NULL, with nothing else needing it.
 
     ``key_on_a_required_column`` holds ``null``, ``key_on_a_defaulted_column`` the default,
     and ``key_read_by_owner`` and ``key_read_by_label`` the two readers, each of which
-    ``Table`` refuses without the relation it reads.
+    ``Table`` refuses without the relation it reads. ``column in one.sources`` is held by
+    ``test_only_a_derivation_that_reads_the_column_takes_back_the_left_out_offer``, whose
+    ``unrelated`` case keeps the offer beside a derivation of another column.
     """
     field = cast("Field[Any, Any]", table.model._meta.get_field(column))
     read = any(

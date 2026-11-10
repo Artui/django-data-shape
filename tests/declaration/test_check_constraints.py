@@ -27,6 +27,7 @@ from typing import Any, cast
 import django
 import pytest
 from django.db import connection, models
+from django.db.models import Q
 from django.db.models.functions import Now
 from django.test.utils import isolate_apps
 
@@ -3601,3 +3602,175 @@ def test_a_pairing_beside_a_kept_pair_is_accepted_and_loads() -> None:
             reviewer=Paired("team", Zipf()),
         ),
     )
+
+
+_TWENTY = tuple(range(20))
+
+# A key can be filled by a FanOut, a Paired or a Tree and by no distribution, so a refusal that
+# says "a column of the constraint that is distinct in every row" has to have a column that is
+# not one. A key left out of the shape reads as drawn per row, and was offered Distinct.
+_NO_COLUMN_TO_SAY_DISTINCT = (
+    # The relation is in the condition and the other column is a key left out: the shape's
+    # third refusal, _check_a_relation_in_a_condition.
+    pytest.param(
+        _Case(
+            "relation_condition_beside_a_left_out_key",
+            ("company", "prev"),
+            Q(company=1),
+            {"company": FanOut(Zipf())},
+            together=True,
+        ),
+        ("parents= naming only keys outside the condition", "company left out of the shape"),
+        (
+            (
+                "relation_condition_beside_a_left_out_key_narrowed",
+                {"company": FanOut(Zipf(), parents=(2, 3))},
+            ),
+            ("relation_condition_beside_a_left_out_key_left_out", {}),
+        ),
+        id="relation_in_a_condition",
+    ),
+    # The pairing without its relation, beside a key left out whose NULLs are one value.
+    pytest.param(
+        _Case(
+            "pairing_beside_a_left_out_key",
+            ("owner", "other"),
+            None,
+            _WITHOUT_ITS_RELATION,
+            together=True,
+            people=300,
+        ),
+        ("owner=FanOut(Constant(1)), or a FanOut with max_children=1",),
+        (
+            ("pairing_beside_a_left_out_key_flat", {"company": FanOut(Zipf()), "owner": _FLAT}),
+            ("pairing_beside_a_left_out_key_cap", {"company": FanOut(Zipf()), "owner": _CAP}),
+        ),
+        id="pairing_without_its_relation",
+    ),
+    # A condition over a draw, the only column of the constraint a key left out.
+    pytest.param(
+        _Case(
+            "draw_condition_over_a_left_out_key",
+            ("other",),
+            Q(state="x"),
+            {"state": Skew({"x": 0.1, "y": 0.9})},
+            together=True,
+        ),
+        ("state left out of the shape",),
+        (("draw_condition_over_a_left_out_key_left_out", {}),),
+        id="condition_over_draws",
+    ),
+)
+
+
+# Each refused table is the three offers' origin; each remedy it still offers loads 20 of 20 on
+# the refused table's sizes, and the Distinct it used to offer for a key could not be declared
+# (Table: "is a relation, so it needs a FanOut rather than a value distribution").
+@_ON_POSTGRES
+@_NEEDS_DJANGO_5
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.parametrize(("refused", "offered", "builds"), _NO_COLUMN_TO_SAY_DISTINCT)
+def test_distinct_is_offered_only_over_a_column_that_can_say_it(
+    refused: _Case,
+    offered: tuple[str, ...],
+    builds: tuple[tuple[str, dict[str, Any]], ...],
+) -> None:
+    message = _refusal(refused)
+
+    assert "Distinct" not in message
+    for one in (*offered, "a Projection with columns= and sql="):
+        assert one in message
+    for name, columns in builds:
+        _assert_loads(refused._replace(name=name, columns=columns), _TWENTY)
+
+
+def test_a_key_cannot_be_declared_distinct() -> None:
+    # The claim the three refusals above rest on: the offer was for a declaration Table refuses.
+    with pytest.raises(InvalidShape, match="is a relation, so it needs a FanOut"):
+        Table(_model(_PER_PARENT_OVER_A_NULL_SHARE), rows=10, company=Sequential(1, 1))
+
+
+# Measured over twenty seeds on the refused table's sizes: company=FanOut(Zipf(), null=0.3)
+# under Q(state="x") is refused, and the same table with no null share and the PerParent the
+# message offers loads 20 of 20, NULLs counted as one value.
+_PER_PARENT_OVER_A_NULL_SHARE = _Case(
+    "per_parent_over_a_null_share",
+    ("company", "label"),
+    Q(state="x"),
+    {
+        "company": FanOut(Zipf(), null=0.3),
+        "state": Skew({"x": 0.1, "y": 0.9}),
+        "label": _skew(),
+    },
+    together=True,
+)
+
+
+def test_a_per_parent_over_a_null_share_is_offered_only_with_the_share_dropped() -> None:
+    message = _refusal(_PER_PARENT_OVER_A_NULL_SHARE)
+
+    assert "PerParent('company', last='x', rest=...) over company with no null share" in message
+    # What Table says of the PerParent the old wording offered, null share and all.
+    with pytest.raises(InvalidShape, match="Drop the null share"):
+        Table(
+            _model(_PER_PARENT_OVER_A_NULL_SHARE),
+            rows=200,
+            company=FanOut(Zipf(), null=0.3),
+            state=PerParent("company", last="x", rest="y"),
+        )
+
+
+def test_a_per_parent_over_a_fan_out_with_no_null_share_is_offered_without_the_clause() -> None:
+    # Holds the null conjunct: the clause is for a share and for nothing else.
+    message = _refusal(
+        _PER_PARENT_OVER_A_NULL_SHARE._replace(
+            name="per_parent_over_no_null_share",
+            columns={**_PER_PARENT_OVER_A_NULL_SHARE.columns, "company": FanOut(Zipf())},
+        )
+    )
+
+    assert "PerParent('company', last='x', rest=...)," in message
+    assert "no null share" not in message
+
+
+@_ON_POSTGRES
+@_NEEDS_DJANGO_5
+@pytest.mark.django_db(transaction=True)
+def test_the_per_parent_the_refusal_offers_over_a_null_share_loads_with_the_share_dropped() -> None:
+    _assert_loads(
+        _PER_PARENT_OVER_A_NULL_SHARE._replace(
+            name="per_parent_over_no_null_share_loads",
+            columns={
+                "company": FanOut(Zipf()),
+                "state": PerParent("company", last="x", rest="y"),
+                "label": _skew(),
+            },
+        ),
+        _TWENTY,
+    )
+
+
+@pytest.mark.parametrize(
+    ("columns", "fields", "rows"),
+    [
+        pytest.param(
+            {"company": FanOut(Zipf(), null=0.1), "label": _skew()},
+            ("company", "label"),
+            40,
+            id="beside_a_draw",
+        ),
+        pytest.param({"company": FanOut(Zipf(), null=0.1)}, ("company",), 40, id="alone"),
+    ],
+)
+def test_the_nulls_a_refusal_counts_together_are_the_constraints_own_reading(
+    columns: dict[str, Any], fields: tuple[str, ...], rows: int
+) -> None:
+    # Held by the ``_each_null_is_its_own_group`` conjunct in _a_null_share_counted_together:
+    # a null share is the same fan-out either way, and the sentence about its rows being one
+    # group is true only under nulls_distinct=False.
+    apart = _Case("nulls_apart", fields, None, columns, rows=rows)
+    refusal = _refusal(apart)
+    assert "counts every NULL as one value" not in refusal
+    if django.VERSION >= (5, 0):
+        tied = _refusal(apart._replace(name="nulls_tied", together=True))
+        assert "counts every NULL as one value under nulls_distinct=False" in tied
