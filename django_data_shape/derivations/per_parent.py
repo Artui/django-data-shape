@@ -1,5 +1,3 @@
-"""One value for one row of every group, and another for the rest."""
-
 from __future__ import annotations
 
 from typing import cast
@@ -18,85 +16,14 @@ _UNSET = object()
 
 
 def _is_distribution(candidate: object) -> bool:
-    """Whether this is a distribution rather than the value of a column.
-
-    Structural on purpose, and structural on the **type** rather than on the
-    instance. The one plain value that would otherwise be mistaken for a
-    distribution is an ``Enum`` member -- ``Status.COMPLETE.value`` is the
-    string it wraps, and an enum is an entirely ordinary thing to fill a status
-    column with. ``type(member).value`` is the ``DynamicClassAttribute``
-    descriptor rather than a method, so reading the attribute off the class
-    tells the two apart where reading it off the instance would quietly refuse
-    every enum.
-
-    An ``isinstance`` against
-    :class:`~django_data_shape.distributions.distribution.Distribution` would be
-    the obvious spelling and is not available: it is a plain ``Protocol``, and
-    making it runtime-checkable would check for the same attribute on the
-    instance -- which is the check that gets enums wrong.
-    """
+    """Whether this is a distribution rather than the value of a column."""
     return callable(getattr(type(candidate), "value", None))
 
 
 class PerParent:
     """Within each parent's children, one end of the group is different.
 
-    The primitive for per-group business rules, and the reason it is one
-    primitive rather than a family: *one active project per company*, *one
-    default address per customer*, *one current period per subscription*, *one
-    primary contact per account* and *N winners per contest* are the same
-    declaration with different words.
-
-    ```python
-    Table(
-        Project,
-        rows=2_000_000,
-        company=FanOut(Zipf(1.2), placement="grouped"),
-        created_at=Sequential(start, step),
-        status=PerParent("company", order_by="created_at", last="ACTIVE", rest="COMPLETE"),
-    )
-    ```
-
-    **The count of special rows is derived, not declared, and that is the
-    whole point.** Fifty thousand companies and two million projects means
-    ``status='ACTIVE'`` matches one row per company that has any -- around 2.5%
-    of the table -- and that number falls out of the fan-out rather than being
-    chosen. Declaring ``Skew({"ACTIVE": 0.1, ...})`` beside the same fan-out
-    asks for two hundred thousand active projects in a schema that permits fifty
-    thousand, and it is the same rule this package states everywhere else: a
-    distribution is declared over a fixed count, never as a multiplier. Here one
-    distribution is *derived from* another rather than declared beside it.
-
-    **Assignment order is not emission order**, and this is where that split
-    earns its keep. To say "the last project", a group has to be known; to keep
-    physical placement honest, rows have to be emitted interleaved. They
-    reconcile because a ``FanOut`` is a **partition** of the child range rather
-    than a draw per child, so a row's position within its parent's group is
-    arithmetic on the row index and the seed. Nothing is buffered, nothing is
-    sorted, and the rows still stream into ``COPY`` one at a time.
-
-    ``last=`` puts the value on the final ``count`` positions of every group and
-    ``first=`` on the opening ones; exactly one of the two is given. A group
-    smaller than ``count`` has every row special, which is arithmetically right
-    rather than a special case: a company with one project can have at most one
-    active project. A **childless** parent contributes nothing at all, which is
-    why the achieved count is one per *non-empty* group.
-
-    ``rest=`` is the value every other row of the group takes. It may be a plain
-    value, or a distribution that implements
-    :class:`~django_data_shape.distributions.categorical.Categorical` -- and
-    only that kind, checked here, because a distribution that could also produce
-    the special value would put the count back under a coin flip and undo the
-    derivation above. A ``Skew`` over the remaining statuses is accepted; a
-    ``Uniform`` is refused, because nothing can ask it what it might emit.
-
-    ``order_by=`` names the column whose ordering the group's positions agree
-    with. It is a **claim that is checked, not a sort that is performed**: see
-    :meth:`~django_data_shape.declaration.table.Table` for the two conditions that make it
-    true, and note that it buys realism the planner cannot see -- Postgres keeps
-    no statistic about which row of a group holds which value, so a shape
-    without it has the same selectivity and the same plan.
-    """
+    The primitive for per-group business rules, such as *one active project per company*."""
 
     def __init__(
         self,
@@ -182,15 +109,8 @@ class PerParent:
         return self._order_by
 
     def value(self, row: int, draw: float, sources: tuple[object, ...]) -> object:
-        # cast, not a guard: a GROUP source is resolved by this package out of
-        # the fan-out's own partition, so the pair is a pair by construction and
-        # a runtime check here would be a branch no declaration can reach.
         position, size = cast("tuple[int, int]", sources[0])
-        # A group smaller than the count has every row special, and that falls
-        # out of the arithmetic rather than being clamped: ``size - count`` goes
-        # negative and every position is at or past it. Two entries cannot
-        # produce three winners, and one project is the only one a company can
-        # have active.
+        # A group smaller than the count has every row special, since size - count goes negative.
         at_the_special_end = (
             position >= size - self._count if self._from_last else position < self._count
         )
@@ -201,13 +121,7 @@ class PerParent:
         return self._rest
 
     def canonical(self) -> object:
-        """The relation, both ends, the count and the ordering claim. See ``Canonical``.
-
-        ``order_by`` is in it although it changes no value in any row. What it
-        changes is which declarations are accepted, and a shape that would be
-        refused is not the same shape as one that would not -- so two of them
-        must not share a cached database.
-        """
+        """The relation, both ends, the count and the ordering claim. See ``Canonical``."""
         return (
             self._relation,
             self._special,

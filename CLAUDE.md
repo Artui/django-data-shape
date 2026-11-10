@@ -130,6 +130,23 @@ own module, a re-export in `__init__.py`, and a docs entry.
 `ty`, not mypy. `make type-check` runs it over the package.
 No `# type: ignore` -- a pre-commit hook rejects it.
 
+## Comment budget
+
+`#` comments and docstrings both count, in the package and in the tests:
+
+- A class: at most three lines (its docstring plus comments in its body outside its methods).
+- A function or method: at most one line (docstring plus comments inside it, or directly
+  above it).
+- A module: nothing before the first import (no module docstring, no header comment); a
+  package `__init__.py` with nothing to export is empty.
+- Exempt: directives (`# noqa`, `# ty:`, `# vX.Y.Z` pins), migrations, and a docstring
+  the code or a test reads through `__doc__`, which is data.
+
+A docstring mkdocstrings renders into the API reference is not exempt.
+Condense rather than move: a reason that does not fit is cut, not relocated to prose
+elsewhere. A body left empty by a removed docstring takes `...`. The workbench's
+`bin/comment-budget.py` lists the violations.
+
 ## Linting and formatting
 
 Ruff is the source of truth for both. Use `...` over `pass` for empty bodies.

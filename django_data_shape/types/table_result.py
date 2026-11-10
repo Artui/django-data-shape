@@ -1,5 +1,3 @@
-"""What one table's load actually produced."""
-
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -9,10 +7,7 @@ from dataclasses import dataclass
 class TableResult:
     """Rows loaded into one table.
 
-    Carries the database table name rather than the model, because this is what
-    a caller prints or asserts on, and because the two stop being one-to-one as
-    soon as through tables are generated alongside the models that declare them.
-    """
+    Carries the database table name rather than the model, since that is what callers print or assert on."""
 
     table: str
     rows: int

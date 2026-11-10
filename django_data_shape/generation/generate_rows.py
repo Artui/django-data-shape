@@ -1,5 +1,3 @@
-"""Turning a declared table into the tuples COPY will consume."""
-
 from __future__ import annotations
 
 from collections.abc import Callable, Iterator, Mapping
@@ -31,37 +29,7 @@ def generate_rows(
     plans: Mapping[str, FanOutPlan] | None = None,
     pairings: Mapping[str, PairedPlan] | None = None,
 ) -> Iterator[tuple[Any, ...]]:
-    """Yield one tuple per row: the primary key, then each declared column.
-
-    Rows, not model instances. The ORM is the wrong tool at these counts -- the
-    difference between a load measured in seconds and one measured in minutes --
-    and nothing here needs an instance, because no ``save`` will run and no
-    signal should fire.
-
-    Primary keys come from the table's key strategy, which is a deterministic
-    function of the row index -- ``row + 1`` for an integer key, a derived UUID
-    for a UUID one, a caller's own function for anything else. Determinism is the
-    requirement, not the integers: it is what lets a child compute its parent's
-    key without a lookup, and what makes a self-referential tree acyclic on the
-    index rather than on the value.
-
-    ``plans`` carries the resolved fan-out for each relation column. Resolving
-    happens outside this function because it has to read the parent's real keys
-    out of the database, and keeping the query there leaves generation itself
-    backend-neutral and testable without a connection.
-
-    **Columns are computed in one order and emitted in another.** The emitted
-    order is ``columns()``, sorted by name, because it is the ``COPY`` column
-    list and has to be stable. The computed order puts every derivation after
-    the columns it reads, which sorting by name would only satisfy by accident.
-    Conflating the two is the mistake this design keeps meeting under different
-    names, so the two orders are built separately here and never inferred from
-    each other.
-
-    A generator rather than a list: a million tuples is real memory, psycopg
-    writes them one at a time anyway, and materialising the set would buy
-    nothing but peak RSS.
-    """
+    """Yield one tuple per row: the primary key, then each declared column."""
     plans = plans or {}
     pairings = pairings or {}
     keys = table.keys
@@ -69,10 +37,6 @@ def generate_rows(
     columns = table.columns()
     slot_of = {name: index for index, (name, _field) in enumerate(columns)}
 
-    # Every column is reduced to one callable before the loop starts. At a
-    # million rows the loop body runs a million times per column, so which kind
-    # of column this is, and where each of its sources comes from, are decided
-    # once rather than a million times.
     steps: list[_Step] = [
         (slot_of[name], _producer(table, seed, plans, pairings, name, key_stream))
         for name, _field in columns
@@ -101,9 +65,6 @@ def _producer(
     """The step for a column that depends on nothing already in the row."""
     declared = table.fields[name]
     if isinstance(declared, Tree):
-        # Resolved here rather than beside the fan-outs in the build, because
-        # it reads nothing: a tree's parents are rows of this table, and their
-        # keys come from the same strategy and stream as the row's own key.
         tree = resolve_tree(declared, table.rows, seed, table.db_table, name)
         return partial(_from_tree, tree, table.keys, key_stream)
     plan = plans.get(name)
@@ -111,9 +72,6 @@ def _producer(
         return partial(_from_plan, plan)
     pairing = pairings.get(name)
     if pairing is not None:
-        # Two questions of the fan-out this pairs with -- which group, and where
-        # in it -- and one of the pairing. All three are O(1) because both are
-        # partitions of the row range rather than per-row draws.
         declared = cast("Paired", table.fields[name])
         return partial(_from_pairing, plans[declared.relation], pairing)
     distribution = cast("Distribution", table.fields[name])
@@ -127,13 +85,7 @@ def _derivation_producer(
     slot_of: Mapping[str, int],
     name: str,
 ) -> Callable[[int, list[object]], object]:
-    """The step for a derived column, with its sources already resolved to readers.
-
-    This is where the scope parameter is spent, and it is spent once per column
-    rather than once per row. Everything downstream -- the derivation itself, the
-    ordering, the guard around generation -- is scope-blind, which is what makes
-    the four faces one mechanism rather than four.
-    """
+    """The step for a derived column, with its sources already resolved to readers."""
     derivation = cast("Derivation", table.fields[name])
     readers: tuple[_Source, ...] = tuple(
         _source(table, seed, plans, slot_of, derivation.scope, source)
@@ -157,14 +109,7 @@ def _source(
         relation, _, field_name = source.partition(".")
         return partial(_from_parent, plans[relation], field_name)
     if scope is Scope.GROUP:
-        # The plan again, and a third question asked of the same partition:
-        # which parent (PARENT), which of its columns (PARENT), and now where in
-        # its range this row sits. All three are O(1) because the fan-out is a
-        # partition rather than a per-child draw.
         return partial(_from_group, plans[source])
-    # Scope.RANK. A rank is a name the declaration invented, not a column, so
-    # its stream is namespaced away from the field streams -- otherwise a rank
-    # called "total" would silently be the "total" column's own draw.
     return partial(_from_rank, field_stream(seed, table.db_table, f"rank:{source}"))
 
 

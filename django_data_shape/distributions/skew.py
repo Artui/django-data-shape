@@ -1,5 +1,3 @@
-"""A categorical column with a declared imbalance."""
-
 from __future__ import annotations
 
 import math
@@ -12,31 +10,12 @@ from django_data_shape.declaration.invalid_shape import InvalidShape
 class Skew:
     """Values drawn from a weighted set, in a fixed order.
 
-    This is the distribution the package exists for. A status column that is 98%
-    one value is what decides whether an index on it is usable at all, and it is
-    the thing a fixtures loop never expresses -- ten rows with one of each says
-    the opposite of what production says.
-
-    ``Mapping[Any, float]`` rather than ``dict[object, float]``: ``dict`` is
-    invariant in both parameters, so a caller's prepared ``dict[str, float]`` --
-    the obvious way to build one of these outside a call -- would be rejected by
-    a type checker for no reason a reader could act on. ``Mapping`` is covariant
-    in its value type, so integer counts are accepted too.
-
-    Weights are relative and need not sum to 1: the readable form is often
-    counts, and normalising here is cheaper than making every caller do it. They
-    must be positive, because a zero-weight value is a value that never appears,
-    which is better said by leaving it out than by declaring it and meaning not.
-    """
+    The distribution the package exists for: a 98% status column decides whether an index helps."""
 
     def __init__(self, weights: Mapping[Any, float]) -> None:
         if not weights:
             raise InvalidShape("Skew needs at least one value; an empty distribution has none.")
-        # ``not (w > 0)`` rather than ``w <= 0`` because NaN compares False to
-        # both, so the obvious spelling let it through -- and a NaN weight makes
-        # every cumulative bound NaN, so no draw ever matches and the fallthrough
-        # returns the last value for every row. The declared distribution comes
-        # out inverted, silently.
+        # not (w > 0) rather than w <= 0: a NaN weight compares False to both and slips through.
         bad = sorted(repr(v) for v, w in weights.items() if not (w > 0) or not math.isfinite(w))
         if bad:
             raise InvalidShape(
@@ -45,9 +24,6 @@ class Skew:
                 + ". A value that never occurs is said by omitting it."
             )
         total = sum(weights.values())
-        # The cumulative bounds are precomputed once rather than per row: this
-        # runs a million times or more, and the alternative is re-summing the
-        # weights inside the hot loop.
         self._values: list[object] = []
         self._bounds: list[float] = []
         running = 0.0
@@ -61,10 +37,7 @@ class Skew:
         for value, bound in zip(self._values, self._bounds, strict=True):
             if draw < bound:
                 return value
-        # Reachable only when floating-point accumulation leaves the final bound
-        # a hair below 1.0, since a draw is guaranteed below 1.0 by construction.
-        # The last value is the correct answer there, and falling through to it
-        # is cheaper than renormalising on every draw.
+        # Rounding can leave the last bound just under 1.0, so the fallthrough is the last value.
         return self._values[-1]
 
     def distinct_values(self) -> int:
@@ -72,26 +45,12 @@ class Skew:
         return len(self._values)
 
     def shares(self) -> dict[object, float]:
-        """Each declared value against its share of the rows. See ``Categorical``.
-
-        The normalised weights rather than the raw ones, because the question a
-        caller of this asks is "how many of my rows will hold this value", and
-        weights are relative by design -- counts are a legitimate way to write
-        one. Normalising here is what lets a refusal quote a row count back at a
-        declaration that only ever said ``0.1``.
-        """
+        """Each declared value against its share of the rows. See ``Categorical``."""
         total = sum(self._weights.values())
         return {value: weight / total for value, weight in self._weights.items()}
 
     def canonical(self) -> object:
-        """The weights, **in declaration order**. See ``Canonical``.
-
-        The order is part of the declaration rather than a detail of how it was
-        written: the cumulative bounds above are laid out in it, so the same
-        weights given in a different order hand a different value to the same
-        draw. Sorting here would tell the template cache that two databases
-        which differ row for row are the same one.
-        """
+        """The weights, **in declaration order**, which decides the values. See ``Canonical``."""
         return (self._weights,)
 
     def __repr__(self) -> str:

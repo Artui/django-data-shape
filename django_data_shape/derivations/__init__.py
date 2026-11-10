@@ -1,5 +1,3 @@
-"""One mechanism for computing a column from something already known."""
-
 from django_data_shape.derivations.after import After
 from django_data_shape.derivations.aligned import Aligned
 from django_data_shape.derivations.derivation import Derivation
