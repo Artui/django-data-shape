@@ -230,7 +230,7 @@ def scaled_world(shape: Shape, factor: int, *, using: str = DEFAULT_DB_ALIAS) ->
     ``setval`` is not transactional. Nothing here reads it -- keys are assigned,
     not drawn -- so the only visible effect is that a row created by the ORM
     after a world is torn down gets a larger id than it otherwise would.
-    """
+    """  # noqa: E501
     scaled = scaled_shape(shape, factor)
     connection = connections[using]
     depth = _OPEN_WORLDS.get(connection, 0)

@@ -1441,7 +1441,7 @@ class TiedOnlyChild(models.Model):
 
     The key alone keeps nothing here: every root's NULL is one group, so two roots with the
     one name collide, which the flat tree that keeps ``OnlyChild`` cannot help. ``nulls_distinct``
-    arrived in Django 5.0, so below it this is ``OnlyChild`` and the tests reading the difference skip.
+    arrived in Django 5.0; below it this is ``OnlyChild`` and difference-reading tests skip.
     """
 
     parent = models.OneToOneField("self", null=True, on_delete=models.CASCADE, related_name="+")

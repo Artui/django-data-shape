@@ -17,7 +17,7 @@ _BELOW_ONE = 1.0 - 2.0**-53
 class Aligned:
     """``distribution`` read at a rank shared with every column naming it.
 
-    Independent marginals produce a database that is realistic per column and unrealistic per **entity**."""
+    Independent marginals make a database realistic per column, unrealistic per **entity**."""
 
     def __init__(self, rank: str, distribution: Distribution, *, reverse: bool = False) -> None:
         self._sources = (rank,)

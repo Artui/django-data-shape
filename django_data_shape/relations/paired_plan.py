@@ -21,7 +21,7 @@ class PairedPlan:
     ) -> None:
         self._keys = keys
         self._sizes = sizes
-        # Three streams, not one stream and an offset: an offset ties draws that must be independent.
+        # Three streams, not one stream plus offset: an offset ties draws that must be independent.
         self._offsets = stream
         self._strides = stream ^ 0x9E3779B97F4A7C15
         self._starts = stream ^ 0xC2B2AE3D27D4EB4F

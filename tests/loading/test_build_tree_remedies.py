@@ -399,7 +399,8 @@ def test_a_projection_fills_two_trees(seed: int) -> None:
                 Rung,
                 columns=("id", "left", "right"),
                 sql=(
-                    "SELECT g, CASE WHEN g > 1 THEN g / 2 END, CASE WHEN g > 1 AND g %% 2 = 1 THEN g / 2 END "
+                    "SELECT g, CASE WHEN g > 1 THEN g / 2 END, CASE WHEN g > 1 AND g %% 2 = 1 THEN "
+                    "g / 2 END "
                     "FROM generate_series(1, %s) AS g"
                 ),
                 params=(_ROWS,),

@@ -7,7 +7,7 @@ from dataclasses import dataclass
 class TableResult:
     """Rows loaded into one table.
 
-    Carries the database table name rather than the model, since that is what callers print or assert on."""
+    Carries the database table name, not the model, since callers print or assert on that."""
 
     table: str
     rows: int

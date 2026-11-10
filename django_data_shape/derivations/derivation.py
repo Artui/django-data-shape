@@ -9,7 +9,7 @@ from django_data_shape.derivations.scope import Scope
 class Derivation(Protocol):
     """Computes one column from values that are already known.
 
-    Deliberately **not** a kind of ``Distribution``: its inputs are other columns, not a draw alone."""
+    Deliberately **not** a kind of ``Distribution``: inputs are other columns, not a draw alone."""
 
     @property
     def scope(self) -> Scope: ...
