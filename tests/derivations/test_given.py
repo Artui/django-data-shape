@@ -1,5 +1,3 @@
-"""A distribution chosen by the parent's value."""
-
 from __future__ import annotations
 
 import pytest
@@ -20,8 +18,7 @@ def test_the_parents_value_picks_the_distribution() -> None:
 def test_the_chosen_distribution_still_gets_the_row_and_the_draw() -> None:
     given = Given("account.plan", {"free": Skew({"a": 1, "b": 1})})
 
-    # A case is a real distribution, not a value: the conditional part is which
-    # shape applies, and the shape still has to be drawn from.
+    # The conditional part picks the shape, and the shape still has to be drawn from.
     assert given.value(row=0, draw=0.1, sources=("free",)) == "a"
     assert given.value(row=0, draw=0.9, sources=("free",)) == "b"
 
@@ -35,8 +32,7 @@ def test_an_unlisted_value_falls_to_the_default() -> None:
 def test_an_unlisted_value_with_no_default_is_refused_and_names_both() -> None:
     given = Given("account.plan", {"free": Constant("low")})
 
-    # The one refusal here that cannot happen at declaration time, because the
-    # parent's values live in the parent table rather than in the declaration.
+    # The parent's values live in the parent table, so this cannot be refused at declaration.
     with pytest.raises(InvalidShape, match="no case for 'trial'") as raised:
         given.value(row=0, draw=0.5, sources=("trial",))
 

@@ -1,15 +1,3 @@
-"""The three derivations that exist so a shape can still be cached.
-
-`Derived` takes a callable, and a callable cannot be honestly digested -- two
-lambdas share a name, and identical bytecode returns something else when a
-constant it reads is edited elsewhere. So a shape holding one is refused by
-`template_database`, and a column as ordinary as `total = quantity * price`
-excluded a whole declaration from the reuse that turns a forty-second build
-into a hundred-millisecond clone.
-
-These say the same three computations as data instead.
-"""
-
 from __future__ import annotations
 
 import datetime as dt
@@ -70,9 +58,6 @@ def _shape(*, with_lambdas: bool) -> Shape:
                 if with_lambdas
                 else Product("quantity", "unit_price")
             ),
-            # All three appear in the digested shape, so `canonical` is
-            # exercised on each of them rather than on whichever one the
-            # arithmetic happened to need.
             unit_price=(
                 Derived("quantity", compute=lambda q: q + 1)
                 if with_lambdas
@@ -93,18 +78,12 @@ def test_the_same_shape_written_as_data_can_be() -> None:
     digest = shape_digest(_shape(with_lambdas=False))
 
     assert len(digest) == 32
-    # Stable across calls, which is the property a cache key needs and the one
-    # a callable cannot offer.
+    # Stable across calls, which a cache key needs and a callable cannot offer.
     assert shape_digest(_shape(with_lambdas=False)) == digest
 
 
 def test_the_data_form_builds_the_same_rows_as_the_callable_form() -> None:
-    """The claim worth testing: same declaration, same data, cacheable.
-
-    Built rather than compared field by field, because the point is that the
-    replacement is a replacement -- a reader swapping one for the other must
-    get the database they already had.
-    """
+    """The claim worth testing: same declaration, same data, cacheable."""
     build(_shape(with_lambdas=False), require_statistics=False)
 
     tickets = list(Ticket.objects.order_by("id").values("opened_at", "total", "account_id"))
@@ -117,11 +96,7 @@ def test_the_data_form_builds_the_same_rows_as_the_callable_form() -> None:
 
 
 def test_offset_moves_a_column_of_the_same_row() -> None:
-    """ROW scope, which is the whole reason this exists beside `After`.
-
-    `After` is parent-scoped only, so "later than this column of this row" had
-    no spelling that a digest could read.
-    """
+    """ROW scope, which is the whole reason this exists beside `After`."""
     build(
         Shape(
             Table(

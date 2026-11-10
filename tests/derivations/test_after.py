@@ -1,5 +1,3 @@
-"""A child's column landing some way past its parent's."""
-
 from __future__ import annotations
 
 import datetime
@@ -38,8 +36,7 @@ def test_at_least_shifts_the_whole_window() -> None:
 
 
 def test_it_works_in_whatever_unit_the_column_uses() -> None:
-    # One class rather than a datetime one and a numeric one: the arithmetic is
-    # the caller's types, and this only needs addition and a scale by a float.
+    # The arithmetic is the caller's types, and this only needs addition and a scale.
     after = After("invoice.amount", within=100)
 
     assert after.value(row=0, draw=0.25, sources=(50,)) == 75.0

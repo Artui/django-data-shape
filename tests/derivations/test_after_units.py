@@ -1,12 +1,3 @@
-"""``After`` writes the parent's value plus an offset, so the two columns have
-to be the same kind of thing.
-
-``date + timedelta`` is a ``date``. A ``DateTimeField`` child filled across an
-edge whose parent column is a ``DateField`` was therefore filled with dates:
-``COPY`` accepted them, they landed as naive midnights, and the only signal was
-Django's own per-row ``RuntimeWarning`` in the middle of a build.
-"""
-
 from __future__ import annotations
 
 import datetime as dt
@@ -30,8 +21,7 @@ def test_a_date_parent_under_a_datetime_child_is_refused() -> None:
     message = str(excinfo.value)
     assert "Performance.starts_at" in message
     assert "playhouse.opened_on" in message
-    # Both kinds named, because a reader who has to look them up has been given
-    # an error that knows more than it says.
+    # Both kinds are named, so the reader is not sent to look them up.
     assert "DateField" in message
     assert "DateTimeField" in message
 
