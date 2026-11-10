@@ -1,10 +1,3 @@
-"""Models the shape vocabulary is exercised against.
-
-Deliberately a small graph rather than one table: a shape declaration only earns
-its keep over an ordinary loop once there are edges, so the suite's own fixture
-schema has them even though this release refuses to shape them.
-"""
-
 from __future__ import annotations
 
 import uuid
@@ -22,13 +15,7 @@ class Company(models.Model):
 
 
 class Order(models.Model):
-    """One table covering every kind of column the validator reasons about.
-
-    ``note`` is nullable and ``channel`` has a default, so both are legitimately
-    undeclarable; ``status``, ``total`` and ``created_at`` are none of those
-    things and must be declared. That split is the whole of what makes a field
-    required to a shape, so the fixture model exists to have one of each.
-    """
+    """One table covering every kind of column the validator reasons about."""
 
     status = models.CharField(max_length=20)
     total = models.DecimalField(max_digits=10, decimal_places=2)
@@ -52,15 +39,7 @@ class OptionalChild(models.Model):
 
 
 class Project(models.Model):
-    """A fan-out child carrying a per-group invariant.
-
-    Nothing in this release can shape it -- a foreign key is refused -- and that
-    refusal is exactly what one of the tests asserts. It is declared now rather
-    than later because the constraint below is the worked example the invariant
-    work is designed against: at most one project per company may be active,
-    which is what makes the marginal distribution of ``status`` a derived
-    quantity rather than a declarable one.
-    """
+    """A fan-out child carrying a per-group invariant."""
 
     company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name="projects")
     status = models.CharField(max_length=20)
@@ -77,60 +56,33 @@ class Project(models.Model):
 
 
 class Reserved(models.Model):
-    """A model whose column name collides with Table's own signature.
-
-    Not a contrived case: ``rows`` is an ordinary word for a column. Python
-    binds the keyword to Table's row count before the field ever sees it, so
-    without the ``fields=`` mapping this model would be undeclarable.
-    """
+    """A model whose column name collides with Table's own signature."""
 
     rows = models.IntegerField()
 
 
 class Defaulted(models.Model):
-    """A model whose default is a callable, which cannot be guessed at.
-
-    ``uuid4`` produces a different value per row and ``dict`` produces the same
-    one every time; nothing on the field distinguishes them, so a shape has to
-    be told rather than left to pick a reading.
-    """
+    """A model whose default is a callable, which cannot be guessed at."""
 
     token = models.UUIDField(default=uuid.uuid4)
 
 
 class Prepared(models.Model):
-    """A model for checking that field preparation actually happens.
-
-    ``at`` is the interesting column: written without Django's own preparation a
-    naive datetime lands in the database verbatim, which under a non-UTC
-    ``TIME_ZONE`` is hours away from where ``save()`` would have put it. ``tags``
-    cannot be written at all without preparation, because psycopg has no adapter
-    for a bare dict.
-    """
+    """A model for checking that field preparation actually happens."""
 
     at = models.DateTimeField()
     tags = models.JSONField()
 
 
 class SlugPk(models.Model):
-    """A model whose primary key this package cannot assign.
-
-    Keys are handed out as a dense 1..N integer range, and nothing converts
-    them, so a character primary key used to be loaded with the strings "1",
-    "2", "3".
-    """
+    """A model whose primary key this package cannot assign."""
 
     code = models.CharField(max_length=50, primary_key=True)
     name = models.CharField(max_length=50)
 
 
 class ShortCode(models.Model):
-    """A character primary key too short for a UUID's 36 characters.
-
-    Beside ``SlugPk``, whose key has room for one: what decides whether
-    ``Disjoint`` keys are a way out of a scaled world's refusal is whether the
-    key accepts what those strategies make, and this one does not.
-    """
+    """A character primary key too short for a UUID's 36 characters."""
 
     code = models.CharField(max_length=8, primary_key=True)
     name = models.CharField(max_length=50)
@@ -144,11 +96,7 @@ class Referred(models.Model):
 
 
 class Subscriber(models.Model):
-    """A model with a single-column unique constraint.
-
-    The arithmetic this makes checkable: a constant cannot fill a unique column
-    more than once, and neither can a skew with fewer values than rows.
-    """
+    """A model with a single-column unique constraint."""
 
     email = models.CharField(max_length=100, unique=True)
 
@@ -173,64 +121,34 @@ class Tenant(models.Model):
 
 
 class TenantRecord(models.Model):
-    """A child of a UUID-keyed parent.
-
-    The case that proves the key work reaches further than the key column: a
-    foreign key over a UUID parent has to carry UUIDs, both out of the parent's
-    real keys and into the child's own column.
-    """
+    """A child of a UUID-keyed parent."""
 
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="records")
     label = models.CharField(max_length=50)
 
 
 class Reading(models.Model):
-    """A model keyed by a timestamp, which needs its key prepared like any value.
-
-    Exotic, and deliberately so: it is the smallest model that shows why the
-    primary key goes through the field's own preparation rather than straight to
-    the driver. A naive datetime handed to psycopg is stored verbatim; handed to
-    Django first it is localised, which is what save() would have written.
-    """
+    """A model keyed by a timestamp, which needs its key prepared like any value."""
 
     at = models.DateTimeField(primary_key=True)
     value = models.IntegerField()
 
 
 class Catalogue(models.Model):
-    """A table nothing else in the suite builds.
-
-    The one model reserved for the session-scoped fixture, because a world built
-    once for the session outlives every test in it: any other test that built
-    this table would meet rows it did not put there, and the refusal it got
-    would be right and useless. Reserving a model is cheaper than ordering the
-    suite around one fixture.
-    """
+    """A table nothing else in the suite builds."""
 
     name = models.CharField(max_length=50)
 
 
 class Account(models.Model):
-    """A parent whose own columns a child derives from.
-
-    Its own model rather than a couple of columns bolted onto ``Company``,
-    because ``signed_up_at`` and ``plan`` would have to be nullable there not to
-    break every existing declaration -- and a nullable parent column is exactly
-    the case a derivation reading across the edge must not be tested against.
-    """
+    """A parent whose own columns a child derives from."""
 
     signed_up_at = models.DateTimeField()
     plan = models.CharField(max_length=20)
 
 
 class Ticket(models.Model):
-    """A child carrying all four faces of the derivation mechanism at once.
-
-    One model rather than four, because the point being tested is that they are
-    one mechanism: ``total`` reads two columns of its own row, one of which is
-    itself derived, so a declaration whose computation order followed the column
-    order would compute it from an empty slot.
-    """
+    """A child carrying all four faces of the derivation mechanism at once."""
 
     account = models.ForeignKey(Account, on_delete=models.CASCADE, related_name="tickets")
     opened_at = models.DateTimeField()
@@ -241,14 +159,7 @@ class Ticket(models.Model):
 
 
 class Playhouse(models.Model):
-    """A parent whose date column is a ``DateField``, not a ``DateTimeField``.
-
-    Its own model for the same reason ``Account`` is: adding a ``DateField`` to
-    an existing parent would make it a required column on every declaration
-    that already names that model. The distinction it exists for is that
-    ``date + timedelta`` is a ``date``, so a child ``DateTimeField`` filled
-    across this edge gets dates rather than datetimes.
-    """
+    """A parent whose date column is a ``DateField``, not a ``DateTimeField``."""
 
     opened_on = models.DateField()
     announced_at = models.DateTimeField()
@@ -270,12 +181,7 @@ class ActiveVendorManager(models.Manager):
 
 
 class Vendor(models.Model):
-    """A parent whose default manager hides some of its own rows.
-
-    Here because a fan-out reads every parent and a derivation reads their
-    columns, and those two reads must agree about which parents exist. A default
-    manager is the ordinary way a project makes them disagree.
-    """
+    """A parent whose default manager hides some of its own rows."""
 
     name = models.CharField(max_length=50)
     retired = models.BooleanField(default=False)
@@ -291,13 +197,7 @@ class Supply(models.Model):
 
 
 class Template(models.Model):
-    """The thing an event is created from, and the collection's real owner.
-
-    The motivating graph for a projection, kept as its own four models rather
-    than folded onto ``Company``: the point being tested is that a child
-    collection's cardinality is *determined* by a table two edges away, and that
-    only shows when both sides of the join exist.
-    """
+    """The thing an event is created from, and the collection's real owner."""
 
     name = models.CharField(max_length=50)
 
@@ -325,13 +225,7 @@ class Event(models.Model):
 
 
 class EventSession(models.Model):
-    """One of each kind of column a derived projection has to decide about.
-
-    ``event`` is the edge the rows hang off, ``source`` points back at the row
-    that was copied, ``title`` and ``minutes`` match by name, ``channel`` has a
-    plain default and ``note`` is nullable. That is the whole rule set in one
-    model, which is what makes a single build able to falsify all of it.
-    """
+    """One of each kind of column a derived projection has to decide about."""
 
     event = models.ForeignKey(Event, on_delete=models.CASCADE, related_name="sessions")
     source = models.ForeignKey(TemplateSession, null=True, on_delete=models.SET_NULL)
@@ -342,24 +236,14 @@ class EventSession(models.Model):
 
 
 class Attendance(models.Model):
-    """A fan-out child of a projected table.
-
-    Here to answer the question a projection raises about load order: a table
-    filled by a statement is still a table, so something else may fan out over
-    it -- provided the ordering pass puts the projection first.
-    """
+    """A fan-out child of a projected table."""
 
     session = models.ForeignKey(EventSession, on_delete=models.CASCADE)
     name = models.CharField(max_length=50)
 
 
 class Rehearsal(models.Model):
-    """A collection joinable to an event through two different models.
-
-    Template *and* venue, where ``TemplateSession`` shares only the template.
-    Which collection is being copied is then genuinely undecidable, and guessing
-    would build a different database from the one that was declared.
-    """
+    """A collection joinable to an event through two different models."""
 
     template = models.ForeignKey(Template, on_delete=models.CASCADE)
     venue = models.ForeignKey(Venue, on_delete=models.CASCADE)
@@ -367,11 +251,7 @@ class Rehearsal(models.Model):
 
 
 class SparseSession(models.Model):
-    """A projected model with a column nothing can fill.
-
-    ``headcount`` is not null, has no default, and is not a column the copied
-    collection carries under that name.
-    """
+    """A projected model with a column nothing can fill."""
 
     event = models.ForeignKey(Event, on_delete=models.CASCADE)
     title = models.CharField(max_length=50)
@@ -379,12 +259,7 @@ class SparseSession(models.Model):
 
 
 class TokenSession(models.Model):
-    """A projected model with a callable default.
-
-    Refused for the reason ``Table`` refuses one, and for a second reason on top
-    of it: the rows are made by one statement and never pass through Python, so
-    there is no per-row moment at which the callable could be called.
-    """
+    """A projected model with a callable default."""
 
     event = models.ForeignKey(Event, on_delete=models.CASCADE)
     title = models.CharField(max_length=50)
@@ -392,16 +267,7 @@ class TokenSession(models.Model):
 
 
 class KeyedSession(models.Model):
-    """A UUID-keyed projection target whose table name hashes above 2^63.
-
-    Not an arbitrary name. A key stream is a hash of the table and field names,
-    and PostgreSQL's ``bigint`` is signed, so roughly **half of all table names**
-    put the stream above the limit -- a coin flip per table rather than anything
-    about a schema. ``UuidSession`` happens to land below it, which is why the
-    projection built there for four releases while a consumer's own table could
-    not be built at all. This one lands above, so the end-to-end path covers the
-    half that used to fail.
-    """
+    """A UUID-keyed projection target whose table name hashes above 2^63."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     event = models.ForeignKey(Event, on_delete=models.CASCADE, related_name="+")
@@ -418,15 +284,7 @@ class UuidSession(models.Model):
 
 
 class SessionNote(models.Model):
-    """A UUID-keyed note on a UUID-keyed session, so two Disjoint tables deep.
-
-    ``UuidSession`` references ``Event`` and this references the session, so a
-    scaled world declaring all three over rows in each reaches this table only
-    through the session: it has to be emptied because a table that has to be
-    emptied is what it points at. The key is nullable so that a note can sit
-    beside an empty session table, which is the case where it must not be
-    reached at all.
-    """
+    """A UUID-keyed note on a UUID-keyed session, so two Disjoint tables deep."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     session = models.ForeignKey(UuidSession, null=True, on_delete=models.CASCADE)
@@ -434,12 +292,7 @@ class SessionNote(models.Model):
 
 
 class DualSession(models.Model):
-    """A projected model with two edges into the table it is projected per.
-
-    Which one the projected rows hang off is then a question the model graph
-    cannot answer, and answering it by picking the first would build a different
-    database from the one that was declared.
-    """
+    """A projected model with two edges into the table it is projected per."""
 
     event = models.ForeignKey(Event, on_delete=models.CASCADE, related_name="+")
     replaces = models.ForeignKey(Event, on_delete=models.CASCADE, related_name="+")
@@ -447,64 +300,33 @@ class DualSession(models.Model):
 
 
 class AuditedSession(models.Model):
-    """A projected table reserved for the statistics assertion.
-
-    Its own model for the reason ``Catalogue`` has one, and a sharper version of
-    it: ``pg_statistic`` rows are **not** rolled back and survive the truncation
-    between transactional tests, so one test's ``ANALYZE`` of a shared model
-    would make another test's assertion true without the code under test having
-    done anything. Nothing else in the suite builds this table.
-    """
+    """A projected table reserved for the statistics assertion."""
 
     event = models.ForeignKey(Event, on_delete=models.CASCADE)
     title = models.CharField(max_length=50)
 
 
 class Bucketed(models.Model):
-    """A table reserved for the assertion that a declared statistics target lands.
-
-    Its own model for the reason ``AuditedSession`` has one, and one turn
-    sharper. ``ALTER TABLE ... SET STATISTICS`` is DDL that commits with the
-    build, and neither it nor the ``pg_statistic`` rows it changes are rolled
-    back between transactional tests -- so a target set by one test is still
-    there for the next, and an assertion about a shared table would pass or fail
-    on whichever test ran first.
-    """
+    """A table reserved for the assertion that a declared statistics target lands."""
 
     code = models.CharField(max_length=20)
 
 
 class Narrowed(models.Model):
-    """A table reserved for the refusal that a target is what avoids.
-
-    Separate from ``Bucketed`` for exactly the reason above: this one must meet
-    the server's own default target, and a test that had raised the target on a
-    shared table would make the refusal not happen.
-    """
+    """A table reserved for the refusal that a target is what avoids."""
 
     code = models.CharField(max_length=20)
 
 
 class TargetedSession(models.Model):
-    """A projected table reserved for the assertion that a projection takes a target too.
-
-    A collection copied along a join carries the source's skew into a second
-    table, and the route the rows took in has nothing to do with whether the
-    planner can record it.
-    """
+    """A projected table reserved for the assertion that a projection takes a target too."""
 
     event = models.ForeignKey(Event, on_delete=models.CASCADE)
     title = models.CharField(max_length=50)
 
 
 class Period(models.Model):
-    """A subscription's validity chain, whose current row has no end.
-
-    Here because ``None`` is a legitimate value for the special row of a group,
-    which is what makes "not passed" impossible to spell as ``None`` in
-    ``PerParent``. An SCD-2 chain says exactly that: the current period is the
-    one whose ``valid_to`` is unset.
-    """
+    """A subscription's validity chain, whose current row has no end."""
 
     company = models.ForeignKey(Company, on_delete=models.CASCADE)
     valid_from = models.DateTimeField()
@@ -512,12 +334,7 @@ class Period(models.Model):
 
 
 class Seat(models.Model):
-    """A model whose two-column uniqueness is decidable arithmetic.
-
-    ``Table`` declines multi-column uniqueness on purpose -- it cannot know how
-    many companies exist -- so this is the case that only a whole shape can
-    refuse: rows against the product of the parent count and the label count.
-    """
+    """A model whose two-column uniqueness is decidable arithmetic."""
 
     company = models.ForeignKey(Company, on_delete=models.CASCADE)
     label = models.CharField(max_length=20)
@@ -529,28 +346,7 @@ class Seat(models.Model):
 
 
 class Booking(models.Model):
-    """A model carrying every conditional constraint the pre-check cannot read.
-
-    One model rather than seven, because what is being tested is a set of
-    skips: a condition written over an expression rather than fields, one joining
-    two clauses with AND, an OR whose branches name two different columns, a
-    negated OR, an OR one of whose branches is a comparison, a comparison written
-    as a keyword argument, and one written as a bare lookup expression -- plus a
-    check constraint, which is not a unique constraint at all. A declaration
-    naming this model has to be accepted whole.
-
-    Two used to be here and are not skips any more. ``state__in`` moved to
-    :class:`Review`, and a nested ``Q(Q(a) | Q(b))`` over one column moved to
-    :class:`Submission`: both say what a bare equality says about a set instead
-    of a value, and deciding membership in a set the caller wrote out needs
-    nothing this package should not do. What survives here is the OR that
-    genuinely describes no set -- its two branches name **different columns**.
-
-    ``seats`` is what makes the comparison bite: declared as ``Constant(0)`` a
-    condition read as ``seats == 0`` would be refused, so a suffix check that
-    stopped distinguishing a lookup from an equality would show here rather than
-    passing quietly.
-    """
+    """A model carrying every conditional constraint the pre-check cannot read."""
 
     company = models.ForeignKey(Company, on_delete=models.CASCADE)
     room = models.CharField(max_length=20)
@@ -596,12 +392,7 @@ class Booking(models.Model):
             ),
             models.CheckConstraint(
                 name="booking_seats_are_not_negative",
-                # Django renamed CheckConstraint's predicate from ``check`` to
-                # ``condition`` in 5.1 and removed the old name in 6.0, and this
-                # package's floor is 4.2 -- so there is no single spelling, and
-                # the alternative to this is not declaring a check constraint at
-                # all, which would leave the "not a unique constraint" branch
-                # covered by a stub rather than by a model.
+                # No CheckConstraint spelling spans Django 4.2 to 6.0, so this is a real model.
                 **(
                     {"condition": models.Q(seats__gte=0)}
                     if django.VERSION >= (5, 1)
@@ -612,12 +403,7 @@ class Booking(models.Model):
 
 
 class Invitation(models.Model):
-    """A conditional constraint over a column this package may leave undeclared.
-
-    ``outcome`` is nullable, so a shape can legitimately say nothing about it --
-    and a constraint conditioned on a column nobody fills is a constraint with
-    nothing to weigh.
-    """
+    """A conditional constraint over a column this package may leave undeclared."""
 
     company = models.ForeignKey(Company, on_delete=models.CASCADE)
     label = models.CharField(max_length=20)
@@ -634,11 +420,7 @@ class Invitation(models.Model):
 
 
 class Contest(models.Model):
-    """A parent whose children have several winners rather than one.
-
-    No constraint at all, which is the point: ``count=`` is for the rule a
-    schema does not state, and a unique constraint is the case it is not.
-    """
+    """A parent whose children have several winners rather than one."""
 
     name = models.CharField(max_length=50)
 
@@ -651,13 +433,7 @@ class Entry(models.Model):
 
 
 class Assignment(models.Model):
-    """A child with two parents, only one of which its constraint groups by.
-
-    The model that makes "grouped by the wrong thing" reachable: a rule kept
-    once per contest says nothing about how many leads a company ends up with,
-    and with a single foreign key the table's own check would refuse first for
-    an unrelated reason.
-    """
+    """A child with two parents, only one of which its constraint groups by."""
 
     company = models.ForeignKey(Company, on_delete=models.CASCADE)
     contest = models.ForeignKey(Contest, on_delete=models.CASCADE)
@@ -674,36 +450,19 @@ class Assignment(models.Model):
 
 
 class Document(models.Model):
-    """The parent half of a multi-table inheritance pair.
-
-    Its own table, holding ``title``. That column is what makes the pair worth
-    having: it appears in the child's ``_meta.concrete_fields`` and in no column
-    of the child's table, which is the disagreement the inheritance refusal is
-    about.
-    """
+    """The parent half of a multi-table inheritance pair."""
 
     title = models.CharField(max_length=100)
 
 
 class DeliveryDocument(Document):
-    """The child half, whose rows live in two tables at once.
-
-    Concrete inheritance rather than abstract, so Django gives it a table of its
-    own holding ``document_ptr_id`` and ``tracking`` while ``title`` stays next
-    door.
-    """
+    """The child half, whose rows live in two tables at once."""
 
     tracking = models.CharField(max_length=50)
 
 
 class CompanyProxy(Company):
-    """A proxy, which shares its parent's table rather than adding one.
-
-    Here because ``_meta.parents`` is non-empty for a proxy too, so the
-    inheritance refusal has to tell the two apart: a proxy declares no column
-    and no table of its own, and a shape naming it is a shape about the table it
-    proxies.
-    """
+    """A proxy, which shares its parent's table rather than adding one."""
 
     class Meta:
         proxy = True
@@ -716,14 +475,7 @@ class Person(models.Model):
 
 
 class Membership(models.Model):
-    """A through table whose uniqueness two fan-outs cannot keep.
-
-    The pair is unique, and each foreign key is partitioned over its own parents
-    independently of the other, so which pairs come out together is an artefact
-    of the row index. It fits -- the product of the two parent counts is far
-    larger than the row count -- which is why the pigeonhole arithmetic passes
-    it and something else has to refuse it.
-    """
+    """A through table whose uniqueness two fan-outs cannot keep."""
 
     company = models.ForeignKey(Company, on_delete=models.CASCADE)
     person = models.ForeignKey(Person, on_delete=models.CASCADE)
@@ -738,12 +490,7 @@ class Membership(models.Model):
 
 
 class Engagement(models.Model):
-    """``Membership`` spelled the older way, with ``Meta.unique_together``.
-
-    The same pair is unique, but ``unique_together`` writes no entry in
-    ``_meta.constraints`` -- Django keeps it on ``_meta.unique_together`` -- so a
-    check that reads only the constraints list never sees it.
-    """
+    """``Membership`` spelled the older way, with ``Meta.unique_together``."""
 
     company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name="+")
     person = models.ForeignKey(Person, on_delete=models.CASCADE, related_name="+")
@@ -753,13 +500,7 @@ class Engagement(models.Model):
 
 
 class TenantGrant(models.Model):
-    """An edge table whose partner is keyed by UUID.
-
-    ``Membership`` pairs over ``Person``, whose integer key reads the same in
-    every spelling and comes back from the database as it went in, so a
-    narrowing that skipped preparing or reading back a key passed over it. A
-    UUID partner is where those two steps decide anything.
-    """
+    """An edge table whose partner is keyed by UUID."""
 
     company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name="+")
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="+")
@@ -767,11 +508,7 @@ class TenantGrant(models.Model):
 
 
 class Timestamped(models.Model):
-    """An abstract base, whose column belongs to whoever inherits it.
-
-    The inheritance that is not multi-table: Django copies the field onto the
-    child, so it writes to the child's own table and nothing lands next door.
-    """
+    """An abstract base, whose column belongs to whoever inherits it."""
 
     created_at = models.DateTimeField()
 
@@ -780,25 +517,13 @@ class Timestamped(models.Model):
 
 
 class Memo(Timestamped):
-    """A model inheriting abstractly, which is an ordinary single-table model.
-
-    Here so that the inheritance refusal has to distinguish the two kinds. Every
-    column it has is a column of its own table, so a shape naming it is a shape
-    about one table and nothing about it is refusable.
-    """
+    """A model inheriting abstractly, which is an ordinary single-table model."""
 
     body = models.CharField(max_length=100)
 
 
 class Review(models.Model):
-    """A partial unique whose condition names a **set** of values, not one.
-
-    "One open review per project" is spelled with ``__in`` far more often than
-    with ``=``, because open-ness is a handful of statuses rather than a single
-    one. The arithmetic that refuses the ``=`` form has to reach this one too:
-    a column that provably holds a value from the set in every row breaks the
-    constraint exactly as a column pinned to one of them does.
-    """
+    """A partial unique whose condition names a **set** of values, not one."""
 
     company = models.ForeignKey(Company, on_delete=models.CASCADE)
     status = models.CharField(max_length=20, default="DRAFT")
@@ -819,39 +544,21 @@ def get_default_company() -> int:
 
 
 class Delegated(models.Model):
-    """A required foreign key whose default is a **callable**.
-
-    The shape a consumer actually hit, and it slips two refusals rather than
-    one: the required-relation check used to skip anything with a default, and
-    the callable-default check skips anything that is a relation. The callable
-    matters beyond the null -- a default like this one reads the database, which
-    is the single thing a value for a row must never do.
-    """
+    """A required foreign key whose default is a **callable**."""
 
     company = models.ForeignKey(Company, on_delete=models.CASCADE, default=get_default_company)
     label = models.CharField(max_length=20)
 
 
 class Assigned(models.Model):
-    """A required foreign key carrying a Python-level ``default=``.
-
-    The gap the required-relation refusal left open: a ``default`` on a foreign
-    key is applied by ``save()``, which this package never calls, so the column
-    is neither refused nor filled and the load dies on a not-null violation --
-    the exact failure that refusal exists to replace.
-    """
+    """A required foreign key carrying a Python-level ``default=``."""
 
     company = models.ForeignKey(Company, on_delete=models.CASCADE, default=1)
     label = models.CharField(max_length=20)
 
 
 class Escalation(models.Model):
-    """A set condition written as a ``set``, which has no order of its own.
-
-    Separate from :class:`Review` because the two spellings take different
-    routes: a list or tuple keeps the order the caller wrote, and a set has to
-    be given one, or the refusal message it lands in changes between runs.
-    """
+    """A set condition written as a ``set``, which has no order of its own."""
 
     company = models.ForeignKey(Company, on_delete=models.CASCADE)
     status = models.CharField(max_length=20, default="RAISED")
@@ -867,13 +574,7 @@ class Escalation(models.Model):
 
 
 class Coupon(models.Model):
-    """A composite uniqueness with **no relation in it at all**.
-
-    The instance the fan-out refusals do not reach. Two columns drawn per row
-    and nothing partitioning either of them, so nothing enumerates the pairs and
-    whether two rows collide is a matter of the seed -- the same defect the
-    fan-out cases have, with the fan-out removed rather than added.
-    """
+    """A composite uniqueness with **no relation in it at all**."""
 
     batch = models.CharField(max_length=20)
     code = models.CharField(max_length=20)
@@ -885,13 +586,7 @@ class Coupon(models.Model):
 
 
 class Voucher(models.Model):
-    """A composite uniqueness one of whose columns may be left undeclared.
-
-    Nullable, so a shape saying nothing about it loads every row NULL -- and
-    PostgreSQL counts each NULL in a unique index as its own value, so no two
-    rows collide however the other column is drawn. The refusal must not reach
-    this one.
-    """
+    """A composite uniqueness one of whose columns may be left undeclared."""
 
     batch = models.CharField(max_length=20)
     code = models.CharField(max_length=20, null=True)
@@ -903,13 +598,7 @@ class Voucher(models.Model):
 
 
 class Ticketed(models.Model):
-    """A unique column a derivation fills, beside a one-to-one relation.
-
-    Both are declarations the single-column uniqueness check steps over rather
-    than refuses, and for different reasons: a derivation reads something other
-    than its own row index, and a fan-out is a partition whose collisions depend
-    on the parent's row count, which one table cannot see.
-    """
+    """A unique column a derivation fills, beside a one-to-one relation."""
 
     reference = models.CharField(max_length=100, unique=True)
     prefix = models.CharField(max_length=10)
@@ -917,14 +606,7 @@ class Ticketed(models.Model):
 
 
 class Submission(models.Model):
-    """A partial unique whose condition is an **OR-tree of equalities**.
-
-    The third spelling of one rule, and the one a consumer actually wrote:
-    ``Q(status=DRAFT) | Q(status=IN_REVIEW) | Q(status=APPROVED)`` says exactly
-    what the ``__in`` form says, and an ORM offers no reason to prefer either.
-    Reading one and not the other made the arithmetic depend on which of two
-    equivalent spellings the caller happened to choose.
-    """
+    """A partial unique whose condition is an **OR-tree of equalities**."""
 
     company = models.ForeignKey(Company, on_delete=models.CASCADE)
     status = models.CharField(max_length=20, default="DRAFT")
@@ -944,15 +626,7 @@ class Submission(models.Model):
 
 
 class Approval(models.Model):
-    """An OR-tree that is nested **and** names one of its values twice.
-
-    Two properties of the decoder in one declaration, because both come from
-    the same place. Django hands ``Q(Q(a) | Q(b))`` over as a single child that
-    is itself a ``Q``, so reading it is recursion rather than an extra case; and
-    a value named twice is one member of the set, not two, or the share
-    arithmetic in the refusal would total it twice and quote a number nobody
-    declared.
-    """
+    """An OR-tree that is nested **and** names one of its values twice."""
 
     company = models.ForeignKey(Company, on_delete=models.CASCADE)
     status = models.CharField(max_length=20, default="OPEN")
@@ -982,12 +656,7 @@ class Plan(models.Model):
 
 
 class Portfolio(models.Model):
-    """A second legitimate shared parent, so ``through=`` has a real choice.
-
-    Two defensible ones is when ``through=`` is needed even with no audit base
-    anywhere: the join could honestly run either way, and only the caller knows
-    which collection they meant to copy.
-    """
+    """A second legitimate shared parent, so ``through=`` has a real choice."""
 
     name = models.CharField(max_length=50)
 
@@ -1013,15 +682,7 @@ class PlanRun(models.Model):
 
 
 class RunStage(models.Model):
-    """A projection whose derived join an audit base makes ambiguous.
-
-    ``PlanRun`` and ``PlanStage`` are joinable through ``Plan``, which is the
-    whole point, **and** through ``Auditor`` twice over, because an abstract base
-    puts ``created_by`` and ``updated_by`` on every model in the schema. So any
-    two models are joinable, the derivation has four candidates instead of one,
-    and a consumer with that very common base could not reach the derived form
-    for any pair at all.
-    """
+    """A projection whose derived join an audit base makes ambiguous."""
 
     run = models.ForeignKey(PlanRun, on_delete=models.CASCADE, related_name="stages")
     source = models.ForeignKey(PlanStage, null=True, on_delete=models.SET_NULL, related_name="+")
@@ -1031,13 +692,7 @@ class RunStage(models.Model):
 
 
 class Region(models.Model):
-    """A UUID-keyed root, which is what a shared abstract base usually produces.
-
-    A project that gives every model ``id = UUIDField(primary_key=True)`` from
-    one base class is an ordinary Django layout, not an exotic one, and the four
-    models below exist so the documented ``values=`` idiom is executed against
-    it rather than asserted to work on it.
-    """
+    """A UUID-keyed root, which is what a shared abstract base usually produces."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(max_length=50)
@@ -1060,20 +715,7 @@ class Route(models.Model):
 
 
 class Shipment(models.Model):
-    """A projected table whose two measure columns are related to each other.
-
-    Integer-keyed on purpose while its sources are not: a projection owns its
-    own keys and ``UuidKeys`` cannot say itself in SQL, so this is the shape a
-    UUID-keyed project actually reaches -- the projected table's key is this
-    package's, and the UUIDs are on the tables the expression reads.
-
-    ``requested_amount`` and ``approved_amount`` are the pair the reference
-    syntax exists for: the second is a fraction of the first, and that is a
-    relationship the declaration should be able to state rather than encode in
-    two sets of coefficients that agree by arithmetic nobody rechecks.
-    ``settled_amount`` is a third so that a reference can be chained, which is
-    the case a single pair cannot reach.
-    """
+    """A projected table whose two measure columns are related to each other."""
 
     depot = models.ForeignKey(Depot, on_delete=models.CASCADE, related_name="shipments")
     source = models.ForeignKey(Route, null=True, on_delete=models.SET_NULL, related_name="+")
@@ -1084,15 +726,7 @@ class Shipment(models.Model):
 
 
 class Club(models.Model):
-    """A parent that a chain of foreign keys leads back to from its own child.
-
-    ``Section`` points at a club, ``MemberFee`` at a section, and a club at the
-    fee it has selected -- the loop an application with billing grows without
-    anyone drawing it. It is what a scaled world declaring only ``Section`` has
-    to leave alone: every table here references a section transitively, so a
-    statement that empties by schema rather than by row reaches the clubs
-    through the fees, whatever rows the fees hold.
-    """
+    """A parent that a chain of foreign keys leads back to from its own child."""
 
     name = models.CharField(max_length=50)
     selected_fee = models.ForeignKey(
@@ -1115,16 +749,7 @@ class MemberFee(models.Model):
 
 
 class Badge(models.Model):
-    """The end of a many-to-many relation that does not declare it.
-
-    ``Wearer.badges`` gives the pair a through table Django creates itself, and
-    ``Wearer.awards`` one declared as a model of its own, ``Award``. The
-    difference is what a template from a base turns on: ``migrate
-    --run-syncdb`` makes the auto-created table only while making the model
-    that declares the relation, so the copy drops and remakes it with that
-    model, while the declared one is a model like any other and is judged as
-    one.
-    """
+    """The end of a many-to-many relation that does not declare it."""
 
     name = models.CharField(max_length=50)
 
@@ -1145,17 +770,7 @@ class Award(models.Model):
 
 
 class Thread(models.Model):
-    """A UUID-keyed table with a key into itself and one the database never sees.
-
-    The key into itself is for the ``Disjoint`` advice a scaled world's refusal
-    offers: giving a table those keys takes it out of the emptying unless one
-    of its keys points into another table being emptied, and a key into itself
-    is not one, because a table that is not emptied cannot pull itself back in.
-
-    The key into ``Company`` has no constraint behind it, and a scaled world
-    decides which ``Disjoint`` tables to empty from the models' keys rather
-    than the database's, so it still pulls this table in with the companies.
-    """
+    """A UUID-keyed table with a key into itself and one the database never sees."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     parent = models.ForeignKey("self", null=True, on_delete=models.CASCADE, related_name="+")
@@ -1166,13 +781,7 @@ class Thread(models.Model):
 
 
 class TenantProfile(models.Model):
-    """A primary key that is itself a one-to-one key into a UUID-keyed table.
-
-    A UUID fits the column, and still no key a ``Disjoint`` strategy makes is a
-    tenant's, so the advice to use one is never offered for it. Asking the
-    field whether it accepts one would run ``ForeignKey.validate``'s existence
-    query, against whichever database the router names rather than the world's.
-    """
+    """A primary key that is itself a one-to-one key into a UUID-keyed table."""
 
     tenant = models.OneToOneField(
         Tenant, primary_key=True, on_delete=models.CASCADE, related_name="+"
@@ -1181,12 +790,7 @@ class TenantProfile(models.Model):
 
 
 class StrictCodeField(models.CharField):
-    """A character field whose ``to_python`` refuses with a plain exception.
-
-    Django's contract is a ``ValidationError``, and a third-party field does not
-    always keep it. ``refusal`` is a class attribute so that one model can stand
-    for a field raising either of the two such exceptions a scaled world catches.
-    """
+    """A character field whose ``to_python`` refuses with a plain exception."""
 
     refusal: type[Exception] = ValueError
 
@@ -1205,23 +809,13 @@ class StrictCode(models.Model):
 
 
 class Tariff(models.Model):
-    """A primary key on a ``DecimalField``, whose reading of a float is not the float.
-
-    ``to_python`` rounds a float through the field's own context, so ``1.1``
-    reads as ``Decimal("1.100000000")``, which compares unequal to the float it
-    came from and still names the same row. Here so that the refusal of a number
-    read as another row stays confined to integer keys.
-    """
+    """A primary key on a ``DecimalField``, whose reading of a float is not the float."""
 
     rate = models.DecimalField(max_digits=10, decimal_places=2, primary_key=True)
 
 
 class Remark(models.Model):
-    """A row that references one of the three tables above, and none of them is declared.
-
-    Each key is nullable, so a test sets the one it is about and the others
-    reference nothing.
-    """
+    """A row that references one of the three tables above, and none of them is declared."""
 
     thread = models.ForeignKey(Thread, null=True, on_delete=models.CASCADE, related_name="+")
     profile = models.ForeignKey(
@@ -1232,14 +826,7 @@ class Remark(models.Model):
 
 
 class CasedTable(models.Model):
-    """A table whose name holds capitals, so it is found only where it is quoted.
-
-    PostgreSQL folds an unquoted identifier to lower case, and ``regclass``
-    input is read as an identifier, so ``'testapp_CasedTable'::regclass`` looks
-    for ``testapp_casedtable`` -- a table that does not exist, or worse, one
-    that does. Its own table for the reason ``Bucketed`` has one: a statistics
-    target set by one test outlives it.
-    """
+    """A table whose name holds capitals, so it is found only where it is quoted."""
 
     code = models.CharField(max_length=20)
 
@@ -1248,11 +835,7 @@ class CasedTable(models.Model):
 
 
 class DottedTable(models.Model):
-    """A table whose name holds a dot, which Django quotes as part of one identifier.
-
-    Read unquoted, as ``regclass`` input reads it, the dot splits the name into
-    a schema and a table, and the lookup asks for a schema named ``testapp``.
-    """
+    """A table whose name holds a dot, which Django quotes as part of one identifier."""
 
     code = models.CharField(max_length=20)
 
@@ -1268,11 +851,7 @@ class Category(models.Model):
 
 
 class RootlessNode(models.Model):
-    """A self-reference that cannot be null, which no tree can fill.
-
-    Its first row has no earlier row to point at, so a root -- a NULL -- is the
-    only thing it could hold, and the column refuses one.
-    """
+    """A self-reference that cannot be null, which no tree can fill."""
 
     parent = models.ForeignKey("self", on_delete=models.CASCADE)
 
@@ -1286,12 +865,7 @@ class Successor(models.Model):
 
 
 class Folder(models.Model):
-    """A tree whose names are unique among siblings, as a file system's are.
-
-    ``(parent, name)`` is unique, so two children of one parent may not share a
-    name. A ``Tree`` gives a row several children whenever its sizes say so, and
-    a name drawn per row cannot see its siblings.
-    """
+    """A tree whose names are unique among siblings, as a file system's are."""
 
     parent = models.ForeignKey("self", null=True, on_delete=models.CASCADE, related_name="+")
     name = models.CharField(max_length=50)
@@ -1304,11 +878,7 @@ class Folder(models.Model):
 
 
 class Chain(models.Model):
-    """A self-reference unique by constraint rather than by ``unique=True``.
-
-    The column itself is not unique, so the field-level refusal of a unique
-    tree column never sees it; the constraint says the same thing.
-    """
+    """A self-reference unique by constraint rather than by ``unique=True``."""
 
     previous = models.ForeignKey("self", null=True, on_delete=models.CASCADE, related_name="+")
 
@@ -1319,12 +889,7 @@ class Chain(models.Model):
 
 
 class Relay(models.Model):
-    """A self-reference unique through ``Meta.unique_together`` on the column alone.
-
-    The third spelling of the same fact, after ``unique=True`` and a
-    ``UniqueConstraint``: Django keeps it on ``_meta.unique_together``, where
-    neither of the others looks.
-    """
+    """A self-reference unique through ``Meta.unique_together`` on the column alone."""
 
     previous = models.ForeignKey("self", null=True, on_delete=models.CASCADE, related_name="+")
 
@@ -1339,11 +904,7 @@ class RootlessLink(models.Model):
 
 
 class TiedLink(models.Model):
-    """A unique self-reference whose NULLs count as one value, where Django can say so.
-
-    ``nulls_distinct`` arrived in Django 5.0, so below it this is a plain ``Chain``
-    and the tests reading the difference skip.
-    """
+    """A unique self-reference whose NULLs count as one value, where Django can say so."""
 
     previous = models.ForeignKey("self", null=True, on_delete=models.CASCADE, related_name="+")
 
@@ -1358,11 +919,7 @@ class TiedLink(models.Model):
 
 
 class SpelledChain(models.Model):
-    """A unique self-reference whose constraint spells the attname, ``previous_id``.
-
-    Django accepts either spelling in ``UniqueConstraint(fields=)``, and a reader
-    comparing it to the field's ``name`` finds a different column.
-    """
+    """A unique self-reference whose constraint spells the attname, ``previous_id``."""
 
     previous = models.ForeignKey("self", null=True, on_delete=models.CASCADE, related_name="+")
 
@@ -1437,12 +994,7 @@ class OnlyChild(models.Model):
 
 
 class TiedOnlyChild(models.Model):
-    """A one-to-one self-key unique together with a name, where its NULLs count as one value.
-
-    The key alone keeps nothing here: every root's NULL is one group, so two roots with the
-    one name collide, which the flat tree that keeps ``OnlyChild`` cannot help. ``nulls_distinct``
-    arrived in Django 5.0; below it this is ``OnlyChild`` and difference-reading tests skip.
-    """
+    """A one-to-one self-key unique together with a name, where its NULLs count as one value."""
 
     parent = models.OneToOneField("self", null=True, on_delete=models.CASCADE, related_name="+")
     name = models.CharField(max_length=50)
@@ -1505,12 +1057,7 @@ class RootlessShelf(models.Model):
 
 
 class Sibling(models.Model):
-    """A self-reference whose only uniqueness is conditional, so the column is not unique.
-
-    The constraint holds only on the rows its condition selects, so ``parent``
-    alone repeats freely on the rest: a tree under it is not the one-to-one
-    chain a unique column makes.
-    """
+    """A self-reference whose only uniqueness is conditional, so the column is not unique."""
 
     parent = models.ForeignKey("self", null=True, on_delete=models.CASCADE, related_name="+")
     name = models.CharField(max_length=50)
@@ -1526,14 +1073,7 @@ class Sibling(models.Model):
 
 
 class UnenforcedConstraint(models.constraints.BaseConstraint):
-    """A constraint that is not a ``UniqueConstraint`` and has no ``condition`` to speak of.
-
-    Stands in for a third-party one and for ``ExclusionConstraint``, which
-    Django restricts to GiST indexes and so cannot be declared on an integer key
-    without an extension. It has no ``fields`` and its ``condition`` is ``None``,
-    the one shape a check constraint cannot take from Django 5.1, where its
-    predicate is its ``condition``. It writes no SQL.
-    """
+    """A constraint that is not a ``UniqueConstraint`` and has no ``condition`` to speak of."""
 
     condition = None
 
@@ -1563,11 +1103,7 @@ class Exclusive(models.Model):
 
 
 class Checked(models.Model):
-    """A self-reference with a check constraint, which says nothing about uniqueness.
-
-    A ``CheckConstraint`` has no ``fields``, so reading the constraints of a model
-    as if each were a ``UniqueConstraint`` fails here.
-    """
+    """A self-reference with a check constraint, which says nothing about uniqueness."""
 
     parent = models.ForeignKey("self", null=True, on_delete=models.CASCADE, related_name="+")
     name = models.CharField(max_length=50)
@@ -1587,12 +1123,7 @@ class Checked(models.Model):
 
 
 class Limb(models.Model):
-    """A tree beside a fan-out under one uniqueness, as a real table.
-
-    ``(parent, company)`` is unique, so two children of one row may not sit in
-    one company. Real because the remedies a refusal names for this pair are
-    loads, and the declaration tests build no table.
-    """
+    """A tree beside a fan-out under one uniqueness, as a real table."""
 
     parent = models.ForeignKey("self", null=True, on_delete=models.CASCADE, related_name="+")
     company = models.ForeignKey(Company, null=True, on_delete=models.CASCADE, related_name="+")
@@ -1644,12 +1175,7 @@ class LabelledRung(models.Model):
 
 
 class Verdict(models.Model):
-    """A conditional uniqueness over a tree and a second column.
-
-    One accepted verdict per ``(parent, code)``: the rule is about the rows a
-    condition selects, so the table loads only if no two accepted rows share a
-    parent and a code.
-    """
+    """A conditional uniqueness over a tree and a second column."""
 
     parent = models.ForeignKey("self", null=True, on_delete=models.CASCADE, related_name="+")
     code = models.CharField(max_length=50, null=True)
