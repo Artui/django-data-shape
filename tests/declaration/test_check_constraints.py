@@ -3832,14 +3832,14 @@ def test_distinct_is_still_offered_over_a_column_that_can_say_it(refused: _Case)
 def test_a_key_cannot_be_declared_distinct() -> None:
     # The claim the refusals above rest on: the offer was for a declaration Table refuses.
     with pytest.raises(InvalidShape, match="is a relation, so it needs a FanOut"):
-        Table(_model(_PER_PARENT_OVER_A_NULL_SHARE), rows=10, company=Sequential(1, 1))
+        Table(_model(_A_KEY_BESIDE_A_DRAW), rows=10, company=Sequential(1, 1))
 
 
 def test_a_key_cannot_be_derived_either() -> None:
     # The other remedy the fan-out beside a draw offers, which fills the draw column.
     with pytest.raises(InvalidShape, match="is a relation, so it needs a FanOut.*or a derivation"):
         Table(
-            _model(_PER_PARENT_OVER_A_NULL_SHARE),
+            _model(_A_KEY_BESIDE_A_DRAW),
             rows=10,
             company=FanOut(Zipf()),
             prev=Derived("company", compute=_named_for_position, scope="group"),
@@ -3856,6 +3856,7 @@ _FAN_OUT_BESIDE_A_KEY = _Case(
 )
 
 
+@_NEEDS_DJANGO_5
 def test_a_fan_out_beside_a_key_is_offered_the_statement_alone() -> None:
     message = _refusal(_FAN_OUT_BESIDE_A_KEY)
 
@@ -3932,6 +3933,14 @@ _PER_PARENT_OVER_A_NULL_SHARE = _Case(
 )
 
 
+# Table refuses a value on a key whatever the constraint does with its NULLs, so the model
+# that says so keeps them apart and holds on Django 4.2, which has no nulls_distinct.
+_A_KEY_BESIDE_A_DRAW = _PER_PARENT_OVER_A_NULL_SHARE._replace(
+    name="a_key_beside_a_draw", together=False
+)
+
+
+@_NEEDS_DJANGO_5
 def test_a_per_parent_over_a_null_share_is_offered_only_with_the_share_dropped() -> None:
     message = _refusal(_PER_PARENT_OVER_A_NULL_SHARE)
 
@@ -3946,6 +3955,7 @@ def test_a_per_parent_over_a_null_share_is_offered_only_with_the_share_dropped()
         )
 
 
+@_NEEDS_DJANGO_5
 def test_a_per_parent_over_a_fan_out_with_no_null_share_is_offered_without_the_clause() -> None:
     # Holds the null conjunct: the clause is for a share and for nothing else.
     message = _refusal(
