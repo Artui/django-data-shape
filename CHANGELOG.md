@@ -144,6 +144,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   refusal offers a flat or capped `FanOut` where the partners can hold every row, the
   column left out where its NULLs are apart, a `Distinct` column beside it, and a
   `Projection`, each loaded.
+- **A refusal offers `Distinct` only over a column that is not a key.** `Table` refuses a
+  distribution or a derivation on a `FanOut`, `Tree` or `Paired`, so a refusal over keys alone,
+  or over keys and a nullable key the shape leaves out, offered a remedy no declaration could
+  spell. A fan-out beside a key left out (40 rows over 50 companies, NULLs counted as one value)
+  is now offered the `Projection` alone, and a tree beside a key, beside a fan-out, or under a
+  condition is offered its flat tree, a cap of one where the parents can hold every row, and the
+  `Projection`; each of those loaded 20 times in 20.
 
 ### Documentation
 

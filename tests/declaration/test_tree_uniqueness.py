@@ -287,7 +287,9 @@ def _assert_names_only_what_a_tree_accepts(message: str) -> None:
     assert "scope='group'" not in message
     assert "Paired(" not in message
     assert "PerParent(" not in message
-    assert "Distinct" in message
+    # Each caller's constraint is keys alone beside the tree, and Table refuses a distribution
+    # on a key, so there is no column to make Distinct.
+    assert "Distinct" not in message
     assert "Projection" in message
 
 
@@ -621,7 +623,7 @@ def test_a_tree_beside_a_fan_out_is_refused() -> None:
     assert "Branch.company is a fan-out" in message
     # 200 rows over 50 companies: a cap of one cannot place them, and Shape refuses it.
     assert "max_children=1" not in message
-    assert "Distinct" in message
+    assert "Distinct" not in message
     assert "Leaving parent out of the shape" in message
     assert "Constant(1)" in message
     _assert_names_only_what_a_tree_accepts(message)
@@ -928,7 +930,7 @@ def test_a_rule_kept_per_a_fan_out_outside_the_constraint_is_refused() -> None:
     assert "decided per company" in message
     assert "PerParent('parent'" not in message
     assert "scope='group'" not in message
-    assert "Distinct" in message
+    assert "Distinct" not in message
     assert "Projection" in message
 
 

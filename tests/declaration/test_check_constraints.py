@@ -3660,6 +3660,108 @@ _NO_COLUMN_TO_SAY_DISTINCT = (
         (("draw_condition_over_a_left_out_key_left_out", {}),),
         id="condition_over_draws",
     ),
+    # A fan-out beside a key left out, NULLs counted as one value: 40 rows over 50 companies.
+    # Both remedies it used to offer fill the other column, and Table refuses each on a key, so
+    # nothing is left but the statement, which test_the_statement_a_fan_out_beside_a_key_offers
+    # builds.
+    pytest.param(
+        _Case(
+            "fan_out_beside_a_left_out_key",
+            ("company", "prev"),
+            None,
+            {"company": FanOut(Zipf())},
+            rows=40,
+            together=True,
+        ),
+        (),
+        (),
+        id="fan_out_beside_a_key",
+    ),
+    # A tree beside a key left out: the flat tree is the one remedy that is not the statement.
+    pytest.param(
+        _Case(
+            "tree_beside_a_left_out_key",
+            ("prev", "other"),
+            None,
+            {"prev": _tree()},
+            together=True,
+        ),
+        ("a tree with one root, roots at most 1/201",),
+        (("tree_beside_a_left_out_key_flat", {"prev": Tree(roots=1 / 201, sizes=Constant(1))}),),
+        id="tree_beside_a_key",
+    ),
+    # A tree beside a fan-out and nothing else, where a cap of one is room for every row.
+    pytest.param(
+        _Case(
+            "tree_beside_a_fan_out_alone",
+            ("prev", "other"),
+            None,
+            {"prev": _tree(), "other": FanOut(Zipf())},
+            rows=40,
+            together=True,
+        ),
+        ("max_children=1", "a tree with one root, roots at most 1/41"),
+        (
+            (
+                "tree_beside_a_fan_out_alone_flat",
+                {"prev": Tree(roots=1 / 41, sizes=Constant(1)), "other": FanOut(Zipf())},
+            ),
+            (
+                "tree_beside_a_fan_out_alone_cap",
+                {"prev": _tree(), "other": FanOut(Zipf(), max_children=1)},
+            ),
+        ),
+        id="tree_beside_a_fan_out",
+    ),
+    # The same pair beside a key left out, which is no column to make Distinct either.
+    pytest.param(
+        _Case(
+            "tree_and_a_fan_out_beside_a_left_out_key",
+            ("prev", "company", "other"),
+            None,
+            {"prev": _tree(), "company": FanOut(Zipf())},
+            rows=40,
+            together=True,
+        ),
+        ("max_children=1", "a tree with one root, roots at most 1/41"),
+        (
+            (
+                "tree_and_a_fan_out_beside_a_left_out_key_flat",
+                {"prev": Tree(roots=1 / 41, sizes=Constant(1)), "company": FanOut(Zipf())},
+            ),
+            (
+                "tree_and_a_fan_out_beside_a_left_out_key_cap",
+                {"prev": _tree(), "company": FanOut(Zipf(), max_children=1)},
+            ),
+        ),
+        id="tree_and_a_fan_out_beside_a_key",
+    ),
+    # A condition over a tree beside a key left out: the column filled so no row lands inside
+    # the condition, and the flat tree.
+    pytest.param(
+        _Case(
+            "condition_over_a_tree_beside_a_left_out_key",
+            ("prev", "other"),
+            Q(state="x"),
+            {"prev": _tree(), "state": Skew({"x": 0.1, "y": 0.9})},
+            together=True,
+        ),
+        ("state filled so that no row lands inside the condition", "roots at most 1/201"),
+        (
+            (
+                "condition_over_a_tree_beside_a_left_out_key_clear",
+                {"prev": _tree(), "state": Constant("y")},
+            ),
+            (
+                "condition_over_a_tree_beside_a_left_out_key_flat",
+                {
+                    "prev": Tree(roots=1 / 201, sizes=Constant(1)),
+                    "state": Skew({"x": 0.1, "y": 0.9}),
+                },
+            ),
+        ),
+        id="condition_over_a_tree",
+    ),
 )
 
 
@@ -3684,10 +3786,134 @@ def test_distinct_is_offered_only_over_a_column_that_can_say_it(
         _assert_loads(refused._replace(name=name, columns=columns), _TWENTY)
 
 
+# The other side of the guard: beside a column that is not a key, Distinct is still offered, and
+# declared on that column it loads. The two tree refusals have no other test that holds it.
+_A_COLUMN_THAT_CAN_SAY_DISTINCT = (
+    pytest.param(
+        _Case(
+            "tree_and_a_fan_out_beside_a_draw",
+            ("prev", "company", "label"),
+            None,
+            {"prev": _tree(), "company": FanOut(Zipf()), "label": _skew()},
+            rows=40,
+            together=True,
+        ),
+        id="tree_beside_a_partition",
+    ),
+    pytest.param(
+        _Case(
+            "condition_over_a_tree_beside_a_draw",
+            ("prev", "label"),
+            Q(state="x"),
+            {"prev": _tree(), "state": Skew({"x": 0.1, "y": 0.9}), "label": _skew()},
+            together=True,
+        ),
+        id="condition_over_a_tree",
+    ),
+)
+
+
+@_ON_POSTGRES
+@_NEEDS_DJANGO_5
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.parametrize("refused", _A_COLUMN_THAT_CAN_SAY_DISTINCT)
+def test_distinct_is_still_offered_over_a_column_that_can_say_it(refused: _Case) -> None:
+    assert "Distinct -- Sequential does" in _refusal(refused)
+
+    _assert_loads(
+        refused._replace(
+            name=f"{refused.name}_distinct",
+            columns={**refused.columns, "label": Sequential(1, 1)},
+        ),
+        _TWENTY,
+    )
+
+
 def test_a_key_cannot_be_declared_distinct() -> None:
-    # The claim the three refusals above rest on: the offer was for a declaration Table refuses.
+    # The claim the refusals above rest on: the offer was for a declaration Table refuses.
     with pytest.raises(InvalidShape, match="is a relation, so it needs a FanOut"):
         Table(_model(_PER_PARENT_OVER_A_NULL_SHARE), rows=10, company=Sequential(1, 1))
+
+
+def test_a_key_cannot_be_derived_either() -> None:
+    # The other remedy the fan-out beside a draw offers, which fills the draw column.
+    with pytest.raises(InvalidShape, match="is a relation, so it needs a FanOut.*or a derivation"):
+        Table(
+            _model(_PER_PARENT_OVER_A_NULL_SHARE),
+            rows=10,
+            company=FanOut(Zipf()),
+            prev=Derived("company", compute=_named_for_position, scope="group"),
+        )
+
+
+_FAN_OUT_BESIDE_A_KEY = _Case(
+    "fan_out_beside_a_key_statement",
+    ("company", "prev"),
+    None,
+    {"company": FanOut(Zipf())},
+    rows=40,
+    together=True,
+)
+
+
+def test_a_fan_out_beside_a_key_is_offered_the_statement_alone() -> None:
+    message = _refusal(_FAN_OUT_BESIDE_A_KEY)
+
+    assert "Derived" not in message
+    assert "Every other column of the constraint is a key" in message
+    assert "filled by a Projection with columns= and sql=" in message
+    # A column that can take either is still offered both.
+    assert "Derived('company', compute=..., scope='group')" in _refusal(
+        _FAN_OUT_BESIDE_A_KEY._replace(
+            name="fan_out_beside_a_draw_statement",
+            fields=("company", "label"),
+            columns={"company": FanOut(Zipf()), "label": _skew()},
+        )
+    )
+
+
+@_ON_POSTGRES
+@_NEEDS_DJANGO_5
+@pytest.mark.django_db(transaction=True)
+def test_the_statement_a_fan_out_beside_a_key_offers_builds() -> None:
+    case = _FAN_OUT_BESIDE_A_KEY._replace(name="fan_out_beside_a_key_projection")
+    model = _model(case)
+    quote = connection.ops.quote_name
+    with connection.schema_editor() as editor:
+        editor.create_model(model)
+    try:
+        for seed in _TWENTY:
+            build_shape(
+                Shape(
+                    Table(Company, rows=50, name=Constant("acme")),
+                    Projection(
+                        model,
+                        columns=("id", "company"),
+                        sql=f"SELECT id, id FROM {quote(Company._meta.db_table)}",
+                    ),
+                    seed=seed,
+                )
+            )
+            with connection.cursor() as cursor:
+                cursor.execute(f"SELECT COUNT(*) FROM {quote(model._meta.db_table)}")
+                assert cursor.fetchone()[0] == 50
+                cursor.execute(
+                    f"TRUNCATE {quote(Company._meta.db_table)}, {quote(model._meta.db_table)} CASCADE"
+                )
+    finally:
+        with connection.schema_editor() as editor:
+            editor.delete_model(model)
+
+
+@_NEEDS_DJANGO_5
+def test_a_constraint_over_keys_alone_is_met_by_the_pigeonhole_before_any_offer() -> None:
+    # The drawn-columns refusal offers Distinct too, and no key reaches it: a key left out is a
+    # constant of one value, so the arithmetic refuses first at two rows or more, and a key
+    # declared is a fan-out, a tree or a Paired, which that refusal returns on.
+    message = _refusal(_Case("keys_alone", ("other", "prev"), None, {}, together=True))
+
+    assert "this shape can produce 1" in message
+    assert "Distinct" not in message
 
 
 # Measured over twenty seeds on the refused table's sizes: company=FanOut(Zipf(), null=0.3)

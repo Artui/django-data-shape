@@ -562,6 +562,24 @@ def _check_a_fan_out_beside_a_draw(
         if capacity is not None
         else "There may be room for every row"
     )
+    # Both remedies fill the other column, and Table refuses a derivation and a distribution on a
+    # key. test_distinct_is_offered_only_over_a_column_that_can_say_it holds the conjunct: its
+    # fan_out_beside_a_left_out_key case has no other column that is not a key.
+    if any(not _is_a_relation(table, column) for column in others):
+        remedy = (
+            "A value that varies with the group is derived from it rather than drawn beside it: "
+            f"Derived({fanned[0]!r}, compute=..., scope='group'){no_null} receives this row's "
+            "position among its parent's children and how many there are. A column that is "
+            "distinct in every row keeps the constraint on its own, and says so with Distinct -- "
+            "Sequential does."
+        )
+    else:
+        remedy = (
+            "Every other column of the constraint is a key, which takes a FanOut or a Paired and "
+            "neither a derivation nor a distribution, so nothing declared beside the fan-out "
+            "arranges it. A table whose rows have to be a particular set is filled by a "
+            "Projection with columns= and sql=."
+        )
     raise InvalidShape(
         f"{name} needs every ({', '.join(fields)}) combination distinct, and {where}."
         f"{fanned[0]} is a fan-out beside {drawn}. "
@@ -572,12 +590,7 @@ def _check_a_fan_out_beside_a_draw(
         "in the row, and nothing enumerates the combinations inside a group. Whether two of one "
         f"parent's rows draw the same value is a matter of the seed. {room}, which is why the "
         "pigeonhole arithmetic lets this through, and the load then fails inside COPY at a row "
-        "number that moves when the seed does. A value that varies with the group is derived "
-        f"from it rather than drawn beside it: Derived({fanned[0]!r}, compute=..., scope='group')"
-        f"{no_null} receives this row's position among its parent's children and how many there "
-        "are. A "
-        "column that is distinct in every row keeps the constraint on its own, and says so with "
-        "Distinct -- Sequential does."
+        f"number that moves when the seed does. {remedy}"
     )
 
 
@@ -636,16 +649,23 @@ def _check_a_tree_beside_a_draw(table: Table, name: str, fields: tuple[str, ...]
     if not others:
         raise InvalidShape(_a_tree_alone(table, name, where, trees[0]))
     drawn = ", ".join(f"{where}.{column}={_held(table, column)!r}" for column in others)
+    # test_distinct_is_offered_only_over_a_column_that_can_say_it holds the conjunct:
+    # tree_beside_a_left_out_key has no other column that is not a key.
+    if any(not _is_a_relation(table, column) for column in others):
+        keeps = (
+            "A column that is distinct in every row keeps the constraint on its own and says so "
+            "with Distinct -- Sequential does. So does "
+        )
+    else:
+        keeps = "What keeps the constraint on its own is "
     raise InvalidShape(
         f"{name} needs every ({', '.join(fields)}) combination distinct, and {where}."
         f"{trees[0]} is a Tree beside {drawn}. A tree gives a row several children whenever "
         "its sizes say so, and a distribution is drawn from the row index alone, so no child "
         "can see what its siblings drew: two of them sharing a value is a matter of the seed, "
         "and the load then fails inside COPY at a row number that moves when the seed does. "
-        "Nothing is decided per family of a tree, since a family is not a range of rows. A "
-        "column that is distinct in every row keeps the constraint on its own and says so with "
-        f"Distinct -- Sequential does. So does {_a_flat_tree(table, name)}. A table whose rows "
-        "have to be a particular set is "
+        f"Nothing is decided per family of a tree, since a family is not a range of rows. {keeps}"
+        f"{_a_flat_tree(table, name)}. A table whose rows have to be a particular set is "
         "filled by a Projection with columns= and sql=."
     )
 
@@ -742,6 +762,16 @@ def _check_a_tree_beside_a_partition(
         if room
         else ""
     )
+    # A tree and a fan-out are keys, so only a column beside them can be Distinct.
+    # test_distinct_is_offered_only_over_a_column_that_can_say_it holds the conjunct, on a tree
+    # beside a fan-out and on a tree and a fan-out beside a key left out.
+    if any(not _is_a_relation(table, column) for column in others):
+        keeps = (
+            "A column of the constraint that is distinct in every row keeps it too and says so "
+            "with Distinct -- Sequential does, and so does "
+        )
+    else:
+        keeps = "So does " if room else "What keeps it is "
     raise InvalidShape(
         f"{name} needs every ({', '.join(fields)}) combination distinct, and {', '.join(named)}. "
         f"{_a_null_share_counted_together(table, name, fanned)}"
@@ -749,9 +779,7 @@ def _check_a_tree_beside_a_partition(
         "another put in the row, so which combinations come out together is an artefact of that "
         "index and two rows sharing one is a matter of the seed. The load then fails inside COPY "
         "at a row number that moves when the seed does. Nothing is decided per family of a tree, "
-        f"since a family is not a range of rows. {capped}A column of the constraint that is "
-        f"distinct in every row keeps it too and says so with Distinct -- Sequential does, and so "
-        f"does {_a_flat_tree(table, name)}. "
+        f"since a family is not a range of rows. {capped}{keeps}{_a_flat_tree(table, name)}. "
         f"{left_out}A table whose rows have to be a particular set is filled by a Projection with "
         "columns= and sql=."
     )
@@ -1210,6 +1238,12 @@ def _check_drawn_columns_only(
     in a unique index, so those rows cannot collide with anything, and that has
     answered before this runs as well; under ``nulls_distinct=False`` it is one value
     like any other and :func:`_held` reads it so.
+
+    **No key reaches the ``Distinct`` offer below, which is why it has no guard.** A key
+    declared is a fan-out, a tree or a ``Paired``, none of which is drawn per row, and one
+    left out is a constant of one value, so the pigeonhole refuses a constraint of keys alone
+    at two rows or more before this runs.
+    ``test_a_constraint_over_keys_alone_is_met_by_the_pigeonhole_before_any_offer`` holds it.
     """
     declared = [_held(table, column) for column in fields]
     if any(isinstance(one, FanOut) for one in declared):
@@ -1479,16 +1513,29 @@ def _check_conditional_over_a_tree(
         *(f"{where}.{field} is a Tree" for field in trees),
         *(f"{where}.{field}={_held(table, field)!r} is drawn per row" for field in others),
     ]
+    # test_distinct_is_offered_only_over_a_column_that_can_say_it holds the conjunct:
+    # condition_over_a_tree_beside_a_left_out_key has no other column that is not a key.
+    distinct = (
+        [
+            "a column of the constraint that is distinct in every row, which says so with "
+            "Distinct -- Sequential does"
+        ]
+        if any(not _is_a_relation(table, field) for field in others)
+        else []
+    )
+    offers = [
+        f"{column} filled so that no row lands inside the condition",
+        *distinct,
+        _a_flat_tree(table, name),
+        "a Projection with columns= and sql=",
+    ]
     raise InvalidShape(
         f"{name} permits one row with {_matching(column, values)} per ({', '.join(fields)}), and "
         f"{', '.join(named)}; {where}.{column}={declared!r} {asks}. Nothing is decided per family "
         "of a tree, since a family is not a range of rows, so no row inside the condition can see "
         "whether a sibling is inside it too. Two of them sharing a group is a matter of the seed "
         "at any weight, and the load then fails inside COPY at a row number that moves when the "
-        f"seed does. What a tree accepts: {column} filled so that no row lands inside the "
-        "condition; a column of the constraint that is distinct in every row, which says so with "
-        f"Distinct -- Sequential does; {_a_flat_tree(table, name)}; or a Projection with columns= "
-        "and sql=."
+        f"seed does. What a tree accepts: {'; '.join(offers[:-1])}; or {offers[-1]}."
     )
 
 
