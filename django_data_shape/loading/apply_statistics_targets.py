@@ -32,7 +32,67 @@ WHERE a.attrelid = %s::regclass AND a.attnum > 0 AND NOT a.attisdropped
 
 
 def apply_statistics_targets(connection: Any, declaration: Table | Projection) -> None:
-    """Set the declared per-column targets, and refuse a shape the planner could not record."""
+    """Set the declared per-column targets, and refuse a shape the planner could not record.
+
+    ``ANALYZE`` has shipped since 0.1.0 and it is only half the story. What it
+    gathers is bounded by each column's *statistics target*: PostgreSQL keeps at
+    most that many most-common values and that many histogram bounds, and samples
+    300 times as many rows to find them. Everything past the target is collapsed
+    into one residual frequency, so a column with more distinct values than its
+    target has a shape the planner cannot see -- and this package exists to make
+    a declared shape visible.
+
+    **The target is declared, never inferred.** This function reads the
+    distributions only to refuse, and that distinction is the whole design.
+    Raising a target on the caller's behalf would be this package choosing how
+    the planner sees a column, silently, on evidence the declaration does not
+    contain: a hundred-value skew wants a hundred buckets in a table where those
+    hundred values are the query's predicate and wants far fewer where they are
+    not, and nothing in a distribution says which. So a shape that gets a
+    hundred-bucket histogram because ``default_statistics_target`` happens to be
+    a hundred is treated as different from one that asked for it -- not by
+    guessing at the second, but by making the first impossible to hold by
+    accident. Either the declaration can be recorded, or the build stops and
+    names the column.
+
+    **Which is a refusal that cannot happen at declaration time**, like
+    :class:`~django_data_shape.derivations.given.Given`'s missing case and a
+    :class:`~django_data_shape.declaration.projection.Projection` that inserts nothing. The
+    number it compares against lives in the server -- a column carries a target
+    set by a migration, and everything else falls back to a setting an operator
+    can change -- so the declaration alone cannot know it. It is still raised
+    before a single row is generated rather than after the load, because a
+    refusal that costs a two-million-row ``COPY`` first is a refusal nobody
+    thanks you for.
+
+    **The order matters and is easy to get backwards.** A target changed after
+    ``ANALYZE`` has run does nothing at all until the next one, exactly as
+    ``ANALYZE`` before a load leaves stale statistics behind. So this runs before
+    the rows, and the ``ANALYZE`` at the end of the build is the one that reads
+    it -- the ordering is owned by the library for the same reason the rest of
+    the sequence is.
+
+    **Checks still queued are fired before the first target is set.** PostgreSQL
+    refuses ``ALTER TABLE`` on a table with trigger events pending, and Django
+    creates its foreign keys ``DEFERRABLE INITIALLY DEFERRED``, so a row written
+    earlier in the same transaction into a table built beside it -- one with
+    :class:`~django_data_shape.keys.disjoint.Disjoint` keys, which the build
+    does not refuse for holding rows -- leaves its check queued on the table
+    about to be altered. So every check pending in the transaction is fired
+    first, and a row that breaks a constraint raises ``IntegrityError`` here,
+    naming it, rather than at commit. Only for a declaration with targets to
+    set: one declaring none issues no statement more. Firing them ends with
+    ``SET CONSTRAINTS ALL DEFERRED``, which stays in force for the rest of the
+    transaction, so a build inside a transaction of the caller's leaves every
+    deferrable constraint deferred until commit, one declared
+    ``INITIALLY IMMEDIATE`` included. Inside
+    :func:`~django_data_shape.scaling.scaled_world.scaled_world` that is rolled
+    back with the block.
+
+    Nothing happens on another backend. The branch is on the connection's vendor
+    rather than on a failed statement, so it is covered by passing a vendor
+    rather than by running the suite on the backend it skips.
+    """
     if connection.vendor != "postgresql":
         return
 

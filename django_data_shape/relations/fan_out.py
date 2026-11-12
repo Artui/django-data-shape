@@ -9,9 +9,61 @@ PLACEMENTS = ("arrival", "grouped")
 
 
 class FanOut:
-    """A distribution over how many children each parent has, over an already fixed child count.
+    """A distribution over how many children each parent has.
 
-    Never a multiplier: rows times fan-out would make the cardinality emergent."""
+    Declared as a shape over an **already fixed** child row count, never as a
+    multiplier. Rows times fan-out makes cardinality emergent, and a table whose
+    size is emergent is a table nothing can assert about.
+
+    ``sizes`` supplies a relative weight per parent -- ``Zipf()`` for the
+    realistic heavy tail, ``Uniform(1, 10)`` for something flatter. The weights
+    are normalised, so their scale is irrelevant and only their spread matters.
+
+    **A parent's weight is keyed on its position in the parent table, not
+    ordered by it.** The large groups are scattered through the key range rather
+    than gathered at the low keys, so "the whales are the low ids" is false and
+    so is the reverse. That is deliberate: ordering them would put a correlation
+    between a parent's key and its child count into the child table, and a
+    correlated foreign key is planner-visible -- it would be this package
+    manufacturing the flattering, unreal shape it exists to remove. Reach for the
+    head or the tail through
+    :func:`~django_data_shape.relations.fan_out_sizes.fan_out_sizes`, which is the
+    inversion the partition representation exists to make possible.
+
+    ``childless`` is the share of parents with **no** children at all. It is
+    called out separately because it is the case hand-written fixtures always
+    omit and the one that changes what a join does: a parent nobody references
+    is the difference between an inner and an outer join returning the same
+    thing and returning different things.
+
+    ``null`` is the share of children whose foreign key is NULL, which is only
+    meaningful on a nullable column. **It thins the partition uniformly after**
+    it is computed, so ``sizes`` describes the pre-null spread. Stated because
+    the alternative -- partitioning only the non-null children -- would make the
+    declared distribution mean something subtly different from what it says.
+
+    ``placement`` decides where children sit physically, and it is not
+    cosmetic. Emitting them parent by parent gives a perfectly clustered table
+    that no production system has and that flatters every index scan; the
+    default interleaves them the way rows really arrive.
+
+    ``max_children`` is a ceiling on any one parent's share. **It lives here and
+    not on the size distribution** because the weights are normalised: capping
+    a ``Zipf`` weight caps nothing, since the realised count is a share of
+    ``rows`` that the other weights decide. The cap applies to the integer
+    partition, and the rows a capped parent gives up are re-spread over the
+    others by their weights; a childless parent still gets none. It exists for
+    calibrating against production, whose tails the business bounds. **A cap
+    flattens the head into the body**, which the planner sees, so a capped
+    fan-out is a different world from the uncapped one rather than a free
+    improvement on it -- and choosing a ``Zipf`` exponent that already gives
+    production's maximum is often the better fix.
+
+    The cap counts every row the partition places, the ones ``null`` then
+    leaves without a parent included, so a parent at the cap can end with fewer
+    non-null children but never more. A cap of one is a one-to-one, whatever
+    the sizes weigh.
+    """
 
     def __init__(
         self,
@@ -88,7 +140,15 @@ class FanOut:
         return self._max_children
 
     def canonical(self) -> object:
-        """The size distribution, the parents it spreads over, and the shares. See ``Canonical``."""
+        """The size distribution, the parents it spreads over, and the shares. See ``Canonical``.
+
+        ``parents`` belongs here rather than being read as a filter applied
+        afterwards: two shapes differing only in which parents they cover are
+        two different worlds, and the template-database cache keys on this. A
+        clone built for one tenant handed to a test asking for another would be
+        the cache serving a world nobody declared. ``max_children`` is here for
+        the same reason.
+        """
         return (
             self._sizes,
             self._parents,
