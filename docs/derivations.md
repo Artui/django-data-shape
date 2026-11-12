@@ -234,3 +234,9 @@ stops at the edge of the connection.
   keys drawn from nothing.
 - A `Derived` with **no sources**, which is a `Constant` said with a callable, or
   one whose `compute` is not callable.
+- An `After` whose parent and child columns are **different kinds**, such as a
+  `DateField` parent into a `DateTimeField` child. A date plus a `timedelta` is a
+  date, and a date written into a datetime column lands as a naive midnight, so
+  the offset would quietly change its meaning. The two columns have to be the same
+  kind; any two numeric fields count as one kind. The refusal is raised when the
+  table is declared and names both fields.

@@ -226,10 +226,11 @@ def scaled_world(shape: Shape, factor: int, *, using: str = DEFAULT_DB_ALIAS) ->
     rollback that ends the block restores the caller's.
 
     One thing the rollback does not undo, because the database will not: an
-    identity sequence moved past the keys a build assigned stays moved, since
-    ``setval`` is not transactional. Nothing here reads it -- keys are assigned,
-    not drawn -- so the only visible effect is that a row created by the ORM
-    after a world is torn down gets a larger id than it otherwise would.
+    identity sequence moved past the keys a build assigned, since ``setval`` is
+    not transactional. Nothing here reads it -- keys are assigned, not drawn --
+    so after the rollback the world points each declared table's sequence at
+    the rows it then holds, and a row created by the ORM after a world is torn
+    down gets the id it would have had before.
     """  # noqa: E501
     scaled = scaled_shape(shape, factor)
     connection = connections[using]

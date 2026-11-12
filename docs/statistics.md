@@ -51,6 +51,11 @@ Shape(
 [`Projection`][django_data_shape.declaration.projection.Projection] alike. A column left out
 keeps whatever target the schema gives it.
 
+A target has to be a whole number of at least one. Zero, negative, fractional and
+boolean values are refused when the shape is declared. PostgreSQL reads a target of zero
+as "collect no statistics for this column", which is the state this package exists to
+avoid. To keep the schema's own target for a column, leave it out of `statistics=`.
+
 ### Declared, never inferred
 
 The target could have been derived from the distribution -- a `Skew` knows how

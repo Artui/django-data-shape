@@ -73,7 +73,9 @@ print(result.rows)
 - **A Django `default=` is filled in, not skipped.** Defaults are applied by
   `save()`, and nothing here calls `save()`, so a `NOT NULL` column with a
   Python-level default has nothing behind it in the database. The value `save()`
-  would have written is used instead.
+  would have written is used instead. Signal receivers follow from that: no
+  `pre_save` or `post_save` handler runs for a row a build writes, so a receiver
+  that would have written a value for those rows does not run.
 - **Except on a foreign key, where it is refused.** A key that did not come out
   of the parent's own table is a key drawn from nothing, so a `default=` cannot
   stand in for a fan-out the way it stands in for a scalar. A required relation
@@ -99,6 +101,13 @@ print(result.rows)
 - **The whole build is one transaction.** A shape whose second table fails leaves
   nothing behind, so re-running after a fix meets the same state the first
   attempt did.
+- **A table with a statistics target fires its queued checks first.** Before it
+  sets a target, the build fires the constraint checks queued so far, so a row
+  that breaks a foreign key raises `IntegrityError` inside `build()` rather than
+  at commit. That step leaves every deferrable constraint deferred for the rest
+  of the transaction, including one declared `INITIALLY IMMEDIATE`, so a
+  `build()` inside a transaction of your own holds those checks until your
+  transaction commits.
 - **psycopg 3.** Rows stream straight into `COPY FROM STDIN`, which psycopg 2
   cannot do without materialising them first. A psycopg 2 connection is refused
   by name.

@@ -100,8 +100,9 @@ def template_fixture(
 
     ``strategy`` is the clone's, as for
     :func:`~django_data_shape.databases.clone_database.clone_database`:
-    ``file_copy`` by default, ``None`` on a PostgreSQL older than 15. It is not
-    passed to ``template``, which takes its own.
+    ``file_copy`` by default, which a PostgreSQL older than 15 refuses unless
+    the caller passes ``strategy=None``. It is not passed to ``template``, which
+    takes its own.
 
     On a connection that cannot carry a shaped database the fixture skips with
     the reason rather than raising, as ``shape_fixture`` does, so a suite that
