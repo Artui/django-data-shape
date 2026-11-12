@@ -10,7 +10,22 @@ from django_data_shape.declaration.invalid_shape import InvalidShape
 class Skew:
     """Values drawn from a weighted set, in a fixed order.
 
-    The distribution the package exists for: a 98% status column decides whether an index helps."""
+    This is the distribution the package exists for. A status column that is 98%
+    one value is what decides whether an index on it is usable at all, and it is
+    the thing a fixtures loop never expresses -- ten rows with one of each says
+    the opposite of what production says.
+
+    ``Mapping[Any, float]`` rather than ``dict[object, float]``: ``dict`` is
+    invariant in both parameters, so a caller's prepared ``dict[str, float]`` --
+    the obvious way to build one of these outside a call -- would be rejected by
+    a type checker for no reason a reader could act on. ``Mapping`` is covariant
+    in its value type, so integer counts are accepted too.
+
+    Weights are relative and need not sum to 1: the readable form is often
+    counts, and normalising here is cheaper than making every caller do it. They
+    must be positive, because a zero-weight value is a value that never appears,
+    which is better said by leaving it out than by declaring it and meaning not.
+    """
 
     def __init__(self, weights: Mapping[Any, float]) -> None:
         if not weights:
@@ -45,12 +60,26 @@ class Skew:
         return len(self._values)
 
     def shares(self) -> dict[object, float]:
-        """Each declared value against its share of the rows. See ``Categorical``."""
+        """Each declared value against its share of the rows. See ``Categorical``.
+
+        The normalised weights rather than the raw ones, because the question a
+        caller of this asks is "how many of my rows will hold this value", and
+        weights are relative by design -- counts are a legitimate way to write
+        one. Normalising here is what lets a refusal quote a row count back at a
+        declaration that only ever said ``0.1``.
+        """
         total = sum(self._weights.values())
         return {value: weight / total for value, weight in self._weights.items()}
 
     def canonical(self) -> object:
-        """The weights, **in declaration order**, which decides the values. See ``Canonical``."""
+        """The weights, **in declaration order**. See ``Canonical``.
+
+        The order is part of the declaration rather than a detail of how it was
+        written: the cumulative bounds above are laid out in it, so the same
+        weights given in a different order hand a different value to the same
+        draw. Sorting here would tell the template cache that two databases
+        which differ row for row are the same one.
+        """
         return (self._weights,)
 
     def __repr__(self) -> str:

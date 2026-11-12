@@ -25,7 +25,48 @@ def shape_from_factory(
     defaults: Mapping[str, object] | None = None,
     using: str = DEFAULT_DB_ALIAS,
 ) -> str:
-    """Run a factory, measure what it made, and return a declaration **as source**."""
+    """Run a factory, measure what it made, and return a declaration **as source**.
+
+    **Source to read, edit and check in -- never a ``Shape`` to build from**, and
+    that is the whole design rather than a limitation of it. A shape this package
+    builds is *declared*, which is what makes it reviewable and assertable; a
+    shape learned from a sample is neither, and one used directly would change
+    whenever the factory did, silently. So what comes back is text, and a person
+    decides what of it to keep.
+
+    **Because the thing it usually finds is that the factory is flat.** Factories
+    are written for single-object tests, so they fix values: one status, one
+    parent, one count. Measured on exactly that shape, faithful inference emits
+    ``status=Constant('ACTIVE'), company=Constant(1)`` -- the uniform world this
+    package exists to argue against, now with a declaration blessing it. So every
+    such column is reported as a **finding** rather than quietly written down,
+    and the report leads with them.
+
+    **A sub-factory is the sharpest case and the one worth running this for.**
+    ``company = SubFactory(CompanyFactory)`` creates one parent per child, which
+    is a fan-out of degree one: every parent has exactly one row, the average is
+    the truth, and the join estimate cannot miss. It is the single most
+    unrealistic thing a fixture can do and it is invisible in the factory's own
+    source, so it is detected by watching which other tables grew and by how
+    much.
+
+    ``defaults`` is passed to every call, because **most factories in a mature
+    codebase need arguments**. A ``TeamFactory`` wanting a ``permission_role``,
+    called with nothing, leaves a required column empty and fails as a raw
+    ``IntegrityError`` naming a constraint -- which says nothing about what the
+    caller did. Anything the factory raises is caught and named here instead,
+    with the call number, because "it failed" and "it failed after three" are
+    different bugs.
+
+    Nothing is left behind: the calls run inside a transaction that is rolled
+    back, so this can be pointed at a development database without writing to it.
+
+    ``samples`` decides how much of the tail is seen, and the answer moves with
+    it -- fifty runs saw nineteen distinct parents where a thousand saw
+    forty-nine. That is stated in the output rather than hidden, because two
+    people running this at different sizes should not be surprised by two
+    different declarations.
+    """
     if samples < 2:
         raise InvalidShape(
             f"shape_from_factory needs at least two samples to see a shape, got {samples}. "

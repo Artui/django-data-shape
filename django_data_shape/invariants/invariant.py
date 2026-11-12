@@ -8,7 +8,58 @@ from django_data_shape.declaration.invalid_shape import InvalidShape
 class Invariant:
     """A rule that must hold once the rows are in, checked after the load.
 
-    The second of the three nets, and the only one covering rules the database does not enforce."""
+    The second of the three nets, and the only one that covers rules the
+    database does not enforce -- which is most of them. A partial
+    ``UniqueConstraint`` is refused by PostgreSQL and pre-checked here; a
+    denormalised total, a tenant id that must match its parent's, an interval
+    chain with no gaps and a status history whose transitions are legal are all
+    rules a schema states nowhere and a generator can still break.
+
+    Two ways to say one, and they are mutually exclusive because a declaration
+    that carried both would leave the reader to work out which one ran.
+
+    ```python
+    Invariant(
+        "a project's company matches its board's",
+        Project,
+        violated_by=~Q(company=F("board__company")),
+    )
+
+    Invariant(
+        "no company has two active projects",
+        sql=\"\"\"
+            SELECT company_id, count(*) FROM testapp_project
+            WHERE status = 'ACTIVE' GROUP BY company_id HAVING count(*) > 1
+        \"\"\",
+    )
+    ```
+
+    ``violated_by`` is a ``Q`` describing the rows that are **wrong**, not the
+    rows that are right. Stated that way round on purpose: the negation of a
+    rule is what a failure has to report, so writing the rule positively would
+    mean this package inverting a ``Q`` it did not write and reporting rows it
+    inferred. The queryset runs through ``_base_manager``, for the reason a
+    fan-out reads through it -- a project's default manager may hide exactly the
+    rows an invariant exists to catch.
+
+    ``sql`` is the escape hatch, and it is a full statement rather than a
+    predicate because the interesting rules are aggregates: *no group has more
+    than one*, *these two sums agree*, *this chain has no gap*. **Every row it
+    returns is a violation.** A statement returning nothing passes. Nothing here
+    parses it, so it may read any table in the database, including ones this
+    shape does not build.
+
+    An invariant runs inside the build's own transaction and a violation rolls
+    the whole build back -- see
+    :class:`~django_data_shape.invariants.invariant_violated.InvariantViolated` for why
+    that is a build failure rather than a test failure.
+
+    **An invariant changes no row and is still part of a shape's cache key.**
+    It has to be: the check runs during the build, so a shape that reused
+    another shape's template database would never run it, and a rule that
+    silently does not run is worse than no rule -- it is a rule everybody
+    believes.
+    """
 
     def __init__(
         self,
@@ -60,7 +111,14 @@ class Invariant:
         return self._sql
 
     def canonical(self) -> object:
-        """The name, the model and the rule. See ``Canonical``."""
+        """The name, the model and the rule. See ``Canonical``.
+
+        A ``Q`` is rendered with ``str`` rather than fed in piece by piece. It
+        is a tree of tuples that the digest could walk, but ``str`` already
+        renders every child in declaration order and is what a reader would
+        compare two of them by -- and unlike a callable, it is a faithful
+        rendering: two ``Q``s printing alike filter alike.
+        """
         return (
             self._name,
             None if self._model is None else str(self._model._meta.label),

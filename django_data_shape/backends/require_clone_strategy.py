@@ -15,7 +15,20 @@ _STRATEGY_SINCE = 150_000
 
 
 def require_clone_strategy(connection: Any, strategy: str | None) -> None:
-    """Refuse a strategy this server cannot take, and one it has never heard of."""
+    """Refuse a strategy this server cannot take, and one it has never heard of.
+
+    Its own function for the reason
+    :func:`~django_data_shape.backends.require_postgres.require_postgres` is: it reads
+    ``pg_version`` off the connection and nothing else, so the refusal is
+    covered by passing a version rather than by installing a PostgreSQL 14 to
+    run the suite against. A degradation path reachable only on the
+    configuration it degrades for is a path this package's coverage gate cannot
+    see, and that gate is on PostgreSQL precisely because that is where the work
+    happens.
+
+    ``None`` is always allowed: it means no clause at all, which is what every
+    version does when nobody asks for a strategy.
+    """
     if strategy is None:
         return
     if strategy not in STRATEGIES:

@@ -4,7 +4,15 @@ from __future__ import annotations
 class Constant:
     """Every row gets ``value``.
 
-    Present because a column that never varies is a real shape, not a missing declaration."""
+    Present because a column that never varies is a real shape, not a missing
+    declaration: a tenant id on a single-tenant fixture, or a flag that is false
+    for every row in the dataset under test. Declaring it says so, where leaving
+    it out would mean the field simply had no distribution.
+
+    It also has a planner consequence worth knowing: a single-valued column has
+    exactly one most-common value at frequency 1.0, so a filter on it is either
+    everything or nothing, and an index on it is never usable.
+    """
 
     def __init__(self, value: object) -> None:
         self._value = value
@@ -17,7 +25,14 @@ class Constant:
         return 1
 
     def shares(self) -> dict[object, float]:
-        """The one value, holding all of the rows. See ``Categorical``."""
+        """The one value, holding all of the rows. See ``Categorical``.
+
+        Worth implementing rather than leaving undecidable, because a constant
+        is how this package fills a column the model defaults -- so a status
+        column with ``default="COMPLETE"`` and no declaration of its own arrives
+        here, and a constraint conditioned on ``ACTIVE`` is then satisfied by a
+        table that never writes one. Undecidable would refuse it.
+        """
         return {self._value: 1.0}
 
     def canonical(self) -> object:
