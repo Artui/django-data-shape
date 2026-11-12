@@ -18,7 +18,31 @@ _SAMPLE = 5
 
 
 def check_invariants(connection: Any, invariants: Sequence[Invariant]) -> None:
-    """Run every rule, and raise on the first that finds a row."""
+    """Run every rule, and raise on the first that finds a row.
+
+    Called at the end of :func:`~django_data_shape.loading.build.build`, inside the
+    transaction that loaded the rows, so a violation rolls the build back and
+    the database is left as it was found. Exported as well as called, because
+    the rules are worth running against a database this package did not build:
+    a template clone, a restored dump, or the state a suite has worked itself
+    into.
+
+    **The first failure stops the run**, rather than every rule being collected
+    into one report. A generator that broke one invariant has usually broken
+    the rules downstream of it too, and a message listing five consequences of
+    one cause is a message that hides the cause.
+
+    Both forms run as SQL. The ``Q`` form goes through ``_base_manager`` --
+    never the default manager, which may filter away exactly the rows a rule
+    exists to catch -- and reads primary keys so the failure can quote them.
+    The ``sql`` form is executed as written, and every row it returns is a
+    violation.
+
+    Nothing is guarded here the way generation is. An invariant is *supposed* to
+    query: it is the one part of this package whose whole job is a database
+    call, which is why the refusal that governs a derivation would be exactly
+    backwards.
+    """
     for invariant in invariants:
         statement = invariant.sql
         if statement is not None:

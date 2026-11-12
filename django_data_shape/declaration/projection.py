@@ -47,7 +47,138 @@ _REFERENCE = re.compile(r"\{values\.([^{}]*)\}")
 class Projection:
     """One row per pair, copied along a join, by ``INSERT ... SELECT``.
 
-    The shape it exists for is a collection copied across an edge, one row per joined pair."""
+    The shape it exists for is a collection copied across an edge. A
+    ``Template`` has ``TemplateSession`` rows; an ``Event`` is created *from* a
+    template, and its ``EventSession`` rows mirror that template's sessions::
+
+        Shape(
+            Table(Template, rows=500, name=Constant("t")),
+            Table(TemplateSession, rows=4_000, template=FanOut(Zipf()), title=Constant("s")),
+            Table(Event, rows=200_000, template=FanOut(Zipf()), name=Constant("e")),
+            Projection(EventSession, per=Event, copying=TemplateSession),
+        )
+
+    That reads as *one ``EventSession`` per ``Event``, copying
+    ``TemplateSession``*, and it is the whole declaration: the join, the column
+    list and the keys are all derived from the model graph.
+
+    **Why a projection rather than a vocabulary for mirroring.** Three reasons,
+    and the first is the one that decides it.
+
+    - It is what the real system already collapses into at scale. One event
+      built from a template is a service call; a million of them is one
+      statement. A projection *is* that statement, so the test database is built
+      the way the production table would be backfilled rather than the way one
+      row is created.
+    - It needs no new distribution machinery at all. A mirroring mode on
+      ``FanOut`` would need an inverted fan-out, a derived cardinality and a way
+      to say "as many as over there" -- three vocabulary items to express
+      something that is not a distribution in the first place.
+    - It reproduces a correlation PostgreSQL cannot see. Sessions-per-event is
+      correlated with the template, so every event built from a big template has
+      many sessions. A plain ``FanOut`` on ``EventSession.event`` draws that
+      count independently and hands the planner a join selectivity real data
+      never has -- which is the cross-table correlation this package exists to
+      make reproducible.
+
+    **The cardinality is determined, not declared, and that is why this is not a
+    ``Table``.** There is no ``rows=`` here: the row count is
+    ``count(Event JOIN TemplateSession)``, decided by the tables already built.
+    Declaring it as well would be the over-determination this package refuses
+    everywhere else -- ``rows=`` on both sides of a one-to-one, an edge count
+    beside both marginals of a many-to-many, a status skew beside the fan-out
+    that already fixes it. The count comes back in the
+    :class:`~django_data_shape.types.build_result.BuildResult` like every other
+    table's, which is what that type was built to report.
+
+    **The join is derived from the model graph.** ``per`` and ``copying`` are
+    joined through a model they both reach in one step -- here both have a
+    foreign key to ``Template`` -- and ``per``'s own primary key counts as a
+    step of length zero, so a source that points straight at ``per`` works the
+    same way. Exactly one such link has to exist; zero and several are both
+    refused by name, because guessing which edge was meant would build a
+    different database from the one that was declared.
+
+    **The columns are derived too**, in this order, for every column of the
+    projected model except its primary key:
+
+    - the foreign key to ``per`` gets that row's key;
+    - a foreign key to ``copying`` gets the copied row's key, which is how a
+      projected collection records where it came from;
+    - a column whose **name** matches one on ``copying`` is copied from it. The
+      match is by name, so the two columns have to hold compatible types and the
+      database says so if they do not;
+    - a column with a plain (non-callable) Django ``default=`` gets that value
+      as a bound parameter, for the same reason
+      :class:`~django_data_shape.declaration.table.Table` fills one: a Django default is
+      applied by ``save()`` and is not DDL, so a column left out would fail its
+      not-null check rather than quietly take it;
+    - a nullable column, or one with a real ``db_default``, is left out of the
+      statement;
+    - anything else is refused by name, pointing at ``sql=``.
+
+    **Where the rows land physically is decided rather than defaulted.** The
+    statement orders by ``per``'s key and then the copied row's, which is both
+    deterministic -- two builds of one shape have to agree -- and the honest
+    physical layout. There is deliberately no ``placement=`` here, unlike on
+    :class:`~django_data_shape.relations.fan_out.FanOut`, and the reason is a real
+    difference rather than an omission: a fan-out's children arrive over time,
+    interleaved, so grouping them is a lie. A copied collection is written in
+    one transaction per parent, so grouped *is* arrival order, and the two
+    orders a fan-out has to choose between are the same order here.
+
+    **The keys come from the same place as every other table's.** The strategy
+    on this declaration decides them, exactly as it does for a ``Table``. It
+    just has to be able to say itself in SQL -- see
+    :class:`~django_data_shape.keys.sql_keys.SqlKeys` -- because there is no
+    declared row count to enumerate in Python and the rows never pass through
+    it. Today that means an integer key; a UUID or a caller's own function is
+    refused by name at declaration time rather than approximated with a
+    different hash, which would give one strategy two meanings depending on
+    which statement filled the table.
+
+    **``sql=`` is the escape hatch, and it is the whole statement's ``SELECT``.**
+    For anything shaped oddly -- a filter, an aggregate, a three-way join, a
+    window -- pass the columns and the select that fills them::
+
+        Projection(
+            EventSession,
+            columns=("id", "event", "title"),
+            sql=(
+                "SELECT row_number() OVER (ORDER BY e.id), e.id, t.title "
+                "FROM event e JOIN templatesession t ON t.template_id = e.template_id "
+                "WHERE t.title <> %s"
+            ),
+            params=("hidden",),
+        )
+
+    The columns are field names and are checked against the model, so a typo is
+    refused here rather than by the database. The primary key has to be among
+    them: this package owns the keys, and a projection whose statement the
+    caller wrote has to say what they are rather than leave them to a sequence
+    whose current value is not part of any declaration. Nothing else about the
+    select is inspected -- that is what an escape hatch is -- but the build
+    still gives it the emptiness check, the sequence reset, the ``ANALYZE`` and
+    the transaction.
+
+    **``reads=`` is how such a statement says what it selects from**, and it
+    goes with ``sql=`` rather than being an alternative to it. Nothing here
+    parses SQL, so a raw statement is opaque and
+    :func:`~django_data_shape.declaration.order_tables.order_tables` runs it as late as the
+    rest of the declaration allows. That is right until something fans out over
+    this table: the projection then has to run *before* that table, and may find
+    the tables it selects from still empty. Naming them puts it back in the
+    graph precisely -- after what it reads, before what reads it -- and it is
+    part of the cache key, because a statement run before and after a table
+    returns different rows. A derived projection has no use for it: ``per`` and
+    ``copying`` already are the answer.
+
+    Like :class:`~django_data_shape.declaration.shape.Shape` and
+    :class:`~django_data_shape.declaration.table.Table`, this is inert data: every attribute
+    is read-only and every derived plan is a tuple, so a declaration stays
+    hashable and serialisable for the template-database cache that will key on
+    it.
+    """
 
     def __init__(
         self,
@@ -118,23 +249,66 @@ class Projection:
 
     @property
     def statistics(self) -> Mapping[str, int]:
-        """The per-column statistics targets this projection asks the planner for."""
+        """The per-column statistics targets this projection asks the planner for.
+
+        A projected table needs them for exactly the reason a loaded one does. A
+        collection copied along a join carries the source's skew into a second
+        table, and the planner records that skew only if the column's target can
+        hold it -- the route the rows took in has nothing to do with it.
+        """
         return MappingProxyType(self._statistics)
 
     @property
     def reads(self) -> tuple[type[Model], ...]:
-        """The models this projection selects from, or nothing if it did not say."""
+        """The models this projection selects from, or nothing if it did not say.
+
+        What :func:`~django_data_shape.declaration.order_tables.order_tables` sorts on. A
+        derived projection names its two inputs, so it can be ordered after them
+        precisely. A statement this package did not write is opaque -- nothing
+        here parses SQL -- so a raw projection answers with whatever ``reads=``
+        declared, and with nothing at all when it declared nothing.
+        """
         if self._sql is not None:
             return self._reads
         return (cast("type[Model]", self._per), cast("type[Model]", self._copying))
 
     @property
     def max_rows(self) -> int | None:
-        """The largest number of rows this declaration is willing to insert."""
+        """The largest number of rows this declaration is willing to insert.
+
+        ``None``, and no count is taken -- a declaration that does not ask is
+        not charged for the answer.
+
+        It exists because a projection is the one declaration with no ``rows=``,
+        and that is deliberate: its cardinality comes from the join, which is
+        what reproduces a correlation a ``FanOut`` on the child would destroy.
+        The consequence is that the largest table in a database can be the one
+        nobody declared a size for. **Its size is a product**, so when both
+        sides of the join fan out over the same parents the busy parents
+        multiply: raise either declared count by four and the projection grows
+        by sixteen. A consumer measured 2,413,223 rows against a declaration
+        whose largest number was 300,000.
+
+        There is no default ceiling and there will not be one. How many rows is
+        too many is a judgement about size, which this package does not make on
+        a caller's behalf anywhere else either -- see the statistics target,
+        declared for the same reason. What it can do is act on the caller's own
+        number, before the expensive statement rather than after it.
+        """
         return self._max_rows
 
     def statement(self, connection: Any, seed: int) -> tuple[str, tuple[object, ...]]:
-        """The ``INSERT ... SELECT`` this declaration means, and its parameters."""
+        """The ``INSERT ... SELECT`` this declaration means, and its parameters.
+
+        Rendered here rather than stored, because quoting belongs to the
+        connection and a declaration must not hold one. Everything the statement
+        is made of was decided when the declaration was validated; this only
+        spells it.
+
+        A model default lands as a bound parameter rather than as a literal in
+        the SQL, so a string default carrying a quote is the driver's problem
+        and not this package's.
+        """
         quote = connection.ops.quote_name
         columns = ", ".join(quote(column) for column in self._columns)
         into = f"INSERT INTO {quote(self.db_table)} ({columns})"
@@ -144,7 +318,24 @@ class Projection:
         return f"{into} {self._select(quote, seed)}", defaults
 
     def scaled(self, factor: int) -> Projection:
-        """This declaration at another size, which for a projection is its ceiling."""
+        """This declaration at another size, which for a projection is its ceiling.
+
+        A projection has no row count to multiply -- its size is
+        ``count(per JOIN copying)``, so scaling the tables it reads scales it
+        without anything being said. ``max_rows`` is different: it is a declared
+        number in the same units as that size, and a ceiling that does not move
+        with the factor fires on the first growth assertion.
+
+        **Multiplying it by the factor is the right arithmetic rather than an
+        approximation of one**, and for the same reason the count needs no
+        factor. ``scaled_shape`` scales *every* table, parents included, so a
+        parent has the same number of children at every factor; the projection
+        is then a sum over ``factor`` times as many parents of an unchanged
+        per-parent product, which is ``factor`` times the original.
+
+        Returns ``self`` when there is no ceiling, so a declaration that did not
+        ask for one keeps the identity it always had here.
+        """
         if self._max_rows is None:
             return self
         scaled = copy(self)
@@ -152,7 +343,16 @@ class Projection:
         return scaled
 
     def count_statement(self, connection: Any) -> tuple[str, tuple[object, ...]]:
-        """How many rows the insert would write, without writing them."""
+        """How many rows the insert would write, without writing them.
+
+        Exact rather than estimated: it counts the same join the insert selects
+        from, and the select is one row per joined pair, so the two agree by
+        construction. The derived form counts the join directly rather than
+        wrapping the select -- the window function and the ordering decide what
+        the rows *are* and cost real time, while the question here is only how
+        many. A ``sql=`` projection is wrapped instead, because this package
+        cannot know what the caller's statement is one row per.
+        """
         quote = connection.ops.quote_name
         if self._sql is not None:
             return f"SELECT count(*) FROM ({self._sql}) AS {quote('counted')}", self._params
@@ -393,7 +593,14 @@ class Projection:
             check_statistics_target(where, self._statistics[name])
 
     def canonical(self) -> object:
-        """Everything about this projection that decides a row. See ``Canonical``."""
+        """Everything about this projection that decides a row. See ``Canonical``.
+
+        The derived plan rather than only the two models it was derived from:
+        the join, the copied columns and the bound defaults are what the
+        statement actually does, and they are what changes when a model this
+        projection reads grows a field. A digest over ``per`` and ``copying``
+        alone would call two different statements the same.
+        """
         return (
             str(self.model._meta.label),
             self.db_table,

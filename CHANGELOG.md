@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **The API reference's docstrings are restored.** The docstrings the reference renders
+  had been cut to one line each; they read in full again.
+
 ## [0.26.0] — 2026-11-10
 
 ### Changed

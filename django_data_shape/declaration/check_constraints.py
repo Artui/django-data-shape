@@ -81,7 +81,87 @@ class _Unread:
 
 
 def check_constraints(tables: tuple[Table | Projection, ...]) -> None:
-    """Refuse a shape whose row counts contradict the models' own constraints."""
+    """Refuse a shape whose row counts contradict the models' own constraints.
+
+    The third net -- the database itself -- catches every one of these, and
+    catches it with a terrible message: a unique index failing at row 700,000 of
+    a load that has already run for a minute, naming an index rather than a
+    declaration. So the arithmetic is done here instead, from
+    ``Model._meta.constraints`` and ``Model._meta.unique_together``, before a
+    single row is generated.
+
+    **``_meta.total_unique_constraints`` is the helper that sounds right and
+    is the wrong one.** It deliberately excludes conditional constraints -- it
+    exists to answer whether a relation is one-to-one, and a constraint that
+    only sometimes applies cannot answer that -- so it skips exactly the case
+    this function is for. ``_meta.constraints`` is read directly.
+
+    Three checks, and they differ in how certain they are and in what they are
+    counting.
+
+    **An unconditional ``UniqueConstraint`` is pigeonhole**, and provable. Two
+    million rows needing distinct ``(company, label)`` pairs cannot be built
+    from fifty thousand companies and three labels, whatever the seed. That is
+    also the multi-column analysis
+    :meth:`~django_data_shape.declaration.table.Table._check_satisfiable` declines to
+    attempt, and it declines for a good reason: a table alone does not know how
+    many companies there are. A whole shape does, which is why this runs here.
+
+    **Enough room is not a way to fill it**, which is the second check and the
+    one no arithmetic reaches. An unconditional constraint over two fan-outs --
+    the through table of a many-to-many -- passes the pigeonhole comfortably,
+    because the product of two parent counts dwarfs the row count, and still
+    cannot be built: two partitions of the same rows are computed independently,
+    so the pairs they produce are an artefact of the row index and a collision
+    is a matter of the seed. It is refused rather than counted. So is a ``Paired`` under a
+    constraint that does not name the relation it is paired over, since it keeps its
+    partners apart only inside each group of that relation.
+
+    **A conditional ``UniqueConstraint`` is a statement about a group**, and the
+    refusal is categorical rather than arithmetic. ``one_active_project_per_company``
+    permits one ``ACTIVE`` row per company; a ``Skew`` filling ``status`` draws
+    each row independently, so it cannot keep a per-group rule *at any weight* --
+    2.5% is as broken as 10%, just later in the load. The arithmetic goes in the
+    message because it is what makes the refusal legible, not because it is what
+    decides it. The remedy is
+    :class:`~django_data_shape.derivations.per_parent.PerParent`, which makes
+    the count one per non-empty group and therefore derived from the fan-out
+    rather than chosen beside it.
+
+    **What this does not read, and leaves to the other two nets.** A condition
+    that names no set of values for one column -- a negation, two clauses joined
+    by AND, a comparison -- is skipped, because reading it would mean this package
+    deciding what an arbitrary predicate matches. ``__isnull`` and a ``Value`` are read,
+    and an ``F()`` or another expression as the value is read as a member that may be
+    met, never as one that is not. A constraint over ``expressions`` rather than
+    ``fields`` is skipped for the same reason. A derivation in a conditional
+    constraint's group is skipped, because whether its ``compute=`` keeps the rule is not
+    readable here: ``Derived("owner", ..., scope="group")`` keeps it and one grouped by
+    another relation does not. A column the shape leaves out whose
+    ``db_default`` is an expression other than ``Now()`` is skipped too, because nothing
+    here can read what it writes: ``gen_random_uuid()`` keeps a constraint, and
+    :func:`_held` says why ``Now()`` is the one that can be read.
+    In every one of those cases the declaration is allowed through and the
+    post-load check and the database are what catch it.
+
+    **What this cannot count, and refuses anyway.** A distribution that cannot
+    enumerate itself -- anything not
+    :class:`~django_data_shape.distributions.categorical.Categorical` -- under a
+    condition is read as able to land inside it, so ``Uniform(1, 9)`` under
+    ``Q(status="accepted")`` is refused although it would load: unknown is read as a
+    yes. A fan-out over a parent this shape does not build, or one carrying a null
+    share while each NULL is its own group, leaves only the capacity unknown. The
+    arrangement refusals never needed it, so they stand, and what drops out is the
+    arithmetic in the message. A key under a condition is read the same way where
+    ``parents=`` does not settle it, since this runs before any parent's keys are read, so
+    ``Q(owner=99)`` over five people is refused although it would load, over a fan-out and
+    over draws alone. So is ``Q(owner=1)`` over a ``Uniform(1, 10**9)``, since a wide draw
+    is not ``Distinct``. See :func:`_check_a_relation_in_a_condition`.
+
+    A :class:`~django_data_shape.declaration.projection.Projection` is skipped entirely. Its
+    columns are copied along a join rather than drawn from distributions, so
+    there is no declared share to compare a capacity against.
+    """
     rows_of: dict[type[Model], int] = {
         table.model: table.rows for table in tables if isinstance(table, Table)
     }
