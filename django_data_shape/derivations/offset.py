@@ -9,7 +9,24 @@ from django_data_shape.derivations.scope import Scope
 class Offset:
     """``source + by``, where ``source`` is another column of this row.
 
-    The same-row half of ``After``, which is parent-scoped only."""
+    The same-row half of :class:`~django_data_shape.derivations.after.After`,
+    which is parent-scoped only. A show goes on sale and then happens; an
+    invoice is issued and then falls due. Both columns are on the same row, and
+    until this existed the only way to say so was a lambda -- which cost the
+    whole shape its template-database cache. See
+    :class:`~django_data_shape.derivations.product.Product` for why that
+    mattered.
+
+    The gap is **fixed**, which is the difference from ``After``: that one
+    spreads a gap across ``within`` using the column's own draw, because a
+    child's distance from its parent is a real distribution. A due date thirty
+    days after an issue date is not a distribution, it is a term. Where the
+    spread is wanted on the same row, ``Derived`` still takes a callable.
+
+    ``by`` is in the column's own units -- a ``timedelta`` for a datetime
+    column, a number for a numeric one -- and anything supporting
+    ``source + by`` works.
+    """
 
     def __init__(self, source: str, *, by: Any) -> None:
         zero = by * 0

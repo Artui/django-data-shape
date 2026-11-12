@@ -39,7 +39,38 @@ _SELF_KEY_REMEDY = "Make the column null=True, or fill the table with a Projecti
 
 
 class Table:
-    """How many rows of one model, and how each column is distributed."""
+    """How many rows of one model, and how each column is distributed.
+
+    Field distributions are given as keyword arguments because that is the form
+    a reader scans fastest. ``fields=`` is the escape hatch, and it is not
+    optional politeness: a model may legitimately have a column called ``rows``
+    or ``model``, and Python's own argument binding would silently hand that
+    keyword to this signature instead. Without the mapping form those models
+    would simply be undeclarable.
+
+    ``statistics=`` maps a field name to the number of buckets the planner
+    should keep for that column::
+
+        Table(Order, rows=2_000_000, status=Skew(weights), statistics={"status": 500})
+
+    A target is a physical property of the column rather than of the
+    distribution, which is why it is declared beside the distributions and not
+    inside one: the same skew wants a different target in a table of two
+    thousand rows and a table of two million, and a caller's own distribution
+    would have to grow a parameter it has no use for. PostgreSQL keeps at most
+    ``target`` most-common values and ``target`` histogram bounds, and samples
+    300 times that many rows, so this is the dial that decides how much of a
+    declared shape the planner can actually record. A column left out keeps
+    whatever the schema gives it. See
+    :func:`~django_data_shape.loading.apply_statistics_targets.apply_statistics_targets`
+    for what the build does with it, including the one thing it refuses.
+
+    Every refusal below happens here, at declaration time, rather than during
+    the load. A shape that cannot describe a database should say so before it
+    has spent a minute generating rows, and the message should name the field --
+    a reader who has to re-derive which column was meant has been given an error
+    that knows more than it says.
+    """
 
     def __init__(
         self,
@@ -81,7 +112,11 @@ class Table:
 
     @property
     def keys(self) -> KeyStrategy:
-        """The key strategy for the primary key, never None once the table is validated."""
+        """How this table's primary keys are decided.
+
+        Never None by the time anyone can read it: _validate either inferred a
+        strategy from the primary key's type or refused the declaration.
+        """
         return cast("KeyStrategy", self._keys)
 
     @property
@@ -91,7 +126,12 @@ class Table:
 
     @property
     def statistics(self) -> Mapping[str, int]:
-        """The per-column statistics targets this table asks the planner for."""
+        """The per-column statistics targets this table asks the planner for.
+
+        Empty unless the declaration said otherwise, which means the columns
+        keep whatever target the schema gives them -- ``default_statistics_target``
+        for a column no migration has touched.
+        """
         return MappingProxyType(self._statistics)
 
     @property
@@ -99,7 +139,13 @@ class Table:
         return str(self.model._meta.db_table)
 
     def columns(self) -> tuple[tuple[str, Field[Any, Any]], ...]:
-        """The declared fields in a stable order, sorted by name for the COPY column list."""
+        """The declared fields, in a stable order, with their model fields.
+
+        Sorted by name rather than left in declaration order: the order decides
+        the column list of the ``COPY`` statement, and a shape whose generated
+        SQL changes when two keyword arguments are swapped would hash to a
+        different cache key for no reason.
+        """
         meta = self.model._meta
         return tuple(
             (name, cast("Field[Any, Any]", meta.get_field(name))) for name in sorted(self.fields)
@@ -115,11 +161,23 @@ class Table:
         )
 
     def computation_order(self) -> tuple[str, ...]:
-        """The declared derivations, dependencies first: a second order, not columns()."""
+        """The declared derivations, dependencies first.
+
+        A second order over the same columns, and deliberately not the one
+        ``columns()`` returns. That one is sorted by name to keep the ``COPY``
+        statement stable; this one is a topological sort of what depends on
+        what. Computed once, when the declaration was validated, because a cycle
+        among derivations is a refusal and refusals belong at declaration time.
+        """
         return self._computation_order
 
     def parent_fields(self) -> Mapping[str, tuple[str, ...]]:
-        """Which of a parent's columns this table's derivations read, per relation."""
+        """Which of a parent's columns this table's derivations read, per relation.
+
+        The build turns this into columns on the query that already reads the
+        parent's keys, so a child reaches its parent's values through the
+        fan-out it already declared rather than through a lookup per row.
+        """
         wanted: dict[str, set[str]] = {}
         for declared in self.fields.values():
             if not isinstance(declared, Derivation) or declared.scope is not Scope.PARENT:
@@ -551,7 +609,18 @@ class Table:
             )
 
     def canonical(self) -> object:
-        """Everything about this table that decides a row. See ``Canonical``."""
+        """Everything about this table that decides a row. See ``Canonical``.
+
+        The model's label as well as its table name, because a project can
+        rename either without touching the other and a digest that read only one
+        would call two schemas the same.
+
+        The fields are **sorted**, unlike a skew's weights: they become a
+        ``COPY`` column list that ``columns()`` sorts anyway, so declaration
+        order provably does not reach a single row, and sorting means two
+        spellings of one declaration share a cached database instead of building
+        it twice.
+        """
         return (
             str(self.model._meta.label),
             self.db_table,

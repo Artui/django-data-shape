@@ -9,7 +9,20 @@ from django_data_shape.declaration.invalid_shape import InvalidShape
 class Uniform:
     """Values spread evenly between ``low`` and ``high``.
 
-    Deliberately the least interesting distribution, named plainly so it reads as a choice."""
+    Deliberately the least interesting distribution in the package, and named
+    plainly so it reads as a choice. Most real columns are not uniform, and a
+    uniform declaration on a column that matters is usually a placeholder
+    somebody meant to come back to.
+
+    ``places`` rounds the result. Not because the column would reject the
+    unrounded value -- Postgres rounds a float to a ``numeric(10, 2)`` happily,
+    and only overflowing the declared precision is an error -- but because a
+    money column whose values carry full binary float noise is not what the
+    application would ever have written, and this package's whole claim is that
+    the loaded rows are ones it could have. Rounding to ``Decimal`` rather than
+    ``float`` keeps the value exact on the way into ``COPY``; ``places=0`` is
+    how a plain integer column is filled.
+    """
 
     def __init__(self, low: float, high: float, places: int | None = None) -> None:
         # isfinite first: NaN compares False to every ordering, so it would pass ``high <= low``.
@@ -35,7 +48,11 @@ class Uniform:
             return round(Decimal(repr(raw)), self._places)
 
     def canonical(self) -> object:
-        """The bounds and the rounding. See ``Canonical``."""
+        """The bounds and the rounding. See ``Canonical``.
+
+        The precision computed in ``__init__`` is left out, because it is a
+        function of these three and adding it could only ever agree with them.
+        """
         return (self._low, self._high, self._places)
 
     def __repr__(self) -> str:

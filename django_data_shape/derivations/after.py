@@ -9,7 +9,40 @@ from django_data_shape.derivations.scope import Scope
 class After:
     """``parent.field`` plus a gap of ``at_least`` up to ``at_least + within``.
 
-    An order is created after its customer signed up, and a payment after its invoice was issued."""
+    An order is created after its customer signed up; a payment settles after
+    its invoice was issued. Left undeclared, the two dates are independent, and
+    a date-range join over them has a selectivity no production database has --
+    every combination occurs, including the half that cannot.
+
+    ```python
+    Table(
+        Order,
+        rows=2_000_000,
+        account=FanOut(Zipf()),
+        created_at=After("account.signed_up_at", within=timedelta(days=365)),
+    )
+    ```
+
+    The gap is spread uniformly across ``within`` using this column's own draw,
+    so it is a real spread rather than a fixed offset, and it is reproducible
+    from the seed like everything else.
+
+    Two things worth knowing before reaching for it. **The result is not
+    monotonic with the row**, because the parents are not: a column filled this
+    way has a low ``pg_stats.correlation`` where
+    :class:`~django_data_shape.distributions.sequential.Sequential` gives a high
+    one. That is honest -- real children of scattered parents arrive scattered --
+    but it is a different physical shape, and an index scan is costed
+    differently over it. And **the fan-out it reads through may not have a null
+    share**, because a child with no parent has no value to be after; that is
+    refused when the table is declared rather than discovered as a ``None`` in
+    the arithmetic.
+
+    ``within`` and ``at_least`` are in the column's own units: ``timedelta`` for
+    a datetime column, a number for a numeric one. Anything supporting
+    ``parent + offset`` and ``offset * float`` works, which is what makes this
+    one class rather than a datetime one and a numeric one.
+    """
 
     def __init__(self, source: str, *, within: Any, at_least: Any = None) -> None:
         # Zero must come in the caller's own unit: a timedelta for a date, 0 for a number.
