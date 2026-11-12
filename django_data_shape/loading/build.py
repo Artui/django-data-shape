@@ -39,7 +39,53 @@ _INSERT_CHUNK = 1000
 def build(
     shape: Shape, using: str = DEFAULT_DB_ALIAS, *, require_statistics: bool = True
 ) -> BuildResult:
-    """Generate, load, reset sequences and analyze every table in ``shape``."""
+    """Generate, load, reset sequences and analyze every table in ``shape``.
+
+    The order of those steps is the whole function, and it is not
+    interchangeable. Loading rows into a table that was analyzed while empty
+    leaves the planner holding statistics from the old contents and applying
+    them to the new row count -- a worse lie than having no statistics at all,
+    and the one that produced a thirty-thousand-fold misestimate in the
+    measurements this package was designed from. So the ``ANALYZE`` is here, at
+    the end, owned by the library rather than left to the caller to remember.
+
+    A bare ``ANALYZE`` shipped in 0.1.0 because a loader that leaves its table
+    unanalyzed ships the exact state this package exists to condemn. What it
+    gathers is bounded by each column's statistics target, and that is the other
+    half:
+    :func:`~django_data_shape.loading.apply_statistics_targets.apply_statistics_targets`
+    puts the declared targets in place first, and refuses a declaration the
+    planner could not record whatever it did afterwards.
+
+    ``require_statistics=False`` asks for rows and cardinality rather than for a
+    database the planner can reason about, and it is the only way to build on a
+    backend without ``COPY`` and column statistics. It is written as a
+    requirement being dropped rather than as work being skipped, because that is
+    what it does: **on PostgreSQL it changes nothing at all** -- the load is
+    still ``COPY`` and ``ANALYZE`` still runs, since both are free and leaving
+    them out would manufacture the unanalyzed table this package exists to
+    condemn. Elsewhere the rows are inserted instead and no statistics are
+    gathered, so cardinality is real and nothing about a plan is claimed.
+
+    The distinction is the one this package draws everywhere: generation and
+    cardinality are backend-neutral, planner realism is not. A query *count* is
+    an ORM property and means the same on any backend, which is why a growth
+    assertion can be honest here while a plan assertion still cannot.
+
+    A :class:`~django_data_shape.declaration.projection.Projection` sits in the same loop
+    rather than in a pass of its own, and where it sits is decided by
+    :func:`~django_data_shape.declaration.order_tables.order_tables` like everything else:
+    after the tables it reads, and before anything that reads it. Only the step
+    that produces the rows differs -- one statement instead of a generated
+    stream -- and the three steps after it are the same steps for the same
+    reasons. The emptiness check, because the keys still start at 1. The
+    sequence reset, because the rows still sit at 1..N with the sequence at 1,
+    and the first ``objects.create()`` in a test would still collide. And the
+    ``ANALYZE`` above all, because a table filled by ``INSERT ... SELECT`` and
+    left unanalyzed is exactly the unanalyzed million rows this package exists
+    to condemn -- the route the rows took in has nothing to do with whether the
+    planner can see them.
+    """
     connection = connections[using]
     require_postgres(connection, "Building a shape", statistics=require_statistics)
 
