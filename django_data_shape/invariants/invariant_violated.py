@@ -18,8 +18,8 @@ class InvariantViolated(Exception):
     assertions would pass or fail for reasons unrelated to the code. A build
     that refuses leaves the database exactly as it was found.
 
-    The message carries the rule's name, how many rows broke it and a sample of
-    them, because a build failure is read out of a terminal rather than stepped
-    through in a debugger -- and a rule that only says it was violated has
-    handed the reader back the work it just did.
+    The message carries the rule's name and a sample of the rows that broke it,
+    saying so when there are more, because a build failure is read out of a
+    terminal rather than stepped through in a debugger -- and a rule that only
+    says it was violated has handed the reader back the work it just did.
     """

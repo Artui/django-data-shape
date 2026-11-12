@@ -114,9 +114,9 @@ def derive_template(
     - **A ``strategy`` the server cannot take.** It means what it means for
       :func:`~django_data_shape.databases.clone_database.clone_database`, which
       makes the copy: ``file_copy`` by default, because a world worth deriving
-      is a world worth copying cheaply, and ``None`` for a PostgreSQL older than
-      15. It is not part of the key, because it decides what the copy costs and
-      not what it holds.
+      is a world worth copying cheaply, which a PostgreSQL older than 15 refuses
+      unless the caller passes ``strategy=None``. It is not part of the key,
+      because it decides what the copy costs and not what it holds.
 
     Parallel workers asking for the same derived template wait on one advisory
     lock, taken on its name, while one of them runs the step. The finished

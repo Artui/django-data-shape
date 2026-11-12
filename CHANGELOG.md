@@ -11,6 +11,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **The API reference's docstrings are restored.** The docstrings the reference renders
   had been cut to one line each; they read in full again.
+- **The guide pages say more about what a build does.** The statistics step fires queued
+  constraint checks, a statistics target must be at least one, an `After` refuses columns
+  of different kinds, and no `save()` signal runs for a built row. Three docstrings are
+  corrected: `scaled_world` resets its sequences, `strategy=None` is what a PostgreSQL
+  older than 15 needs, and an invariant message carries a sample, not a count.
 
 ## [0.26.0] — 2026-11-10
 
