@@ -3722,6 +3722,46 @@ def test_the_cap_a_fan_out_beside_a_key_is_offered_builds() -> None:
     )
 
 
+_FAN_OUT_BESIDE_A_DRAW = _FAN_OUT_BESIDE_A_KEY._replace(
+    name="fan_out_beside_a_draw_cap",
+    fields=("company", "label"),
+    columns={"company": FanOut(Zipf()), "label": _skew()},
+)
+
+
+@_NEEDS_DJANGO_5
+@pytest.mark.parametrize(
+    ("company", "rows", "offered", "withheld"),
+    [
+        pytest.param(FanOut(Zipf()), 40, (f"{_KEY_CAP}. ",), (), id="room"),
+        pytest.param(
+            FanOut(Zipf(), null=0.2), 40, (f"{_KEY_CAP} and no null share",), (), id="tied_share"
+        ),
+        # Sixty rows fit the 150 combinations, so the pigeonhole lets them past to the offers.
+        pytest.param(FanOut(Zipf()), 60, (), ("max_children",), id="more_rows"),
+    ],
+)
+def test_a_fan_out_beside_a_draw_is_offered_the_cap_where_rows_fit_the_parents(
+    company: FanOut, rows: int, offered: tuple[str, ...], withheld: tuple[str, ...]
+) -> None:
+    columns = {**_FAN_OUT_BESIDE_A_DRAW.columns, "company": company}
+    message = _refusal(_FAN_OUT_BESIDE_A_DRAW._replace(columns=columns, rows=rows))
+
+    for one in (*offered, "Derived('company', compute=..., scope='group')", "Distinct"):
+        assert one in message
+    for one in withheld:
+        assert one not in message
+
+
+# The cap offered beside a draw loads 20 of 20, forty rows over fifty companies.
+@_ON_POSTGRES
+@_NEEDS_DJANGO_5
+@pytest.mark.django_db(transaction=True)
+def test_the_cap_a_fan_out_beside_a_draw_is_offered_builds() -> None:
+    columns = {**_FAN_OUT_BESIDE_A_DRAW.columns, "company": FanOut(Zipf(), max_children=1)}
+    _assert_loads(_FAN_OUT_BESIDE_A_DRAW._replace(columns=columns), _TWENTY)
+
+
 @_NEEDS_DJANGO_5
 def test_a_constraint_over_keys_alone_is_met_by_the_pigeonhole_before_any_offer() -> None:
     # A left-out key is a constant of one value, so the arithmetic refuses first at two rows.

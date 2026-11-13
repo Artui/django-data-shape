@@ -406,7 +406,10 @@ how many companies there are.
   the rows fit under the parents, with no null share where NULLs are one value, and the
   `Projection`. The cap loaded 20 times in 20 at 40 rows over 50 companies; at 51 rows over
   50 with a tied share, past the pigeonhole by the share's one group, it is not offered.
-  Beside a column that is not a key, `Distinct` is still offered and loads.
+  Beside a column that is not a key, `Distinct` is still offered and loads, and so is the
+  cap under the same bound: `max_children=1` beside a drawn `label` loaded 20 times in 20 at
+  40 rows over 50 companies, and at 60 rows, which fit the 150 combinations, it is not
+  offered.
 - **A cap of one is offered only where it can place every row**, or where the parents
   are not declared in this shape. `max_children=1` over
   fewer parents than rows cannot be partitioned, and the build refuses it before a row is

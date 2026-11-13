@@ -374,22 +374,22 @@ def _check_a_fan_out_beside_a_draw(
         if capacity is not None
         else "There may be room for every row"
     )
+    tied = " and no null share" if _a_null_share_counted_together(table, name, fanned) else ""
+    capped = (
+        "A fan-out that gives no parent two rows keeps the constraint on its own and says so "
+        f"with {fanned[0]}=FanOut(..., max_children=1){tied}. "
+        if _room_for_a_cap(table, fanned[0], rows_of)
+        else ""
+    )
     if any(not _is_a_relation(table, column) for column in others):
         remedy = (
             "A value that varies with the group is derived from it rather than drawn beside it: "
             f"Derived({fanned[0]!r}, compute=..., scope='group'){no_null} receives this row's "
-            "position among its parent's children and how many there are. A column that is "
-            "distinct in every row keeps the constraint on its own, and says so with Distinct -- "
-            "Sequential does."
+            f"position among its parent's children and how many there are. {capped}A column "
+            "that is distinct in every row keeps the constraint on its own, and says so with "
+            "Distinct -- Sequential does."
         )
     else:
-        tied = " and no null share" if _a_null_share_counted_together(table, name, fanned) else ""
-        capped = (
-            "A fan-out that gives no parent two rows keeps the constraint on its own and says so "
-            f"with {fanned[0]}=FanOut(..., max_children=1){tied}. "
-            if _room_for_a_cap(table, fanned[0], rows_of)
-            else ""
-        )
         remedy = (
             "Every other column of the constraint is a key, which takes a FanOut or a Paired and "
             "neither a derivation nor a distribution, so nothing declared beside the fan-out "

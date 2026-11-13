@@ -19,11 +19,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   refused as the constraint is, offering only what builds: a flat fan-out
   or a cap of one where the partners can hold every row, the column left out where it is
   nullable, and a `Projection`. The `Sequential` the old refusal offered cannot fill a key.
-- **A fan-out beside a key left out is offered a cap of one.** Where every other column
-  of the constraint is a key, the refusal offered only a `Projection`, though
-  `max_children=1` keeps the constraint and loads. It is offered now where the rows fit
-  under the parents, with no null share where NULLs are one value, beside the
-  `Projection`.
+- **A fan-out beside a key left out or a drawn column is offered a cap of one.** Where
+  every other column of the constraint is a key, the refusal offered only a `Projection`,
+  and beside a drawn column only a `Derived` and `Distinct`, though `max_children=1` keeps
+  the constraint and loads in both. It is offered now where the rows fit under the
+  parents, with no null share where NULLs are one value, beside what was offered before.
 
 - **The API reference's docstrings are restored.** The docstrings the reference renders
   had been cut to one line each; they read in full again.
