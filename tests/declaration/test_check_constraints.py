@@ -3640,6 +3640,128 @@ def test_the_statement_a_fan_out_beside_a_key_offers_builds() -> None:
             editor.delete_model(model)
 
 
+_BESIDE_AN_OUTSIDE_PAIRING = _Case(
+    "condition_beside_an_outside_pairing",
+    ("other", "owner"),
+    Q(state="x"),
+    {**_WITHOUT_ITS_RELATION, "other": FanOut(Zipf()), "state": Skew({"x": 0.1, "y": 0.9})},
+    people=300,
+)
+
+
+def test_a_draw_under_a_condition_beside_an_outside_pairing_is_offered_a_per_parent() -> None:
+    assert "PerParent('other', last='x', rest=...)" in _refusal(_BESIDE_AN_OUTSIDE_PAIRING)
+
+
+# One row of each other group inside keeps every pair apart: 20 of 20, the draw 15.
+@_ON_POSTGRES
+@pytest.mark.django_db(transaction=True)
+def test_the_per_parent_offered_beside_an_outside_pairing_builds() -> None:
+    _assert_loads(
+        _BESIDE_AN_OUTSIDE_PAIRING._replace(
+            name="condition_beside_an_outside_pairing_per_parent",
+            columns={
+                **_BESIDE_AN_OUTSIDE_PAIRING.columns,
+                "state": PerParent("other", last="x", rest="y"),
+            },
+        ),
+        _TWENTY,
+    )
+
+
+_KEY_CAP = "company=FanOut(..., max_children=1)"
+
+
+@_NEEDS_DJANGO_5
+@pytest.mark.parametrize(
+    ("columns", "rows", "offered", "withheld"),
+    [
+        pytest.param({"company": FanOut(Zipf())}, 40, (f"{_KEY_CAP}. ",), (), id="room"),
+        pytest.param(
+            {"company": FanOut(Zipf(), null=0.2)},
+            40,
+            (f"{_KEY_CAP} and no null share",),
+            (),
+            id="tied_share",
+        ),
+        # A row over the parents, which the null share's one group lets past the pigeonhole.
+        pytest.param(
+            {"company": FanOut(Zipf(), null=0.2)}, 51, (), ("max_children",), id="more_rows"
+        ),
+    ],
+)
+def test_a_fan_out_beside_a_key_is_offered_the_cap_where_rows_fit_the_parents(
+    columns: dict[str, Any], rows: int, offered: tuple[str, ...], withheld: tuple[str, ...]
+) -> None:
+    message = _refusal(_FAN_OUT_BESIDE_A_KEY._replace(columns=columns, rows=rows))
+
+    for one in (*offered, "filled by a Projection with columns= and sql="):
+        assert one in message
+    for one in withheld:
+        assert one not in message
+
+
+@_NEEDS_DJANGO_5
+def test_the_cap_a_fan_out_beside_a_key_is_offered_needs_no_null_share() -> None:
+    capped = FanOut(Zipf(), max_children=1, null=0.2)
+    message = _refusal(_FAN_OUT_BESIDE_A_KEY._replace(columns={"company": capped}))
+
+    assert f"{_KEY_CAP} and no null share" in message
+
+
+# The cap the refusal offers loads 20 of 20 on its sizes, forty rows over fifty companies.
+@_ON_POSTGRES
+@_NEEDS_DJANGO_5
+@pytest.mark.django_db(transaction=True)
+def test_the_cap_a_fan_out_beside_a_key_is_offered_builds() -> None:
+    _assert_loads(
+        _FAN_OUT_BESIDE_A_KEY._replace(
+            name="fan_out_beside_a_key_cap", columns={"company": FanOut(Zipf(), max_children=1)}
+        ),
+        _TWENTY,
+    )
+
+
+_FAN_OUT_BESIDE_A_DRAW = _FAN_OUT_BESIDE_A_KEY._replace(
+    name="fan_out_beside_a_draw_cap",
+    fields=("company", "label"),
+    columns={"company": FanOut(Zipf()), "label": _skew()},
+)
+
+
+@_NEEDS_DJANGO_5
+@pytest.mark.parametrize(
+    ("company", "rows", "offered", "withheld"),
+    [
+        pytest.param(FanOut(Zipf()), 40, (f"{_KEY_CAP}. ",), (), id="room"),
+        pytest.param(
+            FanOut(Zipf(), null=0.2), 40, (f"{_KEY_CAP} and no null share",), (), id="tied_share"
+        ),
+        # Sixty rows fit the 150 combinations, so the pigeonhole lets them past to the offers.
+        pytest.param(FanOut(Zipf()), 60, (), ("max_children",), id="more_rows"),
+    ],
+)
+def test_a_fan_out_beside_a_draw_is_offered_the_cap_where_rows_fit_the_parents(
+    company: FanOut, rows: int, offered: tuple[str, ...], withheld: tuple[str, ...]
+) -> None:
+    columns = {**_FAN_OUT_BESIDE_A_DRAW.columns, "company": company}
+    message = _refusal(_FAN_OUT_BESIDE_A_DRAW._replace(columns=columns, rows=rows))
+
+    for one in (*offered, "Derived('company', compute=..., scope='group')", "Distinct"):
+        assert one in message
+    for one in withheld:
+        assert one not in message
+
+
+# The cap offered beside a draw loads 20 of 20, forty rows over fifty companies.
+@_ON_POSTGRES
+@_NEEDS_DJANGO_5
+@pytest.mark.django_db(transaction=True)
+def test_the_cap_a_fan_out_beside_a_draw_is_offered_builds() -> None:
+    columns = {**_FAN_OUT_BESIDE_A_DRAW.columns, "company": FanOut(Zipf(), max_children=1)}
+    _assert_loads(_FAN_OUT_BESIDE_A_DRAW._replace(columns=columns), _TWENTY)
+
+
 @_NEEDS_DJANGO_5
 def test_a_constraint_over_keys_alone_is_met_by_the_pigeonhole_before_any_offer() -> None:
     # A left-out key is a constant of one value, so the arithmetic refuses first at two rows.

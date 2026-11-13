@@ -7,7 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.27.0] — 2026-11-13
+
 ### Changed
+
+- **A `Paired` whose relation has one parent fills a unique key under every spelling.**
+  `unique=True` and a `OneToOneField` on a `Paired` column were refused by `Table`, though
+  `UniqueConstraint(fields=["owner"])` over the same pairing was accepted and loads: one
+  parent is one group, whose partners are all distinct. Each spelling now builds on
+  Postgres, pinned by `parents=(1,)` or one parent declared. Over more parents each is
+  refused as the constraint is, offering only what builds: a flat fan-out
+  or a cap of one where the partners can hold every row, the column left out where it is
+  nullable, and a `Projection`. The `Sequential` the old refusal offered cannot fill a key.
+- **A fan-out beside a key left out or a drawn column is offered a cap of one.** Where
+  every other column of the constraint is a key, the refusal offered only a `Projection`,
+  and beside a drawn column only a `Derived` and `Distinct`, though `max_children=1` keeps
+  the constraint and loads in both. It is offered now where the rows fit under the
+  parents, with no null share where NULLs are one value, beside what was offered before.
 
 - **The API reference's docstrings are restored.** The docstrings the reference renders
   had been cut to one line each; they read in full again.
@@ -2020,7 +2036,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   into `COPY FROM STDIN`, which psycopg 2 cannot do without materialising them
   first.
 
-[Unreleased]: https://github.com/Artui/django-data-shape/compare/v0.26.0...HEAD
+[Unreleased]: https://github.com/Artui/django-data-shape/compare/v0.27.0...HEAD
+[0.27.0]: https://github.com/Artui/django-data-shape/compare/v0.26.0...v0.27.0
 [0.26.0]: https://github.com/Artui/django-data-shape/compare/v0.25.1...v0.26.0
 [0.25.1]: https://github.com/Artui/django-data-shape/compare/v0.25.0...v0.25.1
 [0.25.0]: https://github.com/Artui/django-data-shape/compare/v0.24.0...v0.25.0

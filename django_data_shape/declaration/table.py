@@ -515,7 +515,7 @@ class Table:
                     )
             if self.rows < 2:
                 continue
-            if isinstance(distribution, (FanOut, Derivation, Tree)):
+            if isinstance(distribution, (FanOut, Paired, Derivation, Tree)):
                 continue
             if isinstance(distribution, Distinct) and distribution.is_distinct_per_row():
                 continue

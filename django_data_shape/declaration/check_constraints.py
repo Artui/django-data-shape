@@ -170,7 +170,7 @@ def check_constraints(tables: tuple[Table | Projection, ...]) -> None:
             continue
         for name, fields, condition in _uniquenesses(table.model):
             _check_one(table, name, fields, condition, rows_of)
-        _check_a_fan_out_on_a_unique_column(table, rows_of)
+        _check_a_key_on_a_unique_column(table, rows_of)
         _check_a_unique_column_left_to_one_value(table)
 
 
@@ -305,7 +305,7 @@ def _check_a_pairing_whose_nulls_are_one_group(
 
 
 def _check_a_pairing_without_its_relation(
-    table: Table, name: str, fields: tuple[str, ...], rows_of: dict[type[Model], int]
+    table: Table, name: str | None, fields: tuple[str, ...], rows_of: dict[type[Model], int]
 ) -> None:
     """A ``Paired`` under a uniqueness that does not name the relation it is paired over."""
     if _a_pairing_keeps_every_pair_apart(table, name, fields):
@@ -332,12 +332,18 @@ def _check_a_pairing_without_its_relation(
                 "a column of the constraint that is distinct in every row, which says so with "
                 "Distinct -- Sequential does"
             )
+        rule = (
+            f"{where}.{column} is unique, so no two rows may share a partner, and it"
+            if name is None
+            else f"{name} needs every ({', '.join(fields)}) combination distinct, and "
+            f"{where}.{column}"
+        )
+        named, shared = ("column", "partner") if name is None else ("constraint", "combination")
         raise InvalidShape(
-            f"{name} needs every ({', '.join(fields)}) combination distinct, and {where}.{column} "
-            f"is paired inside each group of {where}.{paired.relation}, which the constraint "
+            f"{rule} is paired inside each group of {where}.{paired.relation}, which the {named} "
             "does not name. Partners are kept apart inside a group and never across groups, so "
             f"one partner falls to rows of different {paired.relation} groups, and two of them "
-            "sharing a combination is a matter of the seed: the load then fails inside COPY at a "
+            f"sharing a {shared} is a matter of the seed: the load then fails inside COPY at a "
             "row number that moves when the seed does. What keeps it: "
             f"{'; '.join([*offers, 'a Projection with columns= and sql='])}."
         )
@@ -368,19 +374,26 @@ def _check_a_fan_out_beside_a_draw(
         if capacity is not None
         else "There may be room for every row"
     )
+    tied = " and no null share" if _a_null_share_counted_together(table, name, fanned) else ""
+    capped = (
+        "A fan-out that gives no parent two rows keeps the constraint on its own and says so "
+        f"with {fanned[0]}=FanOut(..., max_children=1){tied}. "
+        if _room_for_a_cap(table, fanned[0], rows_of)
+        else ""
+    )
     if any(not _is_a_relation(table, column) for column in others):
         remedy = (
             "A value that varies with the group is derived from it rather than drawn beside it: "
             f"Derived({fanned[0]!r}, compute=..., scope='group'){no_null} receives this row's "
-            "position among its parent's children and how many there are. A column that is "
-            "distinct in every row keeps the constraint on its own, and says so with Distinct -- "
-            "Sequential does."
+            f"position among its parent's children and how many there are. {capped}A column "
+            "that is distinct in every row keeps the constraint on its own, and says so with "
+            "Distinct -- Sequential does."
         )
     else:
         remedy = (
             "Every other column of the constraint is a key, which takes a FanOut or a Paired and "
             "neither a derivation nor a distribution, so nothing declared beside the fan-out "
-            "arranges it. A table whose rows have to be a particular set is filled by a "
+            f"arranges it. {capped}A table whose rows have to be a particular set is filled by a "
             "Projection with columns= and sql=."
         )
     raise InvalidShape(
@@ -654,12 +667,19 @@ def _room_for_a_cap(table: Table, column: str, rows_of: dict[type[Model], int]) 
     return parent_rows is None or table.rows <= parent_rows
 
 
-def _check_a_fan_out_on_a_unique_column(table: Table, rows_of: dict[type[Model], int]) -> None:
-    """A partition over a column that permits one row per parent."""
-    for column, declared in table.fields.items():
-        field = cast("Field[Any, Any]", table.model._meta.get_field(column))
-        if isinstance(declared, FanOut) and field.unique:
+def _check_a_key_on_a_unique_column(table: Table, rows_of: dict[type[Model], int]) -> None:
+    """A partition or a pairing over a column that permits one row per key."""
+    for column, declared in sorted(table.fields.items()):
+        if not cast("Field[Any, Any]", table.model._meta.get_field(column)).unique:
+            continue
+        if isinstance(declared, FanOut):
             _check_a_fan_out_alone(table, None, column, rows_of)
+        elif (
+            isinstance(declared, Paired)
+            and table.rows >= 2
+            and not _one_group(table, declared, rows_of)
+        ):
+            _check_a_pairing_without_its_relation(table, None, (column,), rows_of)
 
 
 def _what_makes_a_unique_column_new(field: Field[Any, Any], rows: int) -> str:
@@ -1019,7 +1039,9 @@ def _keeps_one_row_inside_per_group(
     return declared.relation in fields and _its_relation_keeps_the_groups(table, name, declared)
 
 
-def _a_pairing_keeps_every_pair_apart(table: Table, name: str, fields: tuple[str, ...]) -> bool:
+def _a_pairing_keeps_every_pair_apart(
+    table: Table, name: str | None, fields: tuple[str, ...]
+) -> bool:
     """Whether a ``Paired`` and its own relation are both in this constraint."""
     return any(
         isinstance(paired, Paired)
@@ -1029,7 +1051,7 @@ def _a_pairing_keeps_every_pair_apart(table: Table, name: str, fields: tuple[str
     )
 
 
-def _its_relation_keeps_the_groups(table: Table, name: str, paired: Paired) -> bool:
+def _its_relation_keeps_the_groups(table: Table, name: str | None, paired: Paired) -> bool:
     """Whether this constraint sees the groups the pairing kept its partners distinct in."""
     relation = cast("FanOut", table.fields[paired.relation])
     return not relation.null or _each_null_is_its_own_group(table, name)

@@ -401,9 +401,15 @@ how many companies there are.
   with `prev` left out, `(owner, other)` over a `Paired` with `other` left out, `(other)`
   under `Q(state="x")`, a tree beside a key left out, a tree beside a fan-out with or
   without one, and a tree under a condition are each offered what a key can take, and that
-  loaded 20 times in 20. A fan-out beside a key left out is offered the `Projection` alone,
-  since `Table` refuses a `Derived` on a key as it does a distribution. Beside a column that
-  is not a key, `Distinct` is still offered and loads.
+  loaded 20 times in 20. A fan-out beside a key left out is offered no `Derived`, since
+  `Table` refuses one on a key as it does a distribution: it is offered a cap of one where
+  the rows fit under the parents, with no null share where NULLs are one value, and the
+  `Projection`. The cap loaded 20 times in 20 at 40 rows over 50 companies; at 51 rows over
+  50 with a tied share, past the pigeonhole by the share's one group, it is not offered.
+  Beside a column that is not a key, `Distinct` is still offered and loads, and so is the
+  cap under the same bound: `max_children=1` beside a drawn `label` loaded 20 times in 20 at
+  40 rows over 50 companies, and at 60 rows, which fit the 150 combinations, it is not
+  offered.
 - **A cap of one is offered only where it can place every row**, or where the parents
   are not declared in this shape. `max_children=1` over
   fewer parents than rows cannot be partitioned, and the build refuses it before a row is
@@ -419,7 +425,11 @@ how many companies there are.
 - **A `Paired` whose relation has one parent is distinct in every row.** Its partition
   is one group, and partners are distinct inside a group, so every row holds a partner
   no other row holds. Pinned by `parents=(1,)` or one company declared, it is accepted
-  under any condition, `Q(owner=1)` and a drawn `Q(state="x")` alike, 20 times in 20.
+  under any condition, `Q(owner=1)` and a drawn `Q(state="x")` alike, 20 times in 20, and
+  under each spelling of a unique `owner`: `unique=True`, a `OneToOneField` and
+  `UniqueConstraint(fields=["owner"])`, 20 times in 20 each. A null share on that relation
+  keeps it, 20 times in 20 with `null=0.3`, since a NULL is laid over a row after its group
+  is chosen.
 - **A `Paired` under a uniqueness that does not name its relation is refused.** It keeps
   partners apart inside each group of its relation and nowhere else, so one partner falls
   to rows of different groups. `UniqueConstraint(fields=["owner"])` with
@@ -437,7 +447,16 @@ how many companies there are.
   the `Distinct` offer over 150 people, which loaded 19 times in 20: the twentieth was the
   build refusing a partner count short of the busiest group, which stays the build's
   refusal, offer or no offer. Naming the relation in the constraint keeps it too, and is
-  not offered: that changes the rule, not the shape.
+  not offered: that changes the rule, not the shape. `unique=True` and a `OneToOneField`
+  on `owner` are the same index, loaded 0 times in 20 each, and are refused with the same
+  reasoning and the same offers, which build 20 times in 20 under each. `Table` used to
+  refuse them itself, offering a `Sequential` no key can take.
+- **A conditional uniqueness over a fan-out beside a `Paired` whose relation it does not
+  name is read by its condition.** `(other, owner)` under `Q(state="x")`, with `owner`
+  paired over `company`, holds wherever at most one row of each `other` group is inside:
+  two rows inside then differ in `other`, whatever partners they hold. A 10% `state`
+  loaded 15 times in 20 and is refused, as any draw under a condition over a fan-out is,
+  and the `PerParent("other", last="x", rest="y")` it is offered loaded 20 times in 20.
 - **A unique column left to one `db_default` is offered what builds for its type.**
   `Sequential(1, 1)` writes 1 to `rows`, which an integer, a float, JSON and a duration
   take, 20 times in 20 at 200 rows. A small integer, positive or not, takes it up to
