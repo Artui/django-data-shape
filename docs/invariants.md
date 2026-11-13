@@ -446,7 +446,7 @@ how many companies there are.
   refusal, offer or no offer. Naming the relation in the constraint keeps it too, and is
   not offered: that changes the rule, not the shape. `unique=True` and a `OneToOneField`
   on `owner` are the same index, loaded 0 times in 20 each, and are refused with the same
-  message and the same offers, which build 20 times in 20 under each. `Table` used to
+  reasoning and the same offers, which build 20 times in 20 under each. `Table` used to
   refuse them itself, offering a `Sequential` no key can take.
 - **A conditional uniqueness over a fan-out beside a `Paired` whose relation it does not
   name is read by its condition.** `(other, owner)` under `Q(state="x")`, with `owner`

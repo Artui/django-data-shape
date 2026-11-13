@@ -16,7 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `UniqueConstraint(fields=["owner"])` over the same pairing was accepted and loads: one
   parent is one group, whose partners are all distinct. Each spelling now builds on
   Postgres, pinned by `parents=(1,)` or one parent declared. Over more parents each is
-  refused with the message the constraint gets, offering only what builds: a flat fan-out
+  refused as the constraint is, offering only what builds: a flat fan-out
   or a cap of one where the partners can hold every row, the column left out where it is
   nullable, and a `Projection`. The `Sequential` the old refusal offered cannot fill a key.
 - **A fan-out beside a key left out is offered a cap of one.** Where every other column

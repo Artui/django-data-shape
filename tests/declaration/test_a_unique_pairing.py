@@ -43,7 +43,11 @@ def _remedies(case: _Case) -> str:
 @pytest.mark.parametrize("spelling", _SPELLINGS)
 @pytest.mark.parametrize(
     ("over", "columns", "companies"),
-    [("parents", _OVER_ONE, 50), ("declared", _OVER_MANY, 1)],
+    [
+        ("parents", _OVER_ONE, 50),
+        ("declared", _OVER_MANY, 1),
+        ("null_share", {**_OVER_ONE, "company": FanOut(Zipf(), parents=(1,), null=0.3)}, 50),
+    ],
 )
 def test_a_unique_pairing_over_one_parent_loads_under_every_spelling(
     spelling: str, over: str, columns: dict[str, Any], companies: int
