@@ -6440,7 +6440,7 @@ To look inside one: <code>ALTER DATABASE &lt;name&gt; ALLOW_CONNECTIONS true</co
 
     <div class="doc doc-contents first">
 
-        <p>Make sure a template holding <code>template</code> with <code>step</code> run over it exists, and return its name.</p>
+        <p>Make sure a template holding <code>template</code> with <code>step</code> run over it exists; return its name.</p>
 <p>For the world an application finishes itself. A shape describes what can be
 declared; some columns are the application's own arithmetic -- running
 totals a replay through its services fills in -- and no declaration can
@@ -6511,9 +6511,9 @@ any other <code>BaseException</code> drops the copy and goes on unwrapped.</p>
 <li><strong>A <code>strategy</code> the server cannot take.</strong> It means what it means for
   :func:<code>~django_data_shape.databases.clone_database.clone_database</code>, which
   makes the copy: <code>file_copy</code> by default, because a world worth deriving
-  is a world worth copying cheaply, and <code>None</code> for a PostgreSQL older than</li>
-<li>It is not part of the key, because it decides what the copy costs and
-  not what it holds.</li>
+  is a world worth copying cheaply, which a PostgreSQL older than 15 refuses
+  unless the caller passes <code>strategy=None</code>. It is not part of the key,
+  because it decides what the copy costs and not what it holds.</li>
 </ul>
 <p>Parallel workers asking for the same derived template wait on one advisory
 lock, taken on its name, while one of them runs the step. The finished
@@ -6797,10 +6797,10 @@ that wraps a test, and everything a test writes is rolled back over it.</p>
 <p>Hands back the template's name, which is what a test asserting on the world it
 was handed, or on its key, can use.</p>
 <p><strong>Only a test database is replaced.</strong> pytest-django makes one only for the
-aliases a collected test asks for (from 4.11; before that, for every alias), so in a run whose tests touch no
-database the alias still names the configured one -- a developer's own --
-and the fixture hands back the template's name and leaves it alone. The
-same goes for a <code>django_db_setup</code> that makes no test database, as
+aliases a collected test asks for (from 4.11; before that, for every alias), so in a
+run whose tests touch no database the alias still names the configured one -- a
+developer's own -- and the fixture hands back the template's name and leaves it
+alone. The same goes for a <code>django_db_setup</code> that makes no test database, as
 pytest-django's recipe for an existing one does: the template is not
 cloned into a database the settings do not call a test database, which is
 <code>TEST["NAME"]</code> when that is set and the configured name with Django's
@@ -6830,8 +6830,9 @@ database rather than filling it:</p>
 </ul>
 <p><code>strategy</code> is the clone's, as for
 :func:<code>~django_data_shape.databases.clone_database.clone_database</code>:
-<code>file_copy</code> by default, <code>None</code> on a PostgreSQL older than 15. It is not
-passed to <code>template</code>, which takes its own.</p>
+<code>file_copy</code> by default, which a PostgreSQL older than 15 refuses unless
+the caller passes <code>strategy=None</code>. It is not passed to <code>template</code>, which
+takes its own.</p>
 <p>On a connection that cannot carry a shaped database the fixture skips with
 the reason rather than raising, as <code>shape_fixture</code> does, so a suite that
 also runs on SQLite reports what it did not check.</p>
@@ -7250,11 +7251,11 @@ route, so from there to the end of the block every deferrable constraint
 is deferred, one declared <code>INITIALLY IMMEDIATE</code> included, and the
 caller's block runs under that. The mode is transaction state, and the
 rollback that ends the block restores the caller's.</p>
-<p>One thing the rollback does not undo, because the database will not: an
-identity sequence moved past the keys a build assigned stays moved, since
-<code>setval</code> is not transactional. Nothing here reads it -- keys are assigned,
-not drawn -- so the only visible effect is that a row created by the ORM
-after a world is torn down gets a larger id than it otherwise would.</p>
+<p>The rollback cannot move an identity sequence back, since <code>setval</code> is not
+transactional. So after the rollback the world resets each declared table's
+sequence to the rows it then holds, and a row created by the ORM after a
+world is torn down gets the id it would have had anyway. Nothing here reads
+a sequence -- keys are assigned, not drawn.</p>
 
 
     </div>
@@ -8216,15 +8217,14 @@ draw.</p>
 <p>Counting from one rather than zero because that is what a database sequence
 does, and a test database whose keys start at zero is subtly unlike every
 other one the reader has seen.</p>
-<p>This is the strategy that obliges the sequence reset after loading. It is
-also the only one that does: a key type with no sequence behind it has
-nothing to move.</p>
-<p>It is also the only strategy in this package that can say itself in SQL, so
-it is the only one that can fill a
+<p>This is the strategy that leaves the identity sequence behind the rows, so
+the load resets it afterwards: the keys sit at 1..N with the sequence at 1.
+A key type with no sequence behind it has nothing to move.</p>
+<p>It can say itself in SQL, so it can fill a
 :class:<code>~django_data_shape.declaration.projection.Projection</code> -- see
-:class:<code>~django_data_shape.keys.sql_keys.SqlKeys</code>. That is not an accident
-of implementation effort: <code>row + 1</code> is arithmetic every database has, and
-a keyed hash is not.</p>
+:class:<code>~django_data_shape.keys.sql_keys.SqlKeys</code>. <code>row + 1</code> is arithmetic
+every database has, and a keyed hash is not: of the UUID strategies only
+:class:<code>~django_data_shape.keys.md5_keys.Md5Keys</code> has a SQL twin.</p>
 
 
 
@@ -8286,8 +8286,8 @@ key is, given one.</p>
 
         <p>Nothing to say: the rule is <code>row + 1</code> and has no parameters. See <code>Canonical</code>.</p>
 <p>The empty tuple is not the same as being absent -- the strategy's own
-type name is part of the digest, so this differs from <code>UuidKeys()</code>
-below, which also has nothing to say.</p>
+type name is part of the digest, so this differs from <code>UuidKeys()</code>,
+which also has nothing to say.</p>
 
 
     </div>
@@ -8794,10 +8794,10 @@ reads it. Write it for the backend the shape is built on, and cast when it
 has to be both.</p>
 <p><code>%</code> is passed through as the operator, which takes an escape this package
 applies rather than asking for -- unlike <code>sql=</code>, which takes <code>params=</code>
-and so owns its own placeholders; a lone <code>%</code> is refused there instead. The statement is executed with bound
-parameters, so a literal <code>%</code> in it is an incomplete placeholder to both
-psycopg and Django's SQLite wrapper, and the declaration fails at execution
-with a paramstyle error naming nothing in the shape. The paramstyle is this
+and so owns its own placeholders; a lone <code>%</code> is refused there instead. The
+statement is executed with bound parameters, so a literal <code>%</code> in it is an incomplete
+placeholder to both psycopg and Django's SQLite wrapper, and the declaration fails at
+execution with a paramstyle error naming nothing in the shape. The paramstyle is this
 package's private business for the same reason the join's aliases are: a
 declaration that spelled it would be spelling how the statement happens to
 be run.</p>
@@ -10221,10 +10221,10 @@ invariant that failed the <em>test</em> would leave a database full of impossibl
 data for every later assertion to be evaluated against, and those
 assertions would pass or fail for reasons unrelated to the code. A build
 that refuses leaves the database exactly as it was found.</p>
-<p>The message carries the rule's name, how many rows broke it and a sample of
-them, because a build failure is read out of a terminal rather than stepped
-through in a debugger -- and a rule that only says it was violated has
-handed the reader back the work it just did.</p>
+<p>The message carries the rule's name and a sample of the rows that broke it,
+saying so when there are more, because a build failure is read out of a
+terminal rather than stepped through in a debugger -- and a rule that only
+says it was violated has handed the reader back the work it just did.</p>
 
 
 

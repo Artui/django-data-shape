@@ -1048,6 +1048,12 @@ stops at the edge of the connection.</p>
   keys drawn from nothing.</li>
 <li>A <code>Derived</code> with <strong>no sources</strong>, which is a <code>Constant</code> said with a callable, or
   one whose <code>compute</code> is not callable.</li>
+<li>An <code>After</code> whose parent and child columns are <strong>different kinds</strong>, such as a
+  <code>DateField</code> parent into a <code>DateTimeField</code> child. A date plus a <code>timedelta</code> is a
+  date, and a date written into a datetime column lands as a naive midnight, so
+  the offset would quietly change its meaning. The two columns have to be the same
+  kind; any two numeric fields count as one kind. The refusal is raised when the
+  table is declared and names both fields.</li>
 </ul>
 
 

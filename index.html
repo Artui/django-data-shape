@@ -961,7 +961,9 @@ library rather than left to the caller to remember.</p>
 <li><strong>A Django <code>default=</code> is filled in, not skipped.</strong> Defaults are applied by
   <code>save()</code>, and nothing here calls <code>save()</code>, so a <code>NOT NULL</code> column with a
   Python-level default has nothing behind it in the database. The value <code>save()</code>
-  would have written is used instead.</li>
+  would have written is used instead. Signal receivers follow from that: no
+  <code>pre_save</code> or <code>post_save</code> handler runs for a row a build writes, so a receiver
+  that would have written a value for those rows does not run.</li>
 <li><strong>Except on a foreign key, where it is refused.</strong> A key that did not come out
   of the parent's own table is a key drawn from nothing, so a <code>default=</code> cannot
   stand in for a fan-out the way it stands in for a scalar. A required relation
@@ -987,6 +989,13 @@ library rather than left to the caller to remember.</p>
 <li><strong>The whole build is one transaction.</strong> A shape whose second table fails leaves
   nothing behind, so re-running after a fix meets the same state the first
   attempt did.</li>
+<li><strong>A table with a statistics target fires its queued checks first.</strong> Before it
+  sets a target, the build fires the constraint checks queued so far, so a row
+  that breaks a foreign key raises <code>IntegrityError</code> inside <code>build()</code> rather than
+  at commit. That step leaves every deferrable constraint deferred for the rest
+  of the transaction, including one declared <code>INITIALLY IMMEDIATE</code>, so a
+  <code>build()</code> inside a transaction of your own holds those checks until your
+  transaction commits.</li>
 <li><strong>psycopg 3.</strong> Rows stream straight into <code>COPY FROM STDIN</code>, which psycopg 2
   cannot do without materialising them first. A psycopg 2 connection is refused
   by name.</li>

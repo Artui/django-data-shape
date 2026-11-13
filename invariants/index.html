@@ -1300,9 +1300,15 @@ cannot be built when it demonstrably can.</p>
   with <code>prev</code> left out, <code>(owner, other)</code> over a <code>Paired</code> with <code>other</code> left out, <code>(other)</code>
   under <code>Q(state="x")</code>, a tree beside a key left out, a tree beside a fan-out with or
   without one, and a tree under a condition are each offered what a key can take, and that
-  loaded 20 times in 20. A fan-out beside a key left out is offered the <code>Projection</code> alone,
-  since <code>Table</code> refuses a <code>Derived</code> on a key as it does a distribution. Beside a column that
-  is not a key, <code>Distinct</code> is still offered and loads.</li>
+  loaded 20 times in 20. A fan-out beside a key left out is offered no <code>Derived</code>, since
+  <code>Table</code> refuses one on a key as it does a distribution: it is offered a cap of one where
+  the rows fit under the parents, with no null share where NULLs are one value, and the
+  <code>Projection</code>. The cap loaded 20 times in 20 at 40 rows over 50 companies; at 51 rows over
+  50 with a tied share, past the pigeonhole by the share's one group, it is not offered.
+  Beside a column that is not a key, <code>Distinct</code> is still offered and loads, and so is the
+  cap under the same bound: <code>max_children=1</code> beside a drawn <code>label</code> loaded 20 times in 20 at
+  40 rows over 50 companies, and at 60 rows, which fit the 150 combinations, it is not
+  offered.</li>
 <li><strong>A cap of one is offered only where it can place every row</strong>, or where the parents
   are not declared in this shape. <code>max_children=1</code> over
   fewer parents than rows cannot be partitioned, and the build refuses it before a row is
@@ -1318,7 +1324,11 @@ cannot be built when it demonstrably can.</p>
 <li><strong>A <code>Paired</code> whose relation has one parent is distinct in every row.</strong> Its partition
   is one group, and partners are distinct inside a group, so every row holds a partner
   no other row holds. Pinned by <code>parents=(1,)</code> or one company declared, it is accepted
-  under any condition, <code>Q(owner=1)</code> and a drawn <code>Q(state="x")</code> alike, 20 times in 20.</li>
+  under any condition, <code>Q(owner=1)</code> and a drawn <code>Q(state="x")</code> alike, 20 times in 20, and
+  under each spelling of a unique <code>owner</code>: <code>unique=True</code>, a <code>OneToOneField</code> and
+  <code>UniqueConstraint(fields=["owner"])</code>, 20 times in 20 each. A null share on that relation
+  keeps it, 20 times in 20 with <code>null=0.3</code>, since a NULL is laid over a row after its group
+  is chosen.</li>
 <li><strong>A <code>Paired</code> under a uniqueness that does not name its relation is refused.</strong> It keeps
   partners apart inside each group of its relation and nowhere else, so one partner falls
   to rows of different groups. <code>UniqueConstraint(fields=["owner"])</code> with
@@ -1336,7 +1346,16 @@ cannot be built when it demonstrably can.</p>
   the <code>Distinct</code> offer over 150 people, which loaded 19 times in 20: the twentieth was the
   build refusing a partner count short of the busiest group, which stays the build's
   refusal, offer or no offer. Naming the relation in the constraint keeps it too, and is
-  not offered: that changes the rule, not the shape.</li>
+  not offered: that changes the rule, not the shape. <code>unique=True</code> and a <code>OneToOneField</code>
+  on <code>owner</code> are the same index, loaded 0 times in 20 each, and are refused with the same
+  reasoning and the same offers, which build 20 times in 20 under each. <code>Table</code> used to
+  refuse them itself, offering a <code>Sequential</code> no key can take.</li>
+<li><strong>A conditional uniqueness over a fan-out beside a <code>Paired</code> whose relation it does not
+  name is read by its condition.</strong> <code>(other, owner)</code> under <code>Q(state="x")</code>, with <code>owner</code>
+  paired over <code>company</code>, holds wherever at most one row of each <code>other</code> group is inside:
+  two rows inside then differ in <code>other</code>, whatever partners they hold. A 10% <code>state</code>
+  loaded 15 times in 20 and is refused, as any draw under a condition over a fan-out is,
+  and the <code>PerParent("other", last="x", rest="y")</code> it is offered loaded 20 times in 20.</li>
 <li><strong>A unique column left to one <code>db_default</code> is offered what builds for its type.</strong>
   <code>Sequential(1, 1)</code> writes 1 to <code>rows</code>, which an integer, a float, JSON and a duration
   take, 20 times in 20 at 200 rows. A small integer, positive or not, takes it up to

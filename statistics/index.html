@@ -904,6 +904,10 @@ target is collapsed into a single residual frequency.</p>
 <a class="autorefs autorefs-internal" title="Table" href="../reference/#django_data_shape.declaration.table.Table"><code>Table</code></a> and on
 <a class="autorefs autorefs-internal" title="Projection" href="../reference/#django_data_shape.declaration.projection.Projection"><code>Projection</code></a> alike. A column left out
 keeps whatever target the schema gives it.</p>
+<p>A target has to be a whole number of at least one. Zero, negative, fractional and
+boolean values are refused when the shape is declared. PostgreSQL reads a target of zero
+as "collect no statistics for this column", which is the state this package exists to
+avoid. To keep the schema's own target for a column, leave it out of <code>statistics=</code>.</p>
 <h3 id="declared-never-inferred">Declared, never inferred<a class="headerlink" href="#declared-never-inferred" title="Permanent link">&para;</a></h3>
 <p>The target could have been derived from the distribution -- a <code>Skew</code> knows how
 many values it has. It deliberately is not, and the reason is worth stating
