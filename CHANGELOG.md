@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **A `Paired` whose relation has one parent fills a unique key under every spelling.**
+  `unique=True` and a `OneToOneField` on a `Paired` column were refused by `Table`, though
+  `UniqueConstraint(fields=["owner"])` over the same pairing was accepted and loads: one
+  parent is one group, whose partners are all distinct. Each spelling now builds on
+  Postgres, pinned by `parents=(1,)` or one parent declared. Over more parents each is
+  refused with the message the constraint gets, offering only what builds: a flat fan-out
+  or a cap of one where the partners can hold every row, the column left out where it is
+  nullable, and a `Projection`. The `Sequential` the old refusal offered cannot fill a key.
+- **A fan-out beside a key left out is offered a cap of one.** Where every other column
+  of the constraint is a key, the refusal offered only a `Projection`, though
+  `max_children=1` keeps the constraint and loads. It is offered now where the rows fit
+  under the parents, with no null share where NULLs are one value, beside the
+  `Projection`.
+
 - **The API reference's docstrings are restored.** The docstrings the reference renders
   had been cut to one line each; they read in full again.
 - **The guide pages say more about what a build does.** The statistics step fires queued

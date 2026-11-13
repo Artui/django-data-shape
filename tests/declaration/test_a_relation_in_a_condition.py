@@ -47,6 +47,7 @@ class _Case(NamedTuple):
     together: bool = False
     owner_required: bool = False
     owner_db_default: int | None = None
+    owner_unique: str | None = None
 
 
 def _model(case: _Case) -> type[models.Model]:
@@ -55,6 +56,9 @@ def _model(case: _Case) -> type[models.Model]:
     owner: dict[str, Any] = {"null": not case.owner_required}
     if case.owner_db_default is not None:
         owner["db_default"] = case.owner_db_default
+    key = models.OneToOneField if case.owner_unique == "one_to_one" else models.ForeignKey
+    if case.owner_unique == "unique":
+        owner["unique"] = True
     with isolate_apps("tests.testapp"):
         meta = type(
             "Meta",
@@ -68,7 +72,9 @@ def _model(case: _Case) -> type[models.Model]:
                         name=f"uq_{case.name}"[:60],
                         **tied,
                     )
-                ],
+                ]
+                if case.fields
+                else [],
             },
         )
         return cast(
@@ -81,9 +87,7 @@ def _model(case: _Case) -> type[models.Model]:
                     "company": models.ForeignKey(
                         Company, null=True, on_delete=models.CASCADE, related_name="+"
                     ),
-                    "owner": models.ForeignKey(
-                        Person, on_delete=models.CASCADE, related_name="+", **owner
-                    ),
+                    "owner": key(Person, on_delete=models.CASCADE, related_name="+", **owner),
                     "other": models.ForeignKey(
                         Company, null=True, on_delete=models.CASCADE, related_name="+"
                     ),
